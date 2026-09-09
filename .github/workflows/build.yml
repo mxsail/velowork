@@ -26,7 +26,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93"
+          toolchain: "1.95.0"
           components: clippy
 
       - name: Setup Rust cache
@@ -89,7 +89,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: "1.93"
+          toolchain: "1.95.0"
           targets: ${{ matrix.target }}
 
       - name: Setup Rust cache
@@ -140,9 +140,10 @@ jobs:
 
       - name: Prepare artifact (Windows)
         if: runner.os == 'Windows'
+        shell: bash
         run: |
-          mkdir dist
-          copy target\${{ matrix.target }}\release\velowork.exe dist\
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/velowork.exe dist/
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -174,55 +175,16 @@ jobs:
           for dir in */; do
             name="${dir%/}"
             if [[ "$name" == *windows* ]]; then
-              zip -r "../${name}.zip" "$dir"
+              (cd "$dir" && zip -r "../../${name}.zip" .)
             elif [[ "$name" == *macos* ]]; then
               # macOS: DMG is already created, just move it
               mv "$dir"/*.dmg "../" 2>/dev/null || true
               # Also create a zip of the .app for those who prefer it
-              cd "$dir" && zip -r "../../${name}.zip" "Velowork.app" && cd ..
+              (cd "$dir" && zip -r "../../${name}.zip" "Velowork.app")
             else
               tar -czvf "../${name}.tar.gz" -C "$dir" .
             fi
           done
-
-      - name: Generate ContemberBot token
-        id: app-token
-        continue-on-error: true
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.CONTEMBER_BOT_APP_ID }}
-          private-key: ${{ secrets.CONTEMBER_BOT_APP_PRIVATE_KEY }}
-          owner: mxsail
-          repositories: homebrew-velowork
-
-      - name: Update Homebrew tap
-        if: steps.app-token.outcome == 'success'
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-
-          # Calculate SHA256 from local zip files
-          ARM64_SHA=$(sha256sum velowork-macos-arm64.zip | cut -d' ' -f1)
-          X64_SHA=$(sha256sum velowork-macos-x64.zip | cut -d' ' -f1)
-
-          # Clone the tap repo
-          git clone https://x-access-token:${GH_TOKEN}@github.com/mxsail/homebrew-velowork.git /tmp/homebrew-velowork
-
-          # Update cask
-          sed -i "s/version \".*\"/version \"${VERSION}\"/" /tmp/homebrew-velowork/Casks/velowork.rb
-          sed -i "s/sha256 arm:   \".*\",/sha256 arm:   \"${ARM64_SHA}\",/" /tmp/homebrew-velowork/Casks/velowork.rb
-          sed -i "s/         intel: \".*\"/         intel: \"${X64_SHA}\"/" /tmp/homebrew-velowork/Casks/velowork.rb
-
-          cat /tmp/homebrew-velowork/Casks/velowork.rb
-
-          # Commit and push
-          cd /tmp/homebrew-velowork
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Casks/velowork.rb
-          git commit -m "chore: update cask to v${VERSION}"
-          git push origin main
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -231,5 +193,4 @@ jobs:
             *.tar.gz
             *.zip
             *.dmg
-            *.apk
           generate_release_notes: true
