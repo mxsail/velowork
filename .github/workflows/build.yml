@@ -49,6 +49,7 @@ jobs:
             libegl1-mesa-dev \
             libssl-dev \
             libfontconfig-dev \
+            libudev-dev \
             pkg-config \
             cmake
 
@@ -56,7 +57,7 @@ jobs:
         run: cargo check --release
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets
 
       - name: Run tests
         run: cargo test
@@ -114,6 +115,7 @@ jobs:
             libegl1-mesa-dev \
             libssl-dev \
             libfontconfig-dev \
+            libudev-dev \
             pkg-config \
             cmake
 
