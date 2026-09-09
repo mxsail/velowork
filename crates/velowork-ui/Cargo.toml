@@ -1,0 +1,24 @@
+[package]
+name = "velowork-ui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+velowork-core = { path = "../velowork-core" }
+velowork-theme = { path = "../velowork-theme" }
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+alacritty_terminal = "0.25"
+smol = "2.0"
+unicode-segmentation = "1"
+serde = { version = "1.0", features = ["derive"] }
+velowork-i18n = { path = "../velowork-i18n" }
+serde_json = "1.0"
+smallvec = "1.14"
+dirs = "5.0"
+syntect = { version = "5", features = ["default-fancy"] }
+two-face = { version = "0.5", default-features = false, features = ["syntect-fancy"] }
+resvg = "0.46"
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", features = ["test-support"] }

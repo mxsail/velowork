@@ -1,0 +1,118 @@
+[workspace]
+members = [".", "crates/velowork-core", "crates/velowork-security", "crates/velowork-views-terminal", "crates/velowork-terminal", "crates/velowork-layout", "crates/velowork-state", "crates/velowork-workspace", "crates/velowork-ui", "crates/velowork-markdown", "crates/velowork-extensions", "crates/velowork-updater", "crates/velowork-theme", "crates/velowork-app-core", "crates/velowork-app", "crates/velowork-i18n", "crates/velowork-monitor", "crates/velowork-ai"]
+resolver = "2"
+
+[package]
+name = "velowork"
+version = "0.11.0"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+
+[dependencies]
+# The entire UI/app layer (views, app coordinator, keybindings, action dispatch,
+# logging, theme/terminal/etc. shim modules) lives in `velowork-app`. The binary is
+# a thin entry point that owns only `main.rs`, `assets.rs`, and `smoke_tests.rs`,
+# so most of the former UI dependency set moved to `crates/velowork-app/Cargo.toml`.
+velowork-app = { path = "crates/velowork-app" }
+
+# Shared core types + the lower-level crates `main.rs`/`smoke_tests.rs` still
+# touch directly (workspace/terminal bootstrap, settings bridge, smoke tests).
+velowork-core = { path = "crates/velowork-core" }
+velowork-security = { path = "crates/velowork-security" }
+
+velowork-terminal = { path = "crates/velowork-terminal" }
+velowork-workspace = { path = "crates/velowork-workspace" }
+velowork-views-terminal = { path = "crates/velowork-views-terminal" }
+velowork-ui = { path = "crates/velowork-ui" }
+
+# Extension system — registered at startup in main.rs.
+velowork-extensions = { path = "crates/velowork-extensions" }
+velowork-updater = { path = "crates/velowork-updater" }
+
+# i18n — locale management and translation lookups.
+velowork-i18n = { path = "crates/velowork-i18n" }
+
+# UI Framework (from Zed repo) — main.rs creates the GPUI Application + window.
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", package = "gpui_platform", features = ["wayland", "x11", "font-kit"] }
+
+# Serialization — settings bridge in main.rs + smoke_tests.
+serde_json = "1.0"
+
+# Global allocator — see [features] for the per-target default. glibc malloc
+# fragments badly under velowork's high-churn, multi-threaded small-allocation
+# workload (git-status polling + per-frame render/layout), so RSS climbs into
+# the GBs. mimalloc is the default on Windows (jemalloc doesn't build on MSVC)
+# and stays available on Unix via `--features mimalloc` for comparison. Bypassed
+# when the dhat heap profiler is active (see src/main.rs).
+mimalloc = { version = "0.1", optional = true }
+
+# Heap profiler (opt-in via `--features dhat-heap`). Off by default so it never
+# touches normal builds — see [features] and src/main.rs.
+dhat = { version = "0.3", optional = true }
+
+# Logging — main.rs builds the env_logger sink and hands it to velowork-app::logging.
+log = "0.4"
+env_logger = "0.11"
+
+# Error type for the AssetSource impl in assets.rs.
+anyhow = "1.0"
+
+# Asset embedding (fonts/icons) in assets.rs.
+rust-embed = { version = "8.5", features = ["include-exclude"] }
+
+[features]
+# Per-target default allocator: jemalloc on Unix (the `tikv-jemallocator` dep is
+# Unix-only — see [target.'cfg(unix)'.dependencies]), mimalloc on Windows. Both
+# feature flags are enabled by `default`; src/main.rs picks the right one per
+# target with precedence dhat > jemalloc(unix) > mimalloc, so the unused crate
+# just isn't installed as the global allocator. Override on Unix with
+# `--no-default-features --features mimalloc` (or `glibc` via plain
+# `--no-default-features`).
+default = ["jemalloc", "mimalloc"]
+mimalloc = ["dep:mimalloc"]
+
+# jemalloc: default on Unix. Shares a small fixed set of arenas across all
+# threads (narenas:N in src/main.rs) instead of mimalloc's per-thread heaps, so
+# velowork's ~90 threads don't each pin their own segments — cut anon-heap RSS
+# ~440→180 MB in testing. No-op on Windows (dep is Unix-only). Builds the C
+# library from source (needs a C toolchain).
+jemalloc = ["dep:tikv-jemallocator"]
+
+# Enable the dhat in-process heap profiler. Build with:
+#   cargo run --profile profiling --features dhat-heap
+# On exit it writes dhat-heap.json (view at
+# https://nnethercote.github.io/dh_view/dh_view.html).
+dhat-heap = ["dep:dhat"]
+
+# Profiling build: optimized like release, but keeps debug symbols so heaptrack
+# / perf show readable stacks. Leaves the real `release` profile untouched.
+#   cargo build --profile profiling
+#   heaptrack ./target/profiling/velowork
+[profile.profiling]
+inherits = "release"
+debug = 1
+strip = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", features = ["test-support"] }
+
+# jemalloc is the default allocator on Unix (Linux + macOS). Kept Unix-only
+# because tikv-jemalloc-sys doesn't build under MSVC; Windows uses mimalloc.
+# Enabled by the `jemalloc` feature (in `default`); installed by src/main.rs.
+[target.'cfg(unix)'.dependencies]
+tikv-jemallocator = { version = "0.6", optional = true }
+
+# Pin core-text to 21.0.x to avoid core-graphics 0.24/0.25 conflict in zed-font-kit
+[target.'cfg(target_os = "macos")'.dependencies]
+core-text = ">=21.0, <21.1"
+
+[target.'cfg(target_os = "windows")'.build-dependencies]
+winresource = "0.1"

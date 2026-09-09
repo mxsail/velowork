@@ -1,0 +1,179 @@
+use gpui::*;
+use std::cell::RefCell;
+use std::rc::Rc;
+
+const DEFAULT_DIVIDER_SIZE: f32 = 6.0;
+const HANDLE_HITBOX_SIZE: f32 = 10.0;
+
+/// One-shot drag-start callback, shared into the element's paint closure and
+/// `take()`n on first invocation.
+type DragStartCallback = Rc<RefCell<Option<Box<dyn FnOnce(Point<Pixels>, &mut App)>>>>;
+
+pub struct ResizeHandle {
+    is_horizontal: bool,
+    divider_size: f32,
+    border_color: u32,
+    border_active_color: u32,
+    on_drag_start: DragStartCallback,
+}
+
+impl ResizeHandle {
+    pub fn new(
+        is_horizontal: bool,
+        border_color: u32,
+        border_active_color: u32,
+        on_drag_start: impl FnOnce(Point<Pixels>, &mut App) + 'static,
+    ) -> Self {
+        Self {
+            is_horizontal,
+            divider_size: DEFAULT_DIVIDER_SIZE,
+            border_color,
+            border_active_color,
+            on_drag_start: Rc::new(RefCell::new(Some(Box::new(on_drag_start)))),
+        }
+    }
+
+    pub fn with_size(mut self, size: f32) -> Self {
+        self.divider_size = size;
+        self
+    }
+}
+
+impl IntoElement for ResizeHandle {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for ResizeHandle {
+    type RequestLayoutState = ();
+    type PrepaintState = Hitbox;
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let style = if self.is_horizontal {
+            Style {
+                size: Size {
+                    width: relative(1.0).into(),
+                    height: px(self.divider_size).into(),
+                },
+                flex_shrink: 0.0,
+                ..Default::default()
+            }
+        } else {
+            Style {
+                size: Size {
+                    width: px(self.divider_size).into(),
+                    height: relative(1.0).into(),
+                },
+                flex_shrink: 0.0,
+                ..Default::default()
+            }
+        };
+
+        let layout_id = window.request_layout(style, [], cx);
+        (layout_id, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _state: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        _cx: &mut App,
+    ) -> Self::PrepaintState {
+        let expand = px((HANDLE_HITBOX_SIZE - self.divider_size).max(0.0) / 2.0);
+        let hitbox_bounds = if self.is_horizontal {
+            Bounds::new(
+                point(bounds.origin.x, bounds.origin.y - expand),
+                size(bounds.size.width, px(HANDLE_HITBOX_SIZE)),
+            )
+        } else {
+            Bounds::new(
+                point(bounds.origin.x - expand, bounds.origin.y),
+                size(px(HANDLE_HITBOX_SIZE), bounds.size.height),
+            )
+        };
+
+        window.insert_hitbox(hitbox_bounds, HitboxBehavior::BlockMouseExceptScroll)
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        _state: &mut Self::RequestLayoutState,
+        hitbox: &mut Self::PrepaintState,
+        window: &mut Window,
+        _cx: &mut App,
+    ) {
+        let is_hovered = hitbox.is_hovered(window);
+        if self.divider_size <= 2.0 {
+            // Tight split line within a card
+            let color = if is_hovered {
+                rgb(self.border_active_color)
+            } else {
+                rgb(self.border_color)
+            };
+            window.paint_quad(fill(bounds, color));
+        } else if is_hovered {
+            // Floating gap indicator between cards
+            let indicator_bounds = if self.is_horizontal {
+                let center_y = bounds.origin.y + px(self.divider_size / 2.0) - px(1.0);
+                Bounds::new(
+                    point(bounds.origin.x + px(12.0), center_y),
+                    size((bounds.size.width - px(24.0)).max(px(0.0)), px(2.0)),
+                )
+            } else {
+                let center_x = bounds.origin.x + px(self.divider_size / 2.0) - px(1.0);
+                Bounds::new(
+                    point(center_x, bounds.origin.y + px(12.0)),
+                    size(px(2.0), (bounds.size.height - px(24.0)).max(px(0.0))),
+                )
+            };
+            window.paint_quad(
+                fill(indicator_bounds, rgb(self.border_active_color))
+                    .corner_radii(px(1.0)),
+            );
+        }
+
+        let cursor = if self.is_horizontal {
+            CursorStyle::ResizeUpDown
+        } else {
+            CursorStyle::ResizeLeftRight
+        };
+        window.set_cursor_style(cursor, hitbox);
+
+        let on_drag_start = self.on_drag_start.clone();
+        let hitbox_id = hitbox.id;
+        window.on_mouse_event(move |e: &MouseDownEvent, phase, window, cx| {
+            if phase == DispatchPhase::Bubble
+                && e.button == MouseButton::Left
+                && hitbox_id.is_hovered(window)
+            {
+                if let Some(cb) = on_drag_start.borrow_mut().take() {
+                    cb(e.position, cx);
+                }
+                cx.stop_propagation();
+            }
+        });
+    }
+}

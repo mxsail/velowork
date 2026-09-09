@@ -1,0 +1,19 @@
+//! Application views.
+//!
+//! This module contains all UI views organized into submodules:
+//! - `layout` - Layout management (containers, splits, terminal panes)
+//! - `panels` - Side panels (sidebar, project columns, status bar)
+//! - `overlays` - Modal overlays (fullscreen, command palette, settings, etc.)
+//! - `chrome` - Window chrome (title bar, header buttons)
+//! - `components` - Reusable UI components (inputs, etc.)
+//!
+//! The per-window view is in this module as `window.rs`.
+
+// Submodules
+pub mod chrome;
+pub mod components;
+pub mod layout;
+pub mod overlays;
+pub mod panels;
+pub mod window;
+pub mod dock_controller;

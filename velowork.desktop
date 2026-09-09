@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Velowork
+Comment=Terminal multiplexer for managing multiple terminal sessions
+Exec=velowork
+Icon=velowork
+Terminal=false
+Categories=System;TerminalEmulator;Utility;
+Keywords=terminal;console;shell;command;pty;
+StartupWMClass=velowork
+X-GNOME-UsesNotifications=true

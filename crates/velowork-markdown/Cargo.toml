@@ -1,0 +1,14 @@
+[package]
+name = "velowork-markdown"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+velowork-core = { path = "../velowork-core" }
+velowork-ui = { path = "../velowork-ui" }
+
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+
+pulldown-cmark = "0.12"
+serde_yaml_ng = "0.10"

@@ -1,0 +1,53 @@
+#![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
+
+//! Markdown renderer and Selection Framework for GPUI.
+
+pub mod position;
+pub mod selection;
+pub mod document;
+pub mod clipboard;
+pub mod widgets;
+
+mod parser;
+mod render;
+mod types;
+
+use gpui::*;
+use types::Node;
+use velowork_core::selection::SelectionState;
+
+/// Type alias for markdown selection (1D character offset).
+pub type MarkdownSelection = SelectionState<usize>;
+
+/// A rendered node that can be either a simple block or a code block with selectable lines.
+pub enum RenderedNode {
+    /// A simple block (heading, paragraph, list, etc.) - single selectable unit
+    Simple {
+        div: Div,
+        start_offset: usize,
+        end_offset: usize,
+    },
+    /// A code block with individually selectable lines
+    CodeBlock {
+        language: Option<String>,
+        /// Each line as (div, start_offset, end_offset)
+        lines: Vec<(Div, usize, usize)>,
+    },
+    /// A table with individually selectable rows
+    Table {
+        /// Header row (div, start_offset, end_offset)
+        header: Option<(Div, usize, usize)>,
+        /// Data rows as (div, start_offset, end_offset)
+        rows: Vec<(Div, usize, usize)>,
+    },
+}
+
+/// Parsed markdown document ready for rendering.
+pub struct MarkdownDocument {
+    nodes: Vec<Node>,
+    /// Cumulative start offset (in characters) of each node, parallel to `nodes`.
+    /// Precomputed at parse time so rendering does not re-walk node text lengths.
+    node_offsets: Vec<usize>,
+    /// Flat text representation of all visible content
+    pub plain_text: String,
+}

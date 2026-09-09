@@ -1,0 +1,1290 @@
+use serde::{Deserialize, Serialize};
+#[cfg(windows)]
+use std::collections::HashMap;
+#[cfg(windows)]
+use std::sync::Mutex;
+
+/// Get the user's login shell, falling back to /bin/sh.
+/// On Windows this is only called in the WSL session-backend path where the
+/// result ends up inside a `wsl.exe -- sh -c "…"` command, so the /bin/sh
+/// fallback is appropriate.
+fn user_shell() -> String {
+    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+}
+
+/// Backend for persistent terminal sessions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub enum SessionBackend {
+    /// No persistence - direct shell
+    None,
+    /// Use tmux for session persistence
+    Tmux,
+    /// Use screen for session persistence
+    Screen,
+    /// Use dtach for minimal session persistence (no scrollback management)
+    Dtach,
+    /// Use psmux for session persistence on Windows (native ConPTY, tmux-compatible)
+    Psmux,
+    /// Auto-detect: prefer dtach > tmux > screen on Unix; psmux on Windows
+    #[default]
+    Auto,
+}
+
+impl SessionBackend {
+    /// Parse from string (for env variable override). Infallible: unknown
+    /// values fall back to `None`, so this is not a `FromStr` implementation.
+    #[allow(dead_code)]
+    pub fn parse_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "tmux" => Self::Tmux,
+            "screen" => Self::Screen,
+            "dtach" => Self::Dtach,
+            "psmux" => Self::Psmux,
+            "none" | "off" | "false" | "0" => Self::None,
+            "auto" | "smart" | "on" | "true" | "1" => Self::Auto,
+            _ => Self::None,
+        }
+    }
+
+    /// Load from environment variable VELOWORK_SESSION_BACKEND
+    /// Defaults to Auto if not set
+    #[allow(dead_code)]
+    pub fn from_env() -> Self {
+        std::env::var("VELOWORK_SESSION_BACKEND")
+            .map(|s| Self::parse_str(&s))
+            .unwrap_or_default()
+    }
+
+    /// Resolve Auto to a concrete backend based on availability
+    pub fn resolve(self) -> ResolvedBackend {
+        match self {
+            Self::None => ResolvedBackend::None,
+            Self::Tmux => {
+                if is_tmux_available() {
+                    ResolvedBackend::Tmux
+                } else {
+                    log::warn!("tmux requested but not available, falling back to none");
+                    ResolvedBackend::None
+                }
+            }
+            Self::Screen => {
+                if is_screen_available() {
+                    ResolvedBackend::Screen
+                } else {
+                    log::warn!("screen requested but not available, falling back to none");
+                    ResolvedBackend::None
+                }
+            }
+            Self::Dtach => {
+                if is_dtach_available() {
+                    ResolvedBackend::Dtach
+                } else {
+                    log::warn!("dtach requested but not available, falling back to none");
+                    ResolvedBackend::None
+                }
+            }
+            Self::Psmux => {
+                if is_psmux_available() {
+                    ResolvedBackend::Psmux
+                } else {
+                    log::warn!("psmux requested but not available, falling back to none");
+                    ResolvedBackend::None
+                }
+            }
+            Self::Auto => {
+                // On Windows, psmux is the only native session backend (dtach/tmux/screen
+                // require a Unix shell). On Unix, prefer dtach (minimal, no scrollback
+                // interference) then tmux, then screen.
+                #[cfg(windows)]
+                {
+                    if is_psmux_available() {
+                        log::debug!("[terminal:session_backend] Auto-detected psmux for session persistence");
+                        ResolvedBackend::Psmux
+                    } else {
+                        log::debug!("[terminal:session_backend] No session backend available, sessions won't persist");
+                        ResolvedBackend::None
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    if is_dtach_available() {
+                        log::debug!("[terminal:session_backend] Auto-detected dtach for session persistence");
+                        ResolvedBackend::Dtach
+                    } else if is_tmux_available() {
+                        log::debug!("[terminal:session_backend] Auto-detected tmux for session persistence");
+                        ResolvedBackend::Tmux
+                    } else if is_screen_available() {
+                        log::debug!("[terminal:session_backend] Auto-detected screen for session persistence");
+                        ResolvedBackend::Screen
+                    } else {
+                        log::debug!("[terminal:session_backend] No session backend available, sessions won't persist");
+                        ResolvedBackend::None
+                    }
+                }
+            }
+        }
+    }
+
+    /// Get display name for UI
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::None => "None (Direct Shell)",
+            Self::Auto => "Auto (best available)",
+            Self::Tmux => "tmux",
+            Self::Screen => "screen",
+            Self::Dtach => "dtach (minimal)",
+            Self::Psmux => "psmux (Windows)",
+        }
+    }
+
+    /// Get all variants for UI dropdown
+    pub fn all_variants() -> &'static [SessionBackend] {
+        &[
+            SessionBackend::Auto,
+            #[cfg(not(windows))]
+            SessionBackend::Dtach,
+            #[cfg(not(windows))]
+            SessionBackend::Tmux,
+            #[cfg(not(windows))]
+            SessionBackend::Screen,
+            #[cfg(windows)]
+            SessionBackend::Psmux,
+            SessionBackend::None,
+        ]
+    }
+}
+
+/// Resolved (concrete) backend - no Auto variant
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolvedBackend {
+    None,
+    Tmux,
+    Screen,
+    Dtach,
+    Psmux,
+}
+
+impl ResolvedBackend {
+    /// Check if this backend supports session persistence
+    pub fn supports_persistence(&self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// Generate a session name for a terminal ID
+    /// Uses a prefix to avoid conflicts with user sessions
+    pub fn session_name(&self, terminal_id: &str) -> String {
+        // Use short prefix + first 8 chars of UUID to keep it manageable
+        let short_id = if terminal_id.len() > 8 {
+            &terminal_id[..8]
+        } else {
+            terminal_id
+        };
+        format!("tm-{}", short_id)
+    }
+
+    /// Get the socket path for dtach sessions
+    /// Returns None for non-dtach backends
+    #[allow(dead_code)]
+    pub fn socket_path(&self, terminal_id: &str) -> Option<std::path::PathBuf> {
+        if !matches!(self, Self::Dtach) {
+            return None;
+        }
+        Some(get_dtach_socket_path(terminal_id))
+    }
+
+    /// Build the command to create or attach to a session
+    /// Returns (program, args) tuple
+    /// When `command` is Some, the session runs that command instead of the default shell.
+    /// `extra_env` is injected into newly-created sessions where the backend supports it
+    /// (e.g. tmux's `-e KEY=VAL`), so vars set after a long-running daemon was started
+    /// still reach the shell.
+    pub fn build_command(
+        &self,
+        session_name: &str,
+        cwd: &str,
+        command: Option<&str>,
+        extra_env: &[(String, Option<String>)],
+    ) -> Option<(String, Vec<String>)> {
+        match self {
+            Self::None => None,
+            Self::Tmux => {
+                // Use sh -c to properly chain tmux commands
+                // \; is tmux command separator - since args are passed directly via CommandBuilder
+                // (not through shell parsing), we only need single escape level
+                // -A: attach if exists, create if not
+                // -s: session name
+                // -c: start directory
+                // set status off: hide tmux status bar (we have our own UI)
+                // set mouse on: enable mouse for scrolling
+                // set default-terminal: ensure inner TERM supports 256color
+                // set terminal-features + terminal-overrides: enable 24-bit truecolor (RGB)
+                // set automatic-rename off: prevent shell from overwriting window name
+                // rename-window: set meaningful window name from directory
+                let window_name = extract_dir_name(cwd);
+                let initial_program = match command {
+                    Some(cmd) => {
+                        let sh = user_shell();
+                        format!(" {} '-ic' {}", shell_escape(&sh), shell_escape(cmd))
+                    }
+                    None => String::new(),
+                };
+                // -e KEY=VAL flags reach the shell even when attaching to a
+                // pre-existing tmux server whose global env predates Velowork.
+                let env_args: String = extra_env
+                    .iter()
+                    .filter_map(|(k, v)| {
+                        v.as_ref()
+                            .map(|val| format!(" -e {}", shell_escape(&format!("{k}={val}"))))
+                    })
+                    .collect();
+                // For removals there is no `-e` equivalent: clear the var from the
+                // session environment so later splits/panes don't inherit a stale
+                // value. (The very first pane is handled by `env_remove` on the
+                // tmux client, which a freshly-started server inherits.)
+                let unset_args: String = extra_env
+                    .iter()
+                    .filter(|(_, v)| v.is_none())
+                    .map(|(k, _)| format!(" \\; set-environment -u {}", shell_escape(k)))
+                    .collect();
+                let tmux_cmd = format!(
+                    "tmux new-session -A{} -s {} -c {}{} \\; set status off \\; set mouse on \\; set default-terminal xterm-256color \\; set terminal-features 'xterm-256color:RGB' \\; set -as terminal-overrides ',xterm-256color:Tc' \\; set-window-option automatic-rename off \\; rename-window {}{}",
+                    env_args,
+                    shell_escape(session_name),
+                    shell_escape(cwd),
+                    initial_program,
+                    shell_escape(&window_name),
+                    unset_args
+                );
+                Some((
+                    "sh".to_string(),
+                    vec!["-c".to_string(), tmux_cmd],
+                ))
+            }
+            Self::Screen => {
+                // screen -D -R <name>
+                // -D -R: reattach if exists, create if not (and detach other attached sessions)
+                // Note: screen doesn't have a direct way to set cwd, we'll handle that separately
+                let mut args = vec![
+                    "-D".to_string(),
+                    "-R".to_string(),
+                    session_name.to_string(),
+                ];
+                if let Some(cmd) = command {
+                    args.push(user_shell());
+                    args.push("-ic".to_string());
+                    args.push(cmd.to_string());
+                }
+                Some(("screen".to_string(), args))
+            }
+            Self::Dtach => {
+                // dtach -A <socket> -E -r winch <shell>
+                // -A: attach if exists, create if not
+                // -E: disable detach character (^\ won't detach)
+                // -r winch: use SIGWINCH for redraw (needed for apps like less, vim)
+                //
+                // We use sh -c to:
+                // 1. Create the socket directory if needed
+                // 2. cd to the working directory
+                // 3. Run dtach with the user's shell (or custom command)
+                let socket_path = get_dtach_socket_path(session_name);
+                let program = match command {
+                    Some(cmd) => {
+                        let sh = user_shell();
+                        format!("{} -ic {}", shell_escape(&sh), shell_escape(cmd))
+                    }
+                    None => {
+                        shell_escape(&user_shell())
+                    }
+                };
+
+                let parent = socket_path.parent().and_then(|p| p.to_str())?;
+                let socket = socket_path.to_str()?;
+                let dtach_cmd = format!(
+                    "mkdir -p {} && cd {} && exec dtach -A {} -E -r winch {}",
+                    shell_escape(parent),
+                    shell_escape(cwd),
+                    shell_escape(socket),
+                    program
+                );
+                Some(("sh".to_string(), vec!["-c".to_string(), dtach_cmd]))
+            }
+            Self::Psmux => {
+                // psmux speaks tmux command language but we bypass any host shell:
+                // Windows cmd.exe doesn't honor sh-style single-quoting, and we have
+                // no need for it — `;` is psmux's literal command separator when
+                // received as its own argv token (no `\;` shell escaping required).
+                //
+                // The initial pane runs psmux's configured default-shell (PowerShell
+                // on a fresh install). Velowork's `default_shell` setting is currently
+                // not propagated into the session — users wanting `cmd.exe` etc.
+                // inside persistent sessions need to set `default-shell` in
+                // `~/.psmux.conf`.
+                let window_name = extract_dir_name(cwd);
+                let mut args = vec!["new-session".to_string(), "-A".to_string()];
+                // -e KEY=VAL injects sets; removals (None) have no new-session
+                // flag, so they're applied as `set-environment -u` commands
+                // below — mirroring the tmux backend.
+                for (k, v) in extra_env {
+                    if let Some(val) = v {
+                        args.push("-e".to_string());
+                        args.push(format!("{k}={val}"));
+                    }
+                }
+                args.push("-s".to_string());
+                args.push(session_name.to_string());
+                args.push("-c".to_string());
+                args.push(cwd.to_string());
+                if let Some(cmd) = command {
+                    // Wrap custom command in cmd.exe so PATH lookup and quoting
+                    // behave consistently regardless of psmux's default-shell.
+                    args.push("cmd.exe".to_string());
+                    args.push("/c".to_string());
+                    args.push(cmd.to_string());
+                }
+                let push_cmd = |args: &mut Vec<String>, parts: &[&str]| {
+                    args.push(";".to_string());
+                    for p in parts {
+                        args.push((*p).to_string());
+                    }
+                };
+                push_cmd(&mut args, &["set", "status", "off"]);
+                push_cmd(&mut args, &["set", "mouse", "on"]);
+                push_cmd(&mut args, &["set-window-option", "automatic-rename", "off"]);
+                args.push(";".to_string());
+                args.push("rename-window".to_string());
+                args.push(window_name);
+                // Clear any env vars marked for removal so later panes don't
+                // inherit a stale value (parallels the tmux `set-environment -u`).
+                for (k, v) in extra_env {
+                    if v.is_none() {
+                        push_cmd(&mut args, &["set-environment", "-u", k.as_str()]);
+                    }
+                }
+                Some(("psmux".to_string(), args))
+            }
+        }
+    }
+
+    /// Kill a session
+    pub fn kill_session(&self, session_name: &str) {
+        match self {
+            Self::None => {}
+            Self::Tmux => {
+                #[cfg(target_os = "macos")]
+                let _ = crate::process::safe_output(
+                    crate::process::command("tmux")
+                        .args(["kill-session", "-t", session_name])
+                        .env("PATH", get_extended_path()),
+                );
+
+                #[cfg(all(unix, not(target_os = "macos")))]
+                let _ = crate::process::safe_output(
+                    crate::process::command("tmux").args(["kill-session", "-t", session_name]),
+                );
+            }
+            Self::Screen => {
+                #[cfg(target_os = "macos")]
+                let _ = crate::process::safe_output(
+                    crate::process::command("screen")
+                        .args(["-S", session_name, "-X", "quit"])
+                        .env("PATH", get_extended_path()),
+                );
+
+                #[cfg(all(unix, not(target_os = "macos")))]
+                let _ = crate::process::safe_output(
+                    crate::process::command("screen").args(["-S", session_name, "-X", "quit"]),
+                );
+            }
+            Self::Dtach => {
+                let socket_path = get_dtach_socket_path(session_name);
+                if socket_path.exists() {
+                    #[cfg(unix)]
+                    {
+                        let my_pid = std::process::id() as i32;
+                        // Discover the PIDs holding the dtach socket open. This is a
+                        // best-effort, point-in-time snapshot (now via the /proc socket
+                        // scan instead of an `lsof -t` spawn), with an inherent TOCTOU
+                        // window between reading it here and signalling below. By the
+                        // time we call `kill`, the dtach process may have already exited
+                        // and its PID been recycled onto an unrelated process. We accept
+                        // this risk because there is no portable, race-free way to
+                        // atomically "signal whoever holds this socket"; the window is
+                        // short and the dtach socket is user-private (see
+                        // get_dtach_socket_dir).
+                        let holders = crate::pty_manager::find_pids_for_unix_sockets(
+                            std::slice::from_ref(&socket_path),
+                        );
+                        for &pid in holders.get(&socket_path).into_iter().flatten() {
+                            let pid = pid as i32;
+                            if pid == my_pid {
+                                log::debug!("Skipping own PID {} when killing dtach session {}", pid, session_name);
+                                continue;
+                            }
+                            // SAFETY: `libc::kill` is a thin FFI wrapper over the
+                            // `kill(2)` syscall. It takes two plain `i32` values
+                            // (a pid and a signal number) by value, dereferences no
+                            // pointers, and has no memory-safety preconditions, so
+                            // the call itself cannot cause UB regardless of the
+                            // argument values. The only hazard is *logical*, not a
+                            // memory-safety one: per the TOCTOU note above, `pid`
+                            // may have been recycled since the scan, so we could
+                            // signal an unrelated process. We tolerate that as
+                            // best-effort cleanup and intentionally ignore the
+                            // return value (the process may already be gone).
+                            unsafe {
+                                libc::kill(pid, libc::SIGTERM);
+                            }
+                            log::debug!("Sent SIGTERM to dtach process {} for session {}", pid, session_name);
+                        }
+                    }
+                    let _ = std::fs::remove_file(&socket_path);
+                    log::debug!("Removed dtach socket: {:?}", socket_path);
+                }
+            }
+            Self::Psmux => {
+                let mut cmd = crate::process::command("psmux");
+                cmd.args(["kill-session", "-t", session_name]);
+                let _ = crate::process::safe_output(&mut cmd);
+                log::debug!("Killed psmux session {}", session_name);
+            }
+        }
+    }
+}
+
+/// Remove dtach socket files whose dtach process is no longer running.
+/// Called once at startup to clean up after crashes or ungraceful exits.
+#[cfg(unix)]
+pub fn cleanup_stale_dtach_sockets() {
+    let dir = get_dtach_socket_dir();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(_) => return, // dir doesn't exist yet — nothing to clean
+    };
+
+    let socket_paths: Vec<std::path::PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|e| e.to_str()) == Some("sock"))
+        .collect();
+
+    // One /proc socket scan for every socket at once, instead of an `lsof -t`
+    // spawn (~1s each) per file.
+    let holders = crate::pty_manager::find_pids_for_unix_sockets(&socket_paths);
+
+    let mut removed = 0;
+    for path in &socket_paths {
+        let has_listener = holders.get(path).map(|v| !v.is_empty()).unwrap_or(false);
+        if !has_listener {
+            let _ = std::fs::remove_file(path);
+            removed += 1;
+        }
+    }
+
+    if removed > 0 {
+        log::info!(
+            "Cleaned up {} stale dtach socket(s) from {:?}",
+            removed,
+            dir
+        );
+    }
+}
+
+/// Resolve a session backend for a specific WSL distro.
+/// Runs `wsl.exe -d <distro> -- sh -c "command -v <tool>"` to check availability.
+/// Results are cached per (distro, preference) pair so detection runs at most once.
+#[cfg(windows)]
+pub fn resolve_for_wsl(distro: Option<&str>, preference: SessionBackend) -> ResolvedBackend {
+    use std::sync::LazyLock;
+
+    static CACHE: LazyLock<Mutex<HashMap<(Option<String>, SessionBackend), ResolvedBackend>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
+
+    let key = (distro.map(|s| s.to_string()), preference);
+    let cache = CACHE.lock().unwrap_or_else(|poisoned| {
+        log::warn!("[terminal:session_backend] WSL backend cache mutex was poisoned, recovering");
+        poisoned.into_inner()
+    });
+    if let Some(cached) = cache.get(&key) {
+        return *cached;
+    }
+    drop(cache);
+
+    let result = match preference {
+        SessionBackend::None => ResolvedBackend::None,
+        SessionBackend::Tmux => {
+            if is_wsl_tool_available(distro, "tmux") {
+                ResolvedBackend::Tmux
+            } else {
+                log::warn!("[terminal:session_backend] tmux requested but not available in WSL, falling back to none");
+                ResolvedBackend::None
+            }
+        }
+        SessionBackend::Screen => {
+            if is_wsl_tool_available(distro, "screen") {
+                ResolvedBackend::Screen
+            } else {
+                log::warn!("[terminal:session_backend] screen requested but not available in WSL, falling back to none");
+                ResolvedBackend::None
+            }
+        }
+        SessionBackend::Dtach => {
+            if is_wsl_tool_available(distro, "dtach") {
+                ResolvedBackend::Dtach
+            } else {
+                log::warn!("[terminal:session_backend] dtach requested but not available in WSL, falling back to none");
+                ResolvedBackend::None
+            }
+        }
+        SessionBackend::Psmux => {
+            // psmux is a host-Windows backend; WSL terminals need a Unix tool inside the
+            // distro. Pick the best available there instead of refusing persistence.
+            if is_wsl_tool_available(distro, "dtach") {
+                log::debug!("[terminal:session_backend] psmux requested but inside WSL — using dtach instead");
+                ResolvedBackend::Dtach
+            } else if is_wsl_tool_available(distro, "tmux") {
+                log::debug!("[terminal:session_backend] psmux requested but inside WSL — using tmux instead");
+                ResolvedBackend::Tmux
+            } else if is_wsl_tool_available(distro, "screen") {
+                log::debug!("[terminal:session_backend] psmux requested but inside WSL — using screen instead");
+                ResolvedBackend::Screen
+            } else {
+                log::warn!("[terminal:session_backend] psmux requested but no session tool available in WSL, falling back to none");
+                ResolvedBackend::None
+            }
+        }
+        SessionBackend::Auto => {
+            if is_wsl_tool_available(distro, "dtach") {
+                log::debug!("[terminal:session_backend] Auto-detected dtach in WSL for session persistence");
+                ResolvedBackend::Dtach
+            } else if is_wsl_tool_available(distro, "tmux") {
+                log::debug!("[terminal:session_backend] Auto-detected tmux in WSL for session persistence");
+                ResolvedBackend::Tmux
+            } else if is_wsl_tool_available(distro, "screen") {
+                log::debug!("[terminal:session_backend] Auto-detected screen in WSL for session persistence");
+                ResolvedBackend::Screen
+            } else {
+                log::debug!("[terminal:session_backend] No session backend available in WSL");
+                ResolvedBackend::None
+            }
+        }
+    };
+
+    CACHE.lock().unwrap_or_else(|poisoned| {
+        log::warn!("[terminal:session_backend] WSL backend cache mutex was poisoned, recovering");
+        poisoned.into_inner()
+    }).insert(key, result);
+    result
+}
+
+/// Check if a tool is available inside a WSL distro using `command -v`.
+#[cfg(windows)]
+fn is_wsl_tool_available(distro: Option<&str>, tool: &str) -> bool {
+    let mut cmd = crate::process::command("wsl.exe");
+    if let Some(d) = distro {
+        cmd.args(["-d", d]);
+    }
+    cmd.args(["--", "sh", "-c", &format!("command -v {}", shell_escape(tool))]);
+    crate::process::safe_output(&mut cmd)
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// WSL-native socket directory for dtach sessions (lives inside WSL, not on Windows host).
+/// Uses a fixed path since we can't read XDG_RUNTIME_DIR from outside WSL.
+#[cfg(windows)]
+const WSL_DTACH_SOCKET_DIR: &str = "/tmp/velowork-dtach";
+
+/// Get the WSL-native socket path for a dtach session.
+#[cfg(windows)]
+fn get_wsl_dtach_socket_path(session_name: &str) -> String {
+    format!("{}/{}.sock", WSL_DTACH_SOCKET_DIR, session_name)
+}
+
+impl ResolvedBackend {
+    /// Build a session command wrapped through `wsl.exe` for running inside WSL.
+    /// Returns `("wsl.exe", [args...])` or `None` for `ResolvedBackend::None`.
+    ///
+    /// Unlike `build_command()` (which runs on the host), this constructs commands
+    /// that execute inside WSL. Key differences:
+    /// - dtach socket paths use WSL-native `/tmp/` instead of Windows temp dir
+    /// - Default shell uses `"$SHELL"` (resolved inside WSL) instead of host env var
+    #[cfg(windows)]
+    pub fn build_wsl_session_command(
+        &self,
+        distro: Option<&str>,
+        session_name: &str,
+        wsl_cwd: &str,
+        command: Option<&str>,
+    ) -> Option<(String, Vec<String>)> {
+        let inner_cmd = match self {
+            // psmux runs on the Windows host, never inside WSL. resolve_for_wsl
+            // never returns Psmux, so reaching this arm is a programming error.
+            Self::None | Self::Psmux => return None,
+            Self::Tmux => {
+                // Tmux doesn't reference host paths or $SHELL, so delegate to build_command
+                let (_program, inner_args) = self.build_command(session_name, wsl_cwd, command, &[])?;
+                inner_args.last()?.to_string()
+            }
+            Self::Screen => {
+                let (_program, inner_args) = self.build_command(session_name, wsl_cwd, command, &[])?;
+                let mut parts = vec!["screen".to_string()];
+                parts.extend(inner_args.iter().map(|a| shell_escape(a)));
+                parts.join(" ")
+            }
+            Self::Dtach => {
+                // Build dtach command with WSL-native socket path and $SHELL
+                // (can't delegate to build_command — it uses Windows temp dir and host $SHELL)
+                let socket_path = get_wsl_dtach_socket_path(session_name);
+                let program = match command {
+                    Some(cmd) => format!("sh -c {}", shell_escape(cmd)),
+                    // Use $SHELL (resolved inside WSL) — not shell_escape'd so it expands
+                    None => "\"$SHELL\"".to_string(),
+                };
+                format!(
+                    "mkdir -p {} && cd {} && exec dtach -A {} -E -r winch {}",
+                    shell_escape(WSL_DTACH_SOCKET_DIR),
+                    shell_escape(wsl_cwd),
+                    shell_escape(&socket_path),
+                    program
+                )
+            }
+        };
+
+        let mut args = Vec::new();
+        if let Some(d) = distro {
+            args.push("-d".to_string());
+            args.push(d.to_string());
+        }
+        args.extend(["--".to_string(), "sh".to_string(), "-c".to_string(), inner_cmd]);
+
+        Some(("wsl.exe".to_string(), args))
+    }
+}
+
+/// Kill a session backend running inside WSL.
+#[cfg(windows)]
+pub fn kill_wsl_session(backend: ResolvedBackend, distro: Option<&str>, session_name: &str) {
+    let kill_cmd = match backend {
+        // Psmux is host-Windows only; resolve_for_wsl never returns it,
+        // and kill_wsl_session is only called for WSL terminals.
+        ResolvedBackend::None | ResolvedBackend::Psmux => return,
+        ResolvedBackend::Tmux => {
+            format!("tmux kill-session -t {}", shell_escape(session_name))
+        }
+        ResolvedBackend::Screen => {
+            format!("screen -S {} -X quit", shell_escape(session_name))
+        }
+        ResolvedBackend::Dtach => {
+            let socket = get_wsl_dtach_socket_path(session_name);
+            format!(
+                "lsof -t {} 2>/dev/null | xargs -r kill; rm -f {}",
+                shell_escape(&socket),
+                shell_escape(&socket)
+            )
+        }
+    };
+
+    let mut cmd = crate::process::command("wsl.exe");
+    if let Some(d) = distro {
+        cmd.args(["-d", d]);
+    }
+    cmd.args(["--", "sh", "-c", &kill_cmd]);
+    let _ = crate::process::safe_output(&mut cmd);
+    log::debug!("Killed WSL session {} ({:?})", session_name, backend);
+}
+
+/// Escape a string for safe use in shell commands
+#[allow(dead_code)]
+fn shell_escape(s: &str) -> String {
+    // Wrap in single quotes and escape any existing single quotes
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+/// Get the socket directory for dtach sessions
+#[allow(dead_code)]
+fn get_dtach_socket_dir() -> std::path::PathBuf {
+    // Use XDG_RUNTIME_DIR if available (Linux), otherwise fall back to temp dir
+    // XDG_RUNTIME_DIR is preferred as it's user-specific and cleaned on logout
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        std::path::PathBuf::from(runtime_dir).join("velowork")
+    } else {
+        // Fallback: /tmp/velowork-<uid> for security
+        #[cfg(unix)]
+        {
+            // SAFETY: `libc::getuid` is a thin FFI wrapper over the `getuid(2)`
+            // syscall. It takes no arguments, dereferences no pointers, always
+            // succeeds (it is documented as never failing), and returns a plain
+            // `uid_t` by value. There are no memory-safety preconditions, so the
+            // call cannot cause UB.
+            let uid = unsafe { libc::getuid() };
+            std::path::PathBuf::from(format!("/tmp/velowork-{}", uid))
+        }
+        #[cfg(not(unix))]
+        {
+            std::env::temp_dir().join("velowork")
+        }
+    }
+}
+
+/// Get the socket path for a specific dtach session
+#[allow(dead_code)]
+fn get_dtach_socket_path(session_name: &str) -> std::path::PathBuf {
+    get_dtach_socket_dir().join(format!("{}.sock", session_name))
+}
+
+/// Extract directory name from a path for use as window name
+#[allow(dead_code)] // Used only on Unix for tmux window naming
+fn extract_dir_name(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("terminal")
+        .to_string()
+}
+
+/// Build a complete PATH for child processes (terminals and services).
+///
+/// Desktop entries and app bundles inherit a minimal PATH that misses
+/// user-installed tools. We scan well-known directories directly instead
+/// of spawning a shell, which is fragile (login vs interactive, .bash_profile
+/// vs .bashrc, hangs, extra output, etc.).
+#[cfg(not(windows))]
+pub fn get_extended_path() -> String {
+    use std::collections::HashSet;
+    use std::path::{Path, PathBuf};
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let home = match std::env::var("HOME") {
+        Ok(h) => PathBuf::from(h),
+        Err(_) => return current_path,
+    };
+
+    // Well-known user bin directories, checked in order.
+    // Only existing directories are added.
+    let candidates: Vec<PathBuf> = vec![
+        // Rust / Cargo
+        home.join(".cargo/bin"),
+        // Bun
+        home.join(".bun/bin"),
+        // Deno
+        home.join(".deno/bin"),
+        // Go
+        home.join("go/bin"),
+        // pnpm
+        home.join(".local/share/pnpm"),
+        // fnm (fast node manager)
+        home.join(".local/share/fnm"),
+        // pip / pipx / user scripts
+        home.join(".local/bin"),
+        // user bin
+        home.join("bin"),
+        // Fly.io
+        home.join(".fly/bin"),
+        // Homebrew (macOS)
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/opt/homebrew/sbin"),
+        // Manual installs / Homebrew on Intel
+        PathBuf::from("/usr/local/bin"),
+        PathBuf::from("/usr/local/sbin"),
+        // MacPorts
+        PathBuf::from("/opt/local/bin"),
+        // Snap (Linux)
+        PathBuf::from("/snap/bin"),
+    ];
+
+    // Preserve insertion order, deduplicate via HashSet.
+    // User dirs first, then inherited PATH entries.
+    let mut result: Vec<String> = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut push = |s: String| {
+        if seen.insert(s.clone()) {
+            result.push(s);
+        }
+    };
+
+    for dir in &candidates {
+        if dir.is_dir()
+            && let Some(s) = dir.to_str() {
+                push(s.to_string());
+            }
+    }
+
+    // Also resolve fnm's current Node version if fnm is installed
+    resolve_fnm_path(&home, &mut result, &mut seen);
+
+    // Source .cargo/env if it exists — it may define CARGO_HOME in a non-default location
+    if let Some(extra) = source_cargo_env(&home) {
+        let cargo_bin = Path::new(&extra).join("bin");
+        if cargo_bin.is_dir()
+            && let Some(s) = cargo_bin.to_str()
+                && seen.insert(s.to_string()) {
+                    result.push(s.to_string());
+                }
+    }
+
+    // Append inherited PATH entries (keeps system paths at the end)
+    for entry in current_path.split(':') {
+        if !entry.is_empty() && seen.insert(entry.to_string()) {
+            result.push(entry.to_string());
+        }
+    }
+
+    log::debug!("[terminal:session_backend] Extended PATH ({} entries)", result.len());
+    result.join(":")
+}
+
+/// Try to find fnm's current Node bin directory.
+#[cfg(not(windows))]
+fn resolve_fnm_path(home: &std::path::Path, result: &mut Vec<String>, seen: &mut std::collections::HashSet<String>) {
+    // fnm stores the active version in $FNM_MULTISHELL_PATH or we can run `fnm env`.
+    // But to avoid spawning processes, check the default symlink location.
+    let fnm_dir = home.join(".local/share/fnm");
+    if !fnm_dir.is_dir() {
+        return;
+    }
+    let fnm_canonical = match fnm_dir.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    // fnm aliases: default → specific version
+    let default_alias = fnm_dir.join("aliases/default");
+    if let Ok(version) = std::fs::read_link(&default_alias)
+        .or_else(|_| std::fs::read_to_string(&default_alias).map(std::path::PathBuf::from))
+    {
+        // version is either an absolute path or just a version string like "v22.14.0"
+        let node_bin = if version.is_absolute() {
+            version.join("installation/bin")
+        } else {
+            fnm_dir.join("node-versions").join(version.to_string_lossy().trim()).join("installation/bin")
+        };
+        // Validate the resolved path stays within fnm directory to prevent symlink escape
+        if let Ok(canonical_bin) = node_bin.canonicalize() {
+            if !canonical_bin.starts_with(&fnm_canonical) {
+                log::warn!("[terminal:session_backend] fnm alias points outside fnm directory, skipping: {:?}", node_bin);
+                return;
+            }
+            if let Some(s) = canonical_bin.to_str()
+                && seen.insert(s.to_string()) {
+                    result.push(s.to_string());
+                }
+        }
+    }
+}
+
+/// Check if .cargo/env defines a custom CARGO_HOME.
+#[cfg(not(windows))]
+fn source_cargo_env(home: &std::path::Path) -> Option<String> {
+    let env_file = home.join(".cargo/env");
+    let content = std::fs::read_to_string(env_file).ok()?;
+    // Look for: export CARGO_HOME="..." or CARGO_HOME="..."
+    for line in content.lines() {
+        let line = line.trim().strip_prefix("export ").unwrap_or(line.trim());
+        if let Some(rest) = line.strip_prefix("CARGO_HOME=") {
+            let val = rest.trim_matches('"').trim_matches('\'');
+            if !val.is_empty() && val != "$HOME/.cargo" {
+                return Some(val.replace("$HOME", &home.to_string_lossy()));
+            }
+        }
+    }
+    None
+}
+
+/// Check if dtach is available on the system
+/// Always returns false on Windows as dtach is not natively available
+fn is_dtach_available() -> bool {
+    #[cfg(windows)]
+    {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        crate::process::safe_output(
+            crate::process::command("dtach")
+                .arg("-v")
+                .env("PATH", get_extended_path()),
+        )
+            // dtach -v exits with 0 and prints version
+            .map(|o| o.status.success() || !o.stdout.is_empty() || !o.stderr.is_empty())
+            .unwrap_or(false)
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::process::safe_output(crate::process::command("dtach").arg("-v"))
+            // dtach -v exits with 0 and prints version
+            .map(|o| o.status.success() || !o.stdout.is_empty() || !o.stderr.is_empty())
+            .unwrap_or(false)
+    }
+}
+
+/// Check if tmux is available on the system
+/// Always returns false on Windows as tmux is not natively available
+fn is_tmux_available() -> bool {
+    #[cfg(windows)]
+    {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        crate::process::safe_output(
+            crate::process::command("tmux")
+                .arg("-V")
+                .env("PATH", get_extended_path()),
+        )
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::process::safe_output(crate::process::command("tmux").arg("-V"))
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}
+
+/// Check if psmux is available on the system.
+/// Only enabled on Windows — psmux's purpose is being a native Windows tmux
+/// alternative, and the rest of velowork's session-backend chain prefers dtach/tmux/screen
+/// on Unix.
+fn is_psmux_available() -> bool {
+    #[cfg(not(windows))]
+    {
+        false
+    }
+
+    #[cfg(windows)]
+    {
+        let mut cmd = crate::process::command("psmux");
+        cmd.arg("-V");
+        crate::process::safe_output(&mut cmd)
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}
+
+/// Check if screen is available on the system
+/// Always returns false on Windows as screen is not natively available
+fn is_screen_available() -> bool {
+    #[cfg(windows)]
+    {
+        false
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        crate::process::safe_output(
+            crate::process::command("screen")
+                .arg("-v")
+                .env("PATH", get_extended_path()),
+        )
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::process::safe_output(crate::process::command("screen").arg("-v"))
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_backend() {
+        assert_eq!(SessionBackend::parse_str("tmux"), SessionBackend::Tmux);
+        assert_eq!(SessionBackend::parse_str("TMUX"), SessionBackend::Tmux);
+        assert_eq!(SessionBackend::parse_str("screen"), SessionBackend::Screen);
+        assert_eq!(SessionBackend::parse_str("dtach"), SessionBackend::Dtach);
+        assert_eq!(SessionBackend::parse_str("DTACH"), SessionBackend::Dtach);
+        assert_eq!(SessionBackend::parse_str("psmux"), SessionBackend::Psmux);
+        assert_eq!(SessionBackend::parse_str("PSMUX"), SessionBackend::Psmux);
+        assert_eq!(SessionBackend::parse_str("none"), SessionBackend::None);
+        assert_eq!(SessionBackend::parse_str("auto"), SessionBackend::Auto);
+        assert_eq!(SessionBackend::parse_str("smart"), SessionBackend::Auto);
+        assert_eq!(SessionBackend::parse_str("invalid"), SessionBackend::None);
+    }
+
+    #[test]
+    fn test_session_name() {
+        let backend = ResolvedBackend::Tmux;
+        let name = backend.session_name("12345678-1234-1234-1234-123456789012");
+        assert_eq!(name, "tm-12345678");
+
+        // Dtach uses same naming scheme
+        let dtach_backend = ResolvedBackend::Dtach;
+        let dtach_name = dtach_backend.session_name("12345678-1234-1234-1234-123456789012");
+        assert_eq!(dtach_name, "tm-12345678");
+    }
+
+    #[test]
+    fn test_dtach_socket_path() {
+        let backend = ResolvedBackend::Dtach;
+        // socket_path expects terminal_id directly, not session_name
+        let path = backend.socket_path("tm-12345678");
+        assert!(path.is_some());
+        let path = path.unwrap();
+        assert!(path.to_string_lossy().contains("tm-12345678.sock"));
+
+        // Non-dtach backends should return None
+        let tmux_backend = ResolvedBackend::Tmux;
+        assert!(tmux_backend.socket_path("tm-12345678").is_none());
+    }
+
+    #[test]
+    fn test_dtach_build_command() {
+        let backend = ResolvedBackend::Dtach;
+        let result = backend.build_command("test-session", "/home/user", None, &[]);
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "sh");
+        assert_eq!(args.len(), 2);
+        assert_eq!(args[0], "-c");
+        assert!(args[1].contains("dtach -A"));
+        assert!(args[1].contains("-E -r winch"));
+    }
+
+    #[test]
+    fn test_dtach_build_command_with_custom_command() {
+        let backend = ResolvedBackend::Dtach;
+        let result = backend.build_command("test-session", "/home/user", Some("npm run dev"), &[]);
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "sh");
+        assert_eq!(args[0], "-c");
+        assert!(args[1].contains("dtach -A"));
+        // Inner command uses the user's shell with -ic
+        assert!(args[1].contains("-ic"));
+        assert!(args[1].contains("npm run dev"));
+    }
+
+    #[test]
+    fn test_tmux_build_command_with_custom_command() {
+        let backend = ResolvedBackend::Tmux;
+        let result = backend.build_command("test-session", "/home/user", Some("npm run dev"), &[]);
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "sh");
+        assert_eq!(args[0], "-c");
+        assert!(args[1].contains("tmux new-session -A"));
+        // Inner command uses the user's shell with -ic
+        assert!(args[1].contains("'-ic'"));
+        assert!(args[1].contains("npm run dev"));
+    }
+
+    #[test]
+    fn test_tmux_build_command_without_command() {
+        let backend = ResolvedBackend::Tmux;
+        let result = backend.build_command("test-session", "/home/user", None, &[]);
+        assert!(result.is_some());
+        let (_, args) = result.unwrap();
+        // Without a command, no '-ic' should appear after the cwd
+        assert!(!args[1].contains("'-ic'"));
+    }
+
+    #[test]
+    fn test_screen_build_command_with_custom_command() {
+        let backend = ResolvedBackend::Screen;
+        let result = backend.build_command("test-session", "/home/user", Some("npm run dev"), &[]);
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "screen");
+        assert_eq!(args[0], "-D");
+        assert_eq!(args[1], "-R");
+        assert_eq!(args[2], "test-session");
+        // Inner command uses the user's shell with -ic
+        assert_eq!(args[3], user_shell());
+        assert_eq!(args[4], "-ic");
+        assert_eq!(args[5], "npm run dev");
+    }
+
+    #[test]
+    fn test_psmux_build_command_minimal() {
+        let backend = ResolvedBackend::Psmux;
+        // Use forward slashes so the test passes on Unix CI; on Windows in
+        // production Path::file_name handles both separators identically.
+        let result = backend.build_command("tm-12345678", "C:/projects/app", None, &[]);
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "psmux");
+        assert_eq!(args[0], "new-session");
+        assert_eq!(args[1], "-A");
+        // -A is followed directly by -s NAME -c CWD (no -e) when no extra_env
+        assert_eq!(args[2], "-s");
+        assert_eq!(args[3], "tm-12345678");
+        assert_eq!(args[4], "-c");
+        assert_eq!(args[5], "C:/projects/app");
+        // No initial program, then ';' separators with set/rename commands
+        assert!(args.contains(&";".to_string()));
+        let semi_count = args.iter().filter(|a| a.as_str() == ";").count();
+        assert_eq!(semi_count, 4, "expected four `;` separators (status, mouse, automatic-rename, rename-window)");
+        assert!(args.iter().any(|a| a == "rename-window"));
+        assert_eq!(args.last().unwrap(), "app", "window name = last cwd segment");
+    }
+
+    #[test]
+    fn test_psmux_build_command_with_custom_command() {
+        let backend = ResolvedBackend::Psmux;
+        let result = backend.build_command("tm-test", "C:\\src", Some("npm run dev"), &[]);
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "psmux");
+        // custom command is wrapped via cmd.exe /c
+        let cmd_pos = args.iter().position(|a| a == "cmd.exe").expect("cmd.exe in args");
+        assert_eq!(args[cmd_pos + 1], "/c");
+        assert_eq!(args[cmd_pos + 2], "npm run dev");
+    }
+
+    #[test]
+    fn test_psmux_build_command_with_extra_env() {
+        let backend = ResolvedBackend::Psmux;
+        let env = vec![("CLAUDE_CONFIG_DIR".to_string(), Some("C:\\tmp".to_string()))];
+        let (_, args) = backend.build_command("tm-test", "C:\\tmp", None, &env).unwrap();
+        // -e KEY=VAL must appear before -s so psmux applies it to the new session
+        let e_pos = args.iter().position(|a| a == "-e").expect("-e in args");
+        let s_pos = args.iter().position(|a| a == "-s").expect("-s in args");
+        assert!(e_pos < s_pos, "expected -e before -s");
+        assert_eq!(args[e_pos + 1], "CLAUDE_CONFIG_DIR=C:\\tmp");
+    }
+
+    #[test]
+    fn test_psmux_socket_path_returns_none() {
+        // psmux uses TCP IPC, not socket files
+        assert!(ResolvedBackend::Psmux.socket_path("tm-anything").is_none());
+    }
+
+    #[test]
+    fn test_psmux_supports_persistence() {
+        assert!(ResolvedBackend::Psmux.supports_persistence());
+    }
+
+    #[test]
+    fn test_none_build_command() {
+        let backend = ResolvedBackend::None;
+        assert!(backend.build_command("test-session", "/home/user", None, &[]).is_none());
+        assert!(backend.build_command("test-session", "/home/user", Some("echo hi"), &[]).is_none());
+    }
+
+    #[test]
+    fn test_tmux_build_command_with_extra_env() {
+        let backend = ResolvedBackend::Tmux;
+        let env = vec![("CLAUDE_CONFIG_DIR".to_string(), Some("/tmp/foo".to_string()))];
+        let (_, args) = backend
+            .build_command("tm-test", "/tmp", None, &env)
+            .unwrap();
+        // -e KEY=VAL must appear before -s so tmux applies it to the new session
+        assert!(
+            args[1].contains("-e 'CLAUDE_CONFIG_DIR=/tmp/foo'"),
+            "expected -e flag, got: {}",
+            args[1]
+        );
+        let env_pos = args[1].find("-e ").unwrap();
+        let s_pos = args[1].find("-s ").unwrap();
+        assert!(env_pos < s_pos, "expected -e before -s in: {}", args[1]);
+    }
+
+    #[test]
+    fn test_tmux_build_command_unsets_env() {
+        let backend = ResolvedBackend::Tmux;
+        let env = vec![("CLAUDE_CONFIG_DIR".to_string(), None)];
+        let (_, args) = backend
+            .build_command("tm-test", "/tmp", None, &env)
+            .unwrap();
+        // A removal has no `-e` flag but clears the var from the session env.
+        assert!(
+            !args[1].contains("-e "),
+            "removal must not emit an -e flag, got: {}",
+            args[1]
+        );
+        assert!(
+            args[1].contains("set-environment -u 'CLAUDE_CONFIG_DIR'"),
+            "expected session-env unset, got: {}",
+            args[1]
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_build_wsl_session_command_dtach() {
+        let backend = ResolvedBackend::Dtach;
+        let result = backend.build_wsl_session_command(
+            Some("Ubuntu"),
+            "tm-12345678",
+            "/home/user/project",
+            None,
+        );
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "wsl.exe");
+        assert!(args.contains(&"-d".to_string()));
+        assert!(args.contains(&"Ubuntu".to_string()));
+        assert!(args.contains(&"--".to_string()));
+        assert!(args.contains(&"sh".to_string()));
+        assert!(args.contains(&"-c".to_string()));
+        // The inner command should contain dtach with WSL-native socket path
+        let inner_cmd = args.last().unwrap();
+        assert!(inner_cmd.contains("dtach -A"), "inner cmd: {}", inner_cmd);
+        assert!(inner_cmd.contains("-E -r winch"), "inner cmd: {}", inner_cmd);
+        // Must use WSL-native socket path, not Windows temp dir
+        assert!(inner_cmd.contains("/tmp/velowork-dtach/"), "socket path should be WSL-native: {}", inner_cmd);
+        // Must use $SHELL (resolved inside WSL), not /bin/sh
+        assert!(inner_cmd.contains("\"$SHELL\""), "should use $SHELL not /bin/sh: {}", inner_cmd);
+        assert!(!inner_cmd.contains("/bin/sh"), "should not contain /bin/sh: {}", inner_cmd);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_build_wsl_session_command_tmux() {
+        let backend = ResolvedBackend::Tmux;
+        let result = backend.build_wsl_session_command(
+            Some("Ubuntu"),
+            "tm-12345678",
+            "/home/user/project",
+            None,
+        );
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "wsl.exe");
+        let inner_cmd = args.last().unwrap();
+        assert!(inner_cmd.contains("tmux new-session -A"), "inner cmd: {}", inner_cmd);
+        assert!(inner_cmd.contains("set status off"), "inner cmd: {}", inner_cmd);
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_build_wsl_session_command_none() {
+        let backend = ResolvedBackend::None;
+        let result = backend.build_wsl_session_command(
+            Some("Ubuntu"),
+            "tm-12345678",
+            "/home/user/project",
+            None,
+        );
+        assert!(result.is_none());
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_build_wsl_session_command_default_distro() {
+        let backend = ResolvedBackend::Tmux;
+        let result = backend.build_wsl_session_command(
+            None, // default distro
+            "tm-12345678",
+            "/home/user/project",
+            None,
+        );
+        assert!(result.is_some());
+        let (program, args) = result.unwrap();
+        assert_eq!(program, "wsl.exe");
+        // Should NOT contain -d flag when distro is None
+        assert!(!args.contains(&"-d".to_string()));
+        assert!(args.contains(&"--".to_string()));
+    }
+}

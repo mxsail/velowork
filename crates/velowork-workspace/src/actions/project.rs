@@ -1,0 +1,1249 @@
+//! Project management workspace actions
+//!
+//! Actions for creating, modifying, and deleting projects.
+
+use velowork_core::theme::FolderColor;
+use crate::focus::FocusManager;
+use crate::state::{LayoutNode, ProjectData, Workspace, WindowId};
+use gpui::*;
+use std::collections::HashMap;
+
+/// Pick a replacement focus target after hiding `hidden_id`.
+///
+/// Walks `visible_before` starting from the hidden project's position to find
+/// the closest project that is still visible — preferring the next sibling,
+/// then falling back to the previous one.
+fn pick_focus_replacement(
+    visible_before: &[String],
+    visible_after: &[String],
+    hidden_id: &str,
+) -> Option<String> {
+    let idx = visible_before.iter().position(|id| id == hidden_id)?;
+    let after_set: std::collections::HashSet<&str> =
+        visible_after.iter().map(|s| s.as_str()).collect();
+    visible_before
+        .iter()
+        .skip(idx + 1)
+        .find(|id| after_set.contains(id.as_str()))
+        .or_else(|| {
+            visible_before
+                .iter()
+                .take(idx)
+                .rev()
+                .find(|id| after_set.contains(id.as_str()))
+        })
+        .cloned()
+}
+
+/// Expand `~` or `~/...` at the start of a path to the user's home directory.
+/// Does not expand `~user/...` syntax (other user's home directories).
+fn expand_tilde(path: &str) -> String {
+    if (path == "~" || path.starts_with("~/"))
+        && let Some(home) = dirs::home_dir() {
+            let rest = &path[1..]; // "" or "/..."
+            return format!("{}{}", home.display(), rest);
+        }
+    path.to_string()
+}
+
+impl Workspace {
+    /// Returns whether a project is hidden in the given window.
+    ///
+    /// Reads from the targeted `WindowState.hidden_project_ids`. Falls back to
+    /// `main_window` if the targeted extra has been dropped between caller
+    /// resolution and read (drop-race safety). Missing entry == visible.
+    pub fn is_project_hidden(&self, window_id: WindowId, project_id: &str) -> bool {
+        let window_state = self
+            .data
+            .window(window_id)
+            .unwrap_or(&self.data.main_window);
+        window_state.hidden_project_ids.contains(project_id)
+    }
+
+    /// Toggle project overview visibility (also toggles all worktree children).
+    ///
+    /// Delegates to `Workspace::toggle_hidden(window_id, ...)` after a
+    /// project-existence early-return guard. The guard is load-bearing: this
+    /// entrypoint is invoked from the sidebar context menu where a click
+    /// landing on a stale id (project just deleted by another path) must be
+    /// a silent no-op rather than insert the stale id into the persisted
+    /// hidden set. The sister entrypoint `toggle_worktree_visibility` has
+    /// no guard and bumps data_version unconditionally; the asymmetry is
+    /// intentional.
+    ///
+    /// Per the multi-window viewport model, the toggle is scoped to the
+    /// targeted window's `hidden_project_ids`. Unknown extra ids are a
+    /// silent no-op (close-race contract inherited from `toggle_hidden`),
+    /// distinct from the project-existence guard above (which gates on
+    /// project, not window).
+    pub fn toggle_project_overview_visibility(
+        &mut self,
+        focus_manager: &mut FocusManager,
+        window_id: WindowId,
+        project_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.project(project_id).is_none() {
+            return;
+        }
+        let was_hidden = self.is_project_hidden(window_id, project_id);
+
+        // When hiding the project that owns the currently focused terminal,
+        // capture the ordered visible list so we can pick a neighbor to focus
+        // after the toggle. Otherwise keyboard shortcuts stop working because
+        // focus points at a column that's no longer rendered.
+        let needs_focus_redirect = !was_hidden
+            && focus_manager
+                .focused_terminal_state()
+                .map(|s| s.project_id)
+                .as_deref()
+                == Some(project_id);
+        let visible_before: Vec<String> = if needs_focus_redirect {
+            self.visible_projects(
+                window_id,
+                focus_manager.focused_project_id(),
+                focus_manager.is_focus_individual(),
+            )
+            .iter()
+            .map(|p| p.id.clone())
+            .collect()
+        } else {
+            Vec::new()
+        };
+
+        self.toggle_hidden(window_id, project_id, cx);
+
+        if needs_focus_redirect {
+            let visible_after: Vec<String> = self
+                .visible_projects(
+                    window_id,
+                    focus_manager.focused_project_id(),
+                    focus_manager.is_focus_individual(),
+                )
+                .iter()
+                .map(|p| p.id.clone())
+                .collect();
+            let replacement = pick_focus_replacement(&visible_before, &visible_after, project_id);
+            match replacement {
+                Some(next_id) => self.focus_first_terminal_in(focus_manager, &next_id),
+                None => focus_manager.clear_focus(),
+            }
+            cx.notify();
+        }
+    }
+
+    /// Add a new project
+    /// If `with_terminal` is false, creates a bookmark project without a terminal layout.
+    ///
+    /// `window_id` identifies the spawning window (PRD user story 14:
+    /// project lands visible there, hidden everywhere else by default).
+    /// After pushing the project onto `data.projects`, the new id is
+    /// inserted into every window's `hidden_project_ids` set EXCEPT the
+    /// spawning window's via `data.add_project_hide_in_other_windows`. UI
+    /// callers pass the originating `WindowView`'s `window_id`; remote-
+    /// bridge callers pass the focused window resolved via
+    /// `Velowork::focus_manager_for_active_window` (slice 05 cri 13). When
+    /// only main exists (zero extras), the rule degenerates to a no-op
+    /// for the hide-elsewhere step, matching pre-multi-window behavior.
+    pub fn add_project(&mut self, name: String, path: String, with_terminal: bool, window_id: WindowId, cx: &mut Context<Self>) -> String {
+        let path = expand_tilde(&path);
+
+        // Auto-detect WSL UNC paths and set default shell accordingly
+        #[cfg(windows)]
+        let default_shell = velowork_terminal::shell_config::parse_wsl_unc_path(&path)
+            .map(|(distro, _)| velowork_terminal::shell_config::ShellType::Wsl {
+                distro: Some(distro),
+            });
+        #[cfg(not(windows))]
+        let default_shell: Option<velowork_terminal::shell_config::ShellType> = None;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let project = ProjectData {
+            id: id.clone(),
+            name: name.clone(),
+            path: path.clone(),
+            layout: if with_terminal { Some(LayoutNode::new_terminal()) } else { None },
+            terminal_names: HashMap::new(),
+            hidden_terminals: HashMap::new(),
+            folder_color: FolderColor::default(),
+            is_remote: false,
+            connection_id: None,
+            service_terminals: HashMap::new(),
+            default_shell,
+            pinned: false,
+            last_activity_at: None,
+            ..Default::default()
+        };
+        self.data.projects.push(project);
+        self.data.project_order.push(id.clone());
+        self.data.add_project_hide_in_other_windows(&id, window_id);
+        self.notify_data(cx);
+        id
+    }
+
+    /// Add a new terminal to a project by splitting the root layout
+    pub fn add_terminal(&mut self, focus_manager: &mut FocusManager, project_id: &str, cx: &mut Context<Self>) {
+        self.add_terminal_with_shell(focus_manager, project_id, velowork_core::shell::ShellType::Default, cx);
+    }
+
+    /// Add a new terminal with a specific ShellType to a project by splitting the root layout
+    pub fn add_terminal_with_shell(
+        &mut self,
+        focus_manager: &mut FocusManager,
+        project_id: &str,
+        shell_type: velowork_core::shell::ShellType,
+        cx: &mut Context<Self>,
+    ) {
+        let new_node = LayoutNode::new_terminal_with_shell(shell_type);
+        if let Some(project) = self.project_mut(project_id) {
+            if let Some(ref old_layout) = project.layout {
+                let old_layout = old_layout.clone();
+                project.layout = Some(LayoutNode::Split {
+                    direction: crate::state::SplitDirection::Vertical,
+                    sizes: vec![50.0, 50.0],
+                    children: vec![old_layout, new_node],
+                });
+            } else {
+                // Project has no layout - create one with a terminal
+                project.layout = Some(new_node);
+            }
+            self.notify_data(cx);
+        }
+
+        // Focus the newly created terminal (terminal_id: None)
+        let new_path = self.project(project_id)
+            .and_then(|p| p.layout.as_ref())
+            .and_then(|l| l.find_uninitialized_terminal_path());
+        if let Some(path) = new_path {
+            self.set_focused_terminal(focus_manager, project_id.to_string(), path, cx);
+        }
+    }
+
+    /// Add a new terminal running a specific command to a project
+    pub fn add_terminal_with_command(
+        &mut self,
+        project_id: &str,
+        command: &str,
+        env_vars: &HashMap<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(project) = self.project_mut(project_id) {
+            let new_node = LayoutNode::new_terminal_with_command(command, env_vars);
+            if let Some(ref old_layout) = project.layout {
+                let old_layout = old_layout.clone();
+                project.layout = Some(LayoutNode::Split {
+                    direction: crate::state::SplitDirection::Vertical,
+                    sizes: vec![50.0, 50.0],
+                    children: vec![old_layout, new_node],
+                });
+            } else {
+                project.layout = Some(new_node);
+            }
+            self.notify_data(cx);
+        }
+    }
+
+    /// Rename a project
+    pub fn rename_project(&mut self, project_id: &str, new_name: String, cx: &mut Context<Self>) {
+        self.with_project(project_id, cx, |project| {
+            project.name = new_name;
+            true
+        });
+    }
+
+    /// Rename a project's directory path and update the project name to match
+    pub fn rename_project_directory(&mut self, project_id: &str, new_path: String, new_name: String, cx: &mut Context<Self>) {
+        self.with_project(project_id, cx, |project| {
+            project.path = new_path;
+            project.name = new_name;
+            true
+        });
+    }
+
+    /// Set the folder color for a project
+    pub fn set_folder_color(&mut self, project_id: &str, color: FolderColor, cx: &mut Context<Self>) {
+        if let Some(project) = self.project_mut(project_id) {
+            project.folder_color = color;
+            self.notify_data(cx);
+        }
+    }
+
+    /// Set the icon name for a project (matches `assets/icons/{icon}.svg`).
+    pub fn set_project_icon(&mut self, project_id: &str, icon: String, cx: &mut Context<Self>) {
+        if let Some(project) = self.project_mut(project_id) {
+            project.icon = icon;
+            self.notify_data(cx);
+        }
+    }
+
+    /// Set the free-form, multi-line description for a project.
+    pub fn set_project_description(&mut self, project_id: &str, description: String, cx: &mut Context<Self>) {
+        if let Some(project) = self.project_mut(project_id) {
+            project.description = description;
+            self.notify_data(cx);
+        }
+    }
+
+    /// Delete a project
+    pub fn delete_project(&mut self, focus_manager: &mut FocusManager, project_id: &str, cx: &mut Context<Self>) {
+        // Invariant: the system must always retain at least one project.
+        // Refuse to delete when only one remains — this covers the project
+        // management UI's "last project" case as well as any programmatic
+        // delete path (always guarantee >= 1 project exists).
+        if self.data.projects.len() <= 1 {
+            return;
+        }
+
+        // Capture whether the project being deleted is the currently active /
+        // selected one (zoomed project or focused terminal) BEFORE mutating
+        // focus state, so we can seamlessly switch to the first remaining
+        // project if it is (rule: no empty/invalid selection after delete).
+        let was_focused_project = focus_manager
+            .focused_project_id()
+            .map(|s| s.as_str() == project_id)
+            .unwrap_or(false);
+        let was_focused_terminal = focus_manager
+            .focused_terminal_state()
+            .map(|s| s.project_id.as_str() == project_id)
+            .unwrap_or(false);
+
+        // Queue all project terminals for killing before removing state.
+        // Velowork (which owns PtyManager) drains this queue via observer.
+        if let Some(project) = self.project(project_id) {
+            let mut kill_ids: Vec<String> = Vec::new();
+            if let Some(layout) = &project.layout {
+                kill_ids.extend(layout.collect_terminal_ids());
+            }
+            kill_ids.extend(project.service_terminals.values().cloned());
+            self.queue_terminal_kills(kill_ids);
+        }
+
+        // Soft-closed terminals are no longer in the layout but their PTY is
+        // still alive waiting out the grace window — kill them too and drop the
+        // pending records so the grace timer can't fire against a deleted project.
+        let soft_closed = self.drain_pending_closes_for_project(project_id);
+        if !soft_closed.is_empty() {
+            self.queue_terminal_kills(soft_closed);
+        }
+
+        // Remove from projects list
+        self.data.projects.retain(|p| p.id != project_id);
+        // Remove from project order
+        self.data.project_order.retain(|id| id != project_id);
+        // Remove from any folder's project_ids
+        for folder in &mut self.data.folders {
+            folder.project_ids.retain(|id| id != project_id);
+        }
+
+        // Scrub the project id from every window's per-project storage
+        // (hidden set + widths map on main + every extra). Per the multi-
+        // window viewport model, project delete is a workspace-level event
+        // whose effect must propagate to every viewport so no orphan
+        // entries survive. The trailing `notify_data(cx)` below covers the
+        // data_version bump for the whole delete path.
+        self.data.delete_project_scrub_all_windows(project_id);
+        // Clear closing state
+        self.lifecycle.finish_closing(project_id);
+
+        // Exit fullscreen if this project's terminal was in fullscreen.
+        if focus_manager.fullscreen_project_id() == Some(project_id) {
+            focus_manager.exit_fullscreen();
+        }
+
+        // If the deleted project was the active/selected one, seamlessly switch
+        // to the first remaining project so the UI never holds an empty or
+        // invalid selection. Otherwise leave focus untouched.
+        if was_focused_project || was_focused_terminal {
+            let first_remaining = self
+                .data
+                .project_order
+                .first()
+                .cloned()
+                .or_else(|| self.data.projects.first().map(|p| p.id.clone()));
+            match first_remaining {
+                Some(first_id) => {
+                    if was_focused_project {
+                        focus_manager.set_focused_project_id(Some(first_id.clone()));
+                    }
+                    self.focus_first_terminal_in(focus_manager, &first_id);
+                }
+                None => {
+                    focus_manager.set_focused_project_id(None);
+                    focus_manager.clear_focus();
+                }
+            }
+        }
+
+        self.notify_data(cx);
+    }
+
+    /// Move a project to a new position in the top-level order.
+    /// Also removes the project from any folder it may be in.
+    pub fn move_project(&mut self, project_id: &str, new_index: usize, cx: &mut Context<Self>) {
+        // Remove from any folder first
+        for folder in &mut self.data.folders {
+            folder.project_ids.retain(|id| id != project_id);
+        }
+
+        // Remove the project from project_order, then re-insert at the new position.
+        let was_present = self.data.project_order.iter().any(|id| id == project_id);
+        self.data.project_order.retain(|id| id != project_id);
+
+        let target = new_index.min(self.data.project_order.len());
+        if was_present {
+            self.data.project_order.insert(target, project_id.to_string());
+        } else {
+            // Not previously in order — append so it still becomes visible.
+            self.data.project_order.push(project_id.to_string());
+        }
+
+        self.notify_data(cx);
+    }
+
+    /// Update project column widths on the targeted window.
+    ///
+    /// Wholesale-replaces the targeted window's `project_widths` map with the
+    /// supplied map. The leading clear is routed through the `window_mut`
+    /// lookup pair so an unknown extra id (e.g. caller raced a close) is a
+    /// silent no-op for the clear; the per-entry `set_project_width` calls
+    /// then also no-op via the same lookup contract. `notify_data` still
+    /// bumps `data_version` so the auto-save observer's cadence is unchanged
+    /// in the close-race path -- consistent with the silent-no-op contract
+    /// the data-layer setters absorb.
+    ///
+    /// Each entry is written via `data.set_project_width(window_id, ...)` so
+    /// a future migration off the wholesale shape inherits the per-entry
+    /// pair-shaped contract automatically. The runtime shape of a column-resize
+    /// is per-column; the wholesale shape on this entrypoint is a relic of the
+    /// prior data layout where `project_widths` was a top-level field.
+    ///
+    /// Bumps `data_version` exactly once per call (not per entry) -- the data
+    /// layer setter does not notify, so the single trailing `notify_data` keeps
+    /// the auto-save observer's debounce cadence identical to the pre-migration
+    /// body.
+    pub fn update_project_widths(&mut self, window_id: WindowId, widths: HashMap<String, f32>, cx: &mut Context<Self>) {
+        if let Some(w) = self.data.window_mut(window_id) {
+            w.project_widths.clear();
+        }
+        for (id, w) in widths {
+            self.data.set_project_width(window_id, &id, w);
+        }
+        self.notify_data(cx);
+    }
+
+    /// Update service panel height for a project
+    pub fn update_service_panel_height(&mut self, project_id: &str, height: f32, cx: &mut Context<Self>) {
+        self.data.service_panel_heights.insert(project_id.to_string(), height);
+        self.notify_data(cx);
+    }
+
+    /// Get project width or default equal distribution.
+    ///
+    /// Reads from the targeted window's `project_widths` map. `WindowId::Main`
+    /// always lands on `main_window`. `WindowId::Extra(_)` targets the matching
+    /// extra by id; an unknown extra (e.g. raced a close) routes through
+    /// `data.window(window_id) == None` and falls back to the equal-distribution
+    /// default, matching the "missing entry == default" contract on the lookup
+    /// side. Default is `100.0 / visible_count` so a render path that asks for
+    /// every visible column gets a balanced grid when no widths are set yet.
+    pub fn get_project_width(&self, window_id: WindowId, project_id: &str, visible_count: usize) -> f32 {
+        self.data
+            .window(window_id)
+            .and_then(|w| w.project_widths.get(project_id).copied())
+            .unwrap_or_else(|| 100.0 / visible_count as f32)
+    }
+
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{expand_tilde, pick_focus_replacement};
+    use crate::state::*;
+    use velowork_core::theme::FolderColor;
+    use std::collections::HashMap;
+
+    fn make_project(id: &str) -> ProjectData {
+        ProjectData {
+            id: id.to_string(),
+            name: format!("Project {}", id),
+            path: "/tmp/test".to_string(),
+            layout: Some(LayoutNode::new_terminal()),
+            terminal_names: HashMap::new(),
+            hidden_terminals: HashMap::new(),
+            folder_color: FolderColor::default(),
+            is_remote: false,
+            connection_id: None,
+            service_terminals: HashMap::new(),
+            default_shell: None,
+            pinned: false,
+            last_activity_at: None,
+            ..Default::default()
+        }
+    }
+
+    fn make_workspace_data() -> WorkspaceData {
+        WorkspaceData {
+            version: 1,
+            projects: vec![],
+            project_order: vec![],
+            service_panel_heights: HashMap::new(),
+            folders: vec![],
+            main_window: crate::state::WindowState::default(),
+            extra_windows: Vec::new(),
+        }
+    }
+
+    fn simulate_delete_project(data: &mut WorkspaceData, project_id: &str) {
+        data.projects.retain(|p| p.id != project_id);
+        data.project_order.retain(|id| id != project_id);
+        for folder in &mut data.folders {
+            folder.project_ids.retain(|id| id != project_id);
+        }
+        data.main_window.project_widths.remove(project_id);
+    }
+
+    #[test]
+    fn test_delete_project_removes_from_folders() {
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["f1".to_string()];
+        data.folders = vec![FolderData {
+            id: "f1".to_string(),
+            name: "Folder".to_string(),
+            project_ids: vec!["p1".to_string(), "p2".to_string()],
+            folder_color: FolderColor::default(),
+        }];
+
+        simulate_delete_project(&mut data, "p1");
+
+        assert_eq!(data.folders[0].project_ids, vec!["p2".to_string()]);
+    }
+
+    #[test]
+    fn test_get_project_width() {
+        let ws = Workspace::new(make_workspace_data());
+        // Default: equal distribution
+        assert_eq!(ws.get_project_width(WindowId::Main, "p1", 4), 25.0);
+    }
+
+    #[test]
+    fn test_get_project_width_custom() {
+        let mut data = make_workspace_data();
+        data.main_window.project_widths.insert("p1".to_string(), 60.0);
+        let ws = Workspace::new(data);
+        assert_eq!(ws.get_project_width(WindowId::Main, "p1", 2), 60.0);
+    }
+
+    #[test]
+    fn get_project_width_reads_from_main_window_project_widths() {
+        // Per-window viewport model: WindowId::Main routes through
+        // data.window(...) and reads main_window.project_widths.
+        let mut data = make_workspace_data();
+        data.main_window.project_widths.insert("p1".to_string(), 75.0);
+        let ws = Workspace::new(data);
+        assert_eq!(ws.get_project_width(WindowId::Main, "p1", 2), 75.0);
+    }
+
+    #[test]
+    fn get_project_width_extra_reads_from_targeted_window() {
+        // Per-window viewport model: WindowId::Extra(uuid) routes through
+        // data.window(...) and reads the matching extra's project_widths -- not
+        // main's. Fixture writes p1 -> 80.0 only on the extra; main's map is
+        // empty. Reading with the extra id returns 80.0; reading with Main
+        // falls back to the equal-distribution default. Defends against a
+        // regression that ignores window_id and unconditionally reads main.
+        let mut data = make_workspace_data();
+        let mut extra = WindowState::default();
+        extra.project_widths.insert("p1".to_string(), 80.0);
+        let extra_id = extra.id;
+        data.extra_windows.push(extra);
+        let ws = Workspace::new(data);
+
+        assert_eq!(ws.get_project_width(WindowId::Extra(extra_id), "p1", 2), 80.0);
+        // Main has no entry for p1 -> equal-distribution default of 50.0 (2 visible).
+        assert_eq!(ws.get_project_width(WindowId::Main, "p1", 2), 50.0);
+    }
+
+    #[test]
+    fn get_project_width_unknown_extra_returns_default() {
+        // Close-race contract: a fresh uuid that does not match any extra is
+        // a `data.window(...) == None`, which falls back to the equal-
+        // distribution default rather than panicking. Mirrors the silent
+        // no-op shape of the window-scoped setters when targeted at an
+        // already-closed extra.
+        let mut data = make_workspace_data();
+        // Pre-populate main with a value to ensure the unknown-extra path
+        // does NOT silently read from main as a fallback.
+        data.main_window.project_widths.insert("p1".to_string(), 90.0);
+        let ws = Workspace::new(data);
+
+        let unknown = uuid::Uuid::new_v4();
+        // Default for visible_count = 4 -> 25.0, NOT 90.0 (main's value).
+        assert_eq!(ws.get_project_width(WindowId::Extra(unknown), "p1", 4), 25.0);
+    }
+
+    #[test]
+    fn test_expand_tilde_with_subpath() {
+        let home = dirs::home_dir().unwrap();
+        let result = expand_tilde("~/Developer/project");
+        assert_eq!(result, format!("{}/Developer/project", home.display()));
+    }
+
+    #[test]
+    fn test_expand_tilde_home_only() {
+        let home = dirs::home_dir().unwrap();
+        let result = expand_tilde("~");
+        assert_eq!(result, format!("{}", home.display()));
+    }
+
+    #[test]
+    fn test_expand_tilde_absolute_path_unchanged() {
+        let result = expand_tilde("/usr/local/bin");
+        assert_eq!(result, "/usr/local/bin");
+    }
+
+    #[test]
+    fn test_expand_tilde_relative_path_unchanged() {
+        let result = expand_tilde("some/relative/path");
+        assert_eq!(result, "some/relative/path");
+    }
+
+    #[test]
+    fn test_expand_tilde_other_user_unchanged() {
+        let result = expand_tilde("~otheruser/path");
+        assert_eq!(result, "~otheruser/path");
+    }
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn pick_focus_replacement_prefers_next() {
+        let before = s(&["a", "b", "c", "d"]);
+        let after = s(&["a", "b", "d"]);
+        assert_eq!(pick_focus_replacement(&before, &after, "c").as_deref(), Some("d"));
+    }
+
+    #[test]
+    fn pick_focus_replacement_falls_back_to_previous() {
+        let before = s(&["a", "b", "c"]);
+        let after = s(&["a", "b"]);
+        assert_eq!(pick_focus_replacement(&before, &after, "c").as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn pick_focus_replacement_skips_other_hidden_neighbors() {
+        // Hiding "b" while "c" is also no longer visible should jump to "d".
+        let before = s(&["a", "b", "c", "d"]);
+        let after = s(&["a", "d"]);
+        assert_eq!(pick_focus_replacement(&before, &after, "b").as_deref(), Some("d"));
+    }
+
+    #[test]
+    fn pick_focus_replacement_none_when_alone() {
+        let before = s(&["a"]);
+        let after: Vec<String> = Vec::new();
+        assert_eq!(pick_focus_replacement(&before, &after, "a"), None);
+    }
+
+    #[test]
+    fn pick_focus_replacement_none_when_id_missing() {
+        let before = s(&["a", "b"]);
+        let after = s(&["a", "b"]);
+        assert_eq!(pick_focus_replacement(&before, &after, "missing"), None);
+    }
+}
+
+#[cfg(test)]
+mod gpui_tests {
+    use gpui::AppContext as _;
+    use crate::focus::FocusManager;
+    use crate::state::{LayoutNode, ProjectData, WindowId, WindowState, Workspace, WorkspaceData};
+    use velowork_core::theme::FolderColor;
+    use std::collections::HashMap;
+
+    fn make_workspace_data() -> WorkspaceData {
+        WorkspaceData {
+            version: 1,
+            projects: vec![],
+            project_order: vec![],
+            service_panel_heights: HashMap::new(),
+            folders: vec![],
+            main_window: crate::state::WindowState::default(),
+            extra_windows: Vec::new(),
+        }
+    }
+
+    fn make_project(id: &str) -> ProjectData {
+        ProjectData {
+            id: id.to_string(),
+            name: format!("Project {}", id),
+            path: "/tmp/test".to_string(),
+            layout: Some(LayoutNode::new_terminal()),
+            terminal_names: HashMap::new(),
+            hidden_terminals: HashMap::new(),
+            folder_color: FolderColor::default(),
+            is_remote: false,
+            connection_id: None,
+            service_terminals: HashMap::new(),
+            default_shell: None,
+            pinned: false,
+            last_activity_at: None,
+            ..Default::default()
+        }
+    }
+
+    #[gpui::test]
+    fn add_project_main_spawn_with_extra_hides_in_extra_only(cx: &mut gpui::TestAppContext) {
+        // Slice 06 + PRD user story 14 entity-level pin: add_project from
+        // WindowId::Main with one extra present produces a project that is
+        // hidden in the extra and visible (absent from hidden_project_ids)
+        // in main. Defends against a regression that drops the WindowId
+        // parameter, calls the visibility helper with the wrong target, or
+        // skips the helper entirely. Co-located with the data-layer pin
+        // `add_project_hide_in_other_windows_main_spawn_inserts_in_extras_only`
+        // so the entity layer's threading is verified end-to-end.
+        let mut data = make_workspace_data();
+        let extra = WindowState::default();
+        let extra_id = extra.id;
+        data.extra_windows = vec![extra];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        let new_id = workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.add_project("p1".to_string(), "/tmp/p1".to_string(), false, WindowId::Main, cx)
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(!ws.data().main_window.hidden_project_ids.contains(&new_id));
+            let after = ws.data().window(WindowId::Extra(extra_id)).unwrap();
+            assert!(after.hidden_project_ids.contains(&new_id));
+        });
+    }
+
+    #[gpui::test]
+    fn add_project_extra_spawn_hides_in_main_and_other_extras(cx: &mut gpui::TestAppContext) {
+        // Slice 06 + PRD user story 14: add_project from
+        // WindowId::Extra(spawning) with a second extra present hides the
+        // new project in main and the sibling extra, leaves the spawning
+        // extra clean. Defends against a regression that always writes to
+        // main as the spawning window, or scatters the hide across every
+        // extra (including the spawning one). Mirrors the data-layer pin
+        // `add_project_hide_in_other_windows_extra_spawn_inserts_in_main_and_other_extras`.
+        let mut data = make_workspace_data();
+        let extra_a = WindowState::default();
+        let extra_a_id = extra_a.id;
+        let extra_b = WindowState::default();
+        let extra_b_id = extra_b.id;
+        data.extra_windows = vec![extra_a, extra_b];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        let new_id = workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.add_project("p1".to_string(), "/tmp/p1".to_string(), false, WindowId::Extra(extra_a_id), cx)
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(ws.data().main_window.hidden_project_ids.contains(&new_id));
+            let after_a = ws.data().window(WindowId::Extra(extra_a_id)).unwrap();
+            assert!(!after_a.hidden_project_ids.contains(&new_id));
+            let after_b = ws.data().window(WindowId::Extra(extra_b_id)).unwrap();
+            assert!(after_b.hidden_project_ids.contains(&new_id));
+        });
+    }
+
+    #[gpui::test]
+    fn test_add_project_gpui(cx: &mut gpui::TestAppContext) {
+        let workspace = cx.new(|_cx| Workspace::new(make_workspace_data()));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.add_project("Test".to_string(), "/tmp/test".to_string(), true, WindowId::Main, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert_eq!(ws.data().projects.len(), 1);
+            assert_eq!(ws.data().projects[0].name, "Test");
+            assert!(ws.data().projects[0].layout.is_some());
+            assert_eq!(ws.data().project_order.len(), 1);
+            assert_eq!(ws.data().project_order[0], ws.data().projects[0].id);
+            assert!(ws.data_version() > 0);
+        });
+    }
+
+    #[gpui::test]
+    fn test_add_bookmark_project_gpui(cx: &mut gpui::TestAppContext) {
+        let workspace = cx.new(|_cx| Workspace::new(make_workspace_data()));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.add_project("Bookmark".to_string(), "/tmp/bm".to_string(), false, WindowId::Main, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(ws.data().projects[0].layout.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn test_delete_project_gpui(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string()];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.delete_project(&mut FocusManager::new(), "p1", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert_eq!(ws.data().projects.len(), 1);
+            assert_eq!(ws.data().projects[0].id, "p2");
+            assert!(!ws.data().project_order.contains(&"p1".to_string()));
+        });
+    }
+
+    #[gpui::test]
+    fn is_project_hidden_reads_from_main_window_hidden_project_ids(cx: &mut gpui::TestAppContext) {
+        // Per-window viewport model: hidden state is read from
+        // main_window.hidden_project_ids (the source of truth). Missing
+        // entry == visible.
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string()];
+        data.main_window.hidden_project_ids.insert("p1".to_string());
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(ws.is_project_hidden(WindowId::Main, "p1"));
+            // Missing entry defaults to visible (not hidden).
+            assert!(!ws.is_project_hidden(WindowId::Main, "p2"));
+            assert!(!ws.is_project_hidden(WindowId::Main, "missing"));
+        });
+    }
+
+    #[gpui::test]
+    fn toggle_project_overview_visibility_writes_to_main_window(cx: &mut gpui::TestAppContext) {
+        // Toggling project visibility flips main_window.hidden_project_ids
+        // (the per-window viewport model's source of truth).
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1")];
+        data.project_order = vec!["p1".to_string()];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        // First toggle: visible -> hidden. main_window inserts the id.
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_project_overview_visibility(&mut FocusManager::new(), WindowId::Main, "p1", cx);
+        });
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(ws.data().main_window.hidden_project_ids.contains("p1"));
+        });
+
+        // Second toggle: hidden -> visible. main_window removes the entry.
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_project_overview_visibility(&mut FocusManager::new(), WindowId::Main, "p1", cx);
+        });
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(!ws.data().main_window.hidden_project_ids.contains("p1"));
+        });
+    }
+
+    #[gpui::test]
+    fn toggle_project_overview_visibility_unknown_id_is_noop(cx: &mut gpui::TestAppContext) {
+        // Post-migration contract: the project-existence early-return guard
+        // (`if self.project(project_id).is_none() { return; }`) at the top of
+        // toggle_project_overview_visibility is preserved through the
+        // delegation onto Workspace::toggle_hidden. An unknown id must NOT
+        // mutate main_window.hidden_project_ids and must NOT bump data_version
+        // -- the sidebar context-menu UX expects a no-op on a stale id (the
+        // entrypoint is the project-overview row, where a click landing after
+        // a delete must be silent).
+        //
+        // This contrasts with toggle_worktree_visibility (no guard, bumps
+        // unconditionally per the previous commit) and is the load-bearing
+        // difference between the two delegating wrappers. Defends against a
+        // regression that drops the guard "for symmetry with
+        // toggle_worktree_visibility" or that lifts the guard into the
+        // shared toggle_hidden setter (which would force every caller to
+        // either accept the guard or bypass via direct data access).
+        let workspace = cx.new(|_cx| Workspace::new(make_workspace_data()));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_project_overview_visibility(&mut FocusManager::new(), WindowId::Main, "unknown_id", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(!ws.data().main_window.hidden_project_ids.contains("unknown_id"));
+            assert_eq!(ws.data_version(), 0);
+        });
+    }
+
+    #[gpui::test]
+    fn toggle_project_overview_visibility_extra_writes_only_to_targeted_window(cx: &mut gpui::TestAppContext) {
+        // Per-window viewport model: toggling on WindowId::Extra(uuid) flips
+        // only that extra's hidden_project_ids -- main and any sibling extras
+        // stay untouched. Defends against a regression that ignores window_id
+        // and unconditionally writes to main, scatters the toggle across all
+        // extras, or routes through main's slot. Pre-populate main + sibling
+        // extra with sibling state to verify isolation.
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string()];
+        data.main_window.hidden_project_ids.insert("p2".to_string());
+        let extra_a = WindowState::default();
+        let extra_a_id = extra_a.id;
+        let mut extra_b = WindowState::default();
+        extra_b.hidden_project_ids.insert("p2".to_string());
+        let extra_b_id = extra_b.id;
+        data.extra_windows = vec![extra_a, extra_b];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        // First toggle: visible -> hidden in extra_a.
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_project_overview_visibility(&mut FocusManager::new(), WindowId::Extra(extra_a_id), "p1", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            // Targeted extra got p1 hidden.
+            assert!(ws.data().extra_windows[0].hidden_project_ids.contains("p1"));
+            // Main does NOT have p1 hidden.
+            assert!(!ws.data().main_window.hidden_project_ids.contains("p1"));
+            // Sibling extra does NOT have p1 hidden.
+            assert!(!ws.data().extra_windows[1].hidden_project_ids.contains("p1"));
+            // Sibling p2 state preserved on main + sibling extra.
+            assert!(ws.data().main_window.hidden_project_ids.contains("p2"));
+            assert!(ws.data().extra_windows[1].hidden_project_ids.contains("p2"));
+            assert_eq!(extra_b_id, ws.data().extra_windows[1].id);
+        });
+
+        // Second toggle: hidden -> visible in extra_a. Pins the round-trip
+        // semantic so a regression that hard-codes insert-only or remove-only
+        // would surface here.
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_project_overview_visibility(&mut FocusManager::new(), WindowId::Extra(extra_a_id), "p1", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(!ws.data().extra_windows[0].hidden_project_ids.contains("p1"));
+        });
+    }
+
+    #[gpui::test]
+    fn toggle_project_overview_visibility_unknown_extra_is_silent_noop(cx: &mut gpui::TestAppContext) {
+        // Close-race contract: a fresh uuid that does not match any extra
+        // produces no panic; main_window stays untouched. Pre-populate main
+        // with hidden state for p1 to ensure the unknown-extra path does NOT
+        // silently fall back to main as a default. data_version still bumps
+        // via notify_data (the project-existence guard is satisfied because
+        // p1 IS a real project; only the WINDOW lookup misses), matching
+        // the silent-no-op contract on the data-layer setter. Defends
+        // against a regression that replaces the window_mut lookup with
+        // direct main_window access.
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1")];
+        data.project_order = vec!["p1".to_string()];
+        data.main_window.hidden_project_ids.insert("p1".to_string());
+        let workspace = cx.new(|_cx| Workspace::new(data));
+        let unknown = uuid::Uuid::new_v4();
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_project_overview_visibility(&mut FocusManager::new(), WindowId::Extra(unknown), "p1", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            // Main's p1 hidden state is unchanged (NOT toggled to visible).
+            assert!(ws.data().main_window.hidden_project_ids.contains("p1"));
+            assert_eq!(ws.data_version(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn update_project_widths_writes_only_to_main_window(cx: &mut gpui::TestAppContext) {
+        // Per-window viewport model: writes go to main_window.project_widths
+        // (the source of truth). The legacy top-level WorkspaceData.project_widths
+        // field has been removed entirely.
+        let workspace = cx.new(|_cx| Workspace::new(make_workspace_data()));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            let mut widths = HashMap::new();
+            widths.insert("p1".to_string(), 60.0);
+            widths.insert("p2".to_string(), 40.0);
+            ws.update_project_widths(WindowId::Main, widths, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert_eq!(ws.data().main_window.project_widths.get("p1"), Some(&60.0));
+            assert_eq!(ws.data().main_window.project_widths.get("p2"), Some(&40.0));
+        });
+    }
+
+    #[gpui::test]
+    fn update_project_widths_wholesale_replaces_existing_entries(cx: &mut gpui::TestAppContext) {
+        // Wholesale-replace contract: keys absent from the supplied map are
+        // removed from main_window.project_widths. Pins the semantic so a
+        // future refactor that drops the leading clear() (e.g. switching to a
+        // merge body) silently breaks here. Pre-populate p1, then call with a
+        // map containing only p2 -- p1 must be gone.
+        let mut data = make_workspace_data();
+        data.main_window.project_widths.insert("p1".to_string(), 0.50);
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            let mut widths = HashMap::new();
+            widths.insert("p2".to_string(), 0.40);
+            ws.update_project_widths(WindowId::Main, widths, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(!ws.data().main_window.project_widths.contains_key("p1"));
+            assert_eq!(ws.data().main_window.project_widths.get("p2").copied(), Some(0.40));
+        });
+    }
+
+    #[gpui::test]
+    fn update_project_widths_bumps_data_version_exactly_once(cx: &mut gpui::TestAppContext) {
+        // One call -> one data_version bump, even when the supplied map has
+        // multiple entries. Defends against a future refactor that delegates
+        // to the entity-level `set_project_width(WindowId, ...)` per entry,
+        // which would bump per entry and disturb the auto-save observer's
+        // debounce cadence.
+        let workspace = cx.new(|_cx| Workspace::new(make_workspace_data()));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            let mut widths = HashMap::new();
+            widths.insert("p1".to_string(), 0.30);
+            widths.insert("p2".to_string(), 0.40);
+            widths.insert("p3".to_string(), 0.30);
+            ws.update_project_widths(WindowId::Main, widths, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert_eq!(ws.data_version(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn update_project_widths_extra_writes_only_to_targeted_window(cx: &mut gpui::TestAppContext) {
+        // Per-window viewport model: writes targeted at WindowId::Extra(uuid)
+        // land on that extra's project_widths only -- main and any sibling
+        // extras stay untouched. Defends against a regression that ignores
+        // window_id and unconditionally writes to main, scatters the write
+        // across all extras, or routes through main's slot.
+        let mut data = make_workspace_data();
+        let extra_a = WindowState::default();
+        let extra_a_id = extra_a.id;
+        let mut extra_b = WindowState::default();
+        let extra_b_id = extra_b.id;
+        // Pre-populate sibling state on main + extra_b to verify isolation.
+        data.main_window.project_widths.insert("p1".to_string(), 100.0);
+        extra_b.project_widths.insert("p1".to_string(), 200.0);
+        // extra_a starts empty.
+        let _ = extra_a_id;
+        data.extra_windows = vec![extra_a, extra_b];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            let mut widths = HashMap::new();
+            widths.insert("p1".to_string(), 60.0);
+            widths.insert("p2".to_string(), 40.0);
+            ws.update_project_widths(WindowId::Extra(extra_a_id), widths, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            // Targeted extra got both new entries.
+            let extra_a_widths = &ws.data().extra_windows[0].project_widths;
+            assert_eq!(extra_a_widths.get("p1"), Some(&60.0));
+            assert_eq!(extra_a_widths.get("p2"), Some(&40.0));
+            // Main's p1 width is untouched.
+            assert_eq!(ws.data().main_window.project_widths.get("p1"), Some(&100.0));
+            // Sibling extra's p1 width is untouched.
+            assert_eq!(ws.data().extra_windows[1].project_widths.get("p1"), Some(&200.0));
+            // Sibling extra has no p2 from the targeted write.
+            assert!(!ws.data().extra_windows[1].project_widths.contains_key("p2"));
+            // Main has no p2 from the targeted write.
+            assert!(!ws.data().main_window.project_widths.contains_key("p2"));
+            assert_eq!(extra_b_id, ws.data().extra_windows[1].id);
+        });
+    }
+
+    #[gpui::test]
+    fn update_project_widths_unknown_extra_is_silent_noop(cx: &mut gpui::TestAppContext) {
+        // Close-race contract: a fresh uuid that does not match any extra
+        // produces no panic; main_window stays untouched. Pre-populate main
+        // to ensure the unknown-extra path does NOT silently fall back to
+        // main as a default. data_version still bumps via notify_data,
+        // matching the silent-no-op contract on the data-layer setters.
+        let mut data = make_workspace_data();
+        data.main_window.project_widths.insert("p1".to_string(), 50.0);
+        let workspace = cx.new(|_cx| Workspace::new(data));
+        let unknown = uuid::Uuid::new_v4();
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            let mut widths = HashMap::new();
+            widths.insert("p1".to_string(), 99.0);
+            ws.update_project_widths(WindowId::Extra(unknown), widths, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert_eq!(ws.data().main_window.project_widths.get("p1"), Some(&50.0));
+            assert_eq!(ws.data_version(), 1);
+        });
+    }
+
+    #[gpui::test]
+    fn delete_project_clears_main_window_project_width(cx: &mut gpui::TestAppContext) {
+        // Deleting a project must scrub its width from main_window.project_widths
+        // (the source of truth). Without the scrub, a re-added project with the
+        // same id would inherit the deleted project's width on the next render.
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string()];
+        data.main_window.project_widths.insert("p1".to_string(), 60.0);
+        data.main_window.project_widths.insert("p2".to_string(), 40.0);
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.delete_project(&mut FocusManager::new(), "p1", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert!(!ws.data().main_window.project_widths.contains_key("p1"));
+            assert!(ws.data().main_window.project_widths.contains_key("p2"));
+        });
+    }
+
+    #[gpui::test]
+    fn delete_project_scrubs_extra_window_per_project_state(cx: &mut gpui::TestAppContext) {
+        // Per the multi-window viewport model, deleting a project must scrub
+        // its id from EVERY window's per-project storage -- not just main.
+        // Without the fan-out, an extra window would retain orphan width and
+        // hidden-set entries for a project that no longer exists; on next
+        // launch those entries would either (a) bloat the on-disk shape or
+        // (b) silently re-apply if a project with the same id were ever
+        // re-added. This pins the slice 02 acceptance criterion "Project
+        // delete invokes `delete_project_scrub_all_windows` so no orphan
+        // entries remain" -- specifically the extras leg, since slice 05 has
+        // not landed yet so extras only exist in manually-constructed test
+        // fixtures today. Defends against a regression that drops the helper
+        // call and falls back to a main-only inline scrub.
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string()];
+        data.main_window.project_widths.insert("p1".to_string(), 60.0);
+        data.main_window.hidden_project_ids.insert("p1".to_string());
+        let mut extra1 = WindowState::default();
+        extra1.project_widths.insert("p1".to_string(), 30.0);
+        extra1.project_widths.insert("p2".to_string(), 70.0);
+        extra1.hidden_project_ids.insert("p1".to_string());
+        let mut extra2 = WindowState::default();
+        extra2.project_widths.insert("p1".to_string(), 50.0);
+        extra2.hidden_project_ids.insert("p1".to_string());
+        extra2.hidden_project_ids.insert("p2".to_string());
+        data.extra_windows.push(extra1);
+        data.extra_windows.push(extra2);
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.delete_project(&mut FocusManager::new(), "p1", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            // Main: p1 scrubbed from both per-project fields, p2 untouched.
+            assert!(!ws.data().main_window.project_widths.contains_key("p1"));
+            assert!(!ws.data().main_window.hidden_project_ids.contains("p1"));
+            // Every extra: p1 scrubbed; sibling project state preserved.
+            for extra in &ws.data().extra_windows {
+                assert!(!extra.project_widths.contains_key("p1"));
+                assert!(!extra.hidden_project_ids.contains("p1"));
+            }
+            assert!(ws.data().extra_windows[0].project_widths.contains_key("p2"));
+            assert!(ws.data().extra_windows[1].hidden_project_ids.contains("p2"));
+        });
+    }
+
+    #[gpui::test]
+    fn test_move_project_gpui(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2"), make_project("p3")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string(), "p3".to_string()];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.move_project("p3", 0, cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            assert_eq!(ws.data().project_order, vec!["p3", "p1", "p2"]);
+        });
+    }
+
+    #[gpui::test]
+    fn test_hide_focused_project_moves_focus_to_next(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2"), make_project("p3")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string(), "p3".to_string()];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        let mut fm = FocusManager::new();
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.set_focused_terminal(&mut fm, "p2".to_string(), vec![], cx);
+            ws.toggle_project_overview_visibility(&mut fm, WindowId::Main, "p2", cx);
+        });
+
+        let state = fm.focused_terminal_state().expect("focus should be set");
+        assert_eq!(state.project_id, "p3");
+    }
+
+    #[gpui::test]
+    fn test_hide_focused_last_project_falls_back_to_previous(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string()];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        let mut fm = FocusManager::new();
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.set_focused_terminal(&mut fm, "p2".to_string(), vec![], cx);
+            ws.toggle_project_overview_visibility(&mut fm, WindowId::Main, "p2", cx);
+        });
+
+        let state = fm.focused_terminal_state().expect("focus should be set");
+        assert_eq!(state.project_id, "p1");
+    }
+
+    #[gpui::test]
+    fn test_hide_unfocused_project_leaves_focus(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1"), make_project("p2")];
+        data.project_order = vec!["p1".to_string(), "p2".to_string()];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        let mut fm = FocusManager::new();
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.set_focused_terminal(&mut fm, "p1".to_string(), vec![], cx);
+            ws.toggle_project_overview_visibility(&mut fm, WindowId::Main, "p2", cx);
+        });
+
+        let state = fm.focused_terminal_state().expect("focus should remain");
+        assert_eq!(state.project_id, "p1");
+    }
+
+    #[gpui::test]
+    fn test_add_terminal_gpui(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        data.projects = vec![make_project("p1")];
+        data.project_order = vec!["p1".to_string()];
+        let workspace = cx.new(|_cx| Workspace::new(data));
+
+        workspace.update(cx, |ws: &mut Workspace, cx| {
+            ws.add_terminal(&mut FocusManager::new(), "p1", cx);
+        });
+
+        workspace.read_with(cx, |ws: &Workspace, _cx| {
+            let layout = ws.project("p1").unwrap().layout.as_ref().unwrap();
+            match layout {
+                LayoutNode::Split { children, .. } => {
+                    assert_eq!(children.len(), 2);
+                }
+                _ => panic!("Expected split after add_terminal"),
+            }
+        });
+    }
+}

@@ -1,0 +1,107 @@
+# =============================================================================
+# Rust & Build Artifacts
+# =============================================================================
+/target/
+*.rs.bk
+*.profraw
+*.profdata
+dhat-heap.json
+heaptrack.*
+
+# =============================================================================
+# IDE & Editor Configuration
+# =============================================================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+*.bak
+*.orig
+*.rej
+.directory
+*.sublime-workspace
+*.sublime-project
+
+# =============================================================================
+# Operating System Files
+# =============================================================================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+[eE]hthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# =============================================================================
+# Local Runtime, Logs & Temporary Files
+# =============================================================================
+*.log
+*.local.json
+settings.local.json
+sweep.timestamp
+.vault_key
+*.pem
+*.key
+*.db
+*.sqlite
+*.sqlite3
+
+# =============================================================================
+# Distribution & Packaging Outputs
+# =============================================================================
+dist/
+build/
+*.app
+*.dmg
+*.deb
+*.rpm
+
+# =============================================================================
+# AI Assistants, Private Toolings & Design Plans
+# =============================================================================
+.claude/
+.claude.json
+.codebuddy/
+.cursor/
+.cursorrules
+.windsurf/
+.aider/
+.clinerules
+.codex/
+.copilot/
+.opencode/
+.augment/
+.supermaven/
+.tabnine/
+.omo/
+.codegraph
+.mimocode/
+.gemini/
+.agent/
+.chat/
+.anthropic/
+.openai/
+docs/
+plans/
+rules/
+skills/
+AGENTS.md
+CLAUDE.md
+MEMORY.md
+
+# =============================================================================
+# Agent Loop Runtime Artifacts
+# =============================================================================
+.ralph-tui/
+.ralph-stop
+.ralph-steer
+.ralph-ci-failed
+
+# Python bytecode & cache
+__pycache__/
+*.py[cod]
+*$py.class

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- 1. 深色钛空背景渐变 -->
+    <linearGradient id="darkBgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#1E293B;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#0F172A;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 2. 三阶色相偏移电光蓝渐变 -->
+    <linearGradient id="masterBlueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#38BDF8;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#2563EB;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1E1B4B;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 3. 暗夜适配信钛银渐变 -->
+    <linearGradient id="masterDarkSilverGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#E2E8F0;stop-opacity:1" />
+      <stop offset="60%" style="stop-color:#94A3B8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#475569;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 4. 悬浮提亮倒三角渐变 -->
+    <linearGradient id="floatingTopBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#60A5FA;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#3B82F6;stop-opacity:1" />
+    </linearGradient>
+
+    <!-- 5. 缝隙硬编码矢量阴影渐变 -->
+    <linearGradient id="aoShadowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#020617;stop-opacity:0.6" />
+      <stop offset="100%" style="stop-color:#020617;stop-opacity:0.0" />
+    </linearGradient>
+  </defs>
+
+  <!-- ==================== 1. 深色应用图标背景底板 ==================== -->
+  <rect x="100" y="100" width="824" height="824" rx="224" ry="224" fill="url(#darkBgGrad)" />
+  
+  <!-- 暗夜质感外边框 -->
+  <rect x="100" y="100" width="824" height="824" rx="224" ry="224" 
+        fill="none" 
+        stroke="#334155" 
+        stroke-width="2" />
+
+  <!-- ==================== 2. 图形组件 ==================== -->
+  <g id="GrandMasterIconComponents">
+
+    <!-- A. 右侧银色 V 面 -->
+    <path d="M 618,428 L 768,428 Q 783,428 776,441 L 614,749 Q 607,758 594,758 L 442,758 Q 427,758 434,747 L 596,439 Q 603,428 618,428 Z" 
+          fill="url(#masterDarkSilverGrad)" 
+          stroke="#334155" 
+          stroke-width="1" />
+
+    <!-- B. 缝隙 AO 矢量阴影层 -->
+    <path d="M 442,758 L 415,745 L 180,285 L 205,278 L 330,278 L 570,745 Z" 
+          fill="url(#aoShadowGrad)" />
+
+    <!-- C. 左侧蓝色 V 面 (主体) -->
+    <path d="M 196,278 L 315,278 Q 330,278 337,289 L 574,747 Q 581,758 567,758 L 442,758 Q 427,758 420,747 L 183,289 Q 176,278 196,278 Z" 
+          fill="url(#masterBlueGrad)" />
+
+    <!-- D. 左侧 V 面内部 1px 极光斜线高光 (保留) -->
+    <path d="M 194,281 L 431,749" 
+          fill="none" 
+          stroke="#FFFFFF" 
+          stroke-width="1.2" 
+          stroke-linecap="round" 
+          opacity="0.4" />
+
+    <!-- E. 顶部倒三角形 -->
+    <path d="M 718,278 L 848,278 Q 863,278 856,290 L 801,401 Q 791,413 781,401 L 710,290 Q 703,278 718,278 Z" 
+          fill="url(#floatingTopBlue)" />
+
+  </g>
+</svg>

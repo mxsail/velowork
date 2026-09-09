@@ -1,0 +1,31 @@
+[package]
+name = "velowork-app-core"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+velowork-core = { path = "../velowork-core" }
+velowork-terminal = { path = "../velowork-terminal" }
+velowork-workspace = { path = "../velowork-workspace" }
+velowork-theme = { path = "../velowork-theme" }
+velowork-i18n = { path = "../velowork-i18n" }
+
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+
+# Terminal emulation (grid/index types used by action execution)
+alacritty_terminal = "0.25"
+
+# Async timers / blocking IO offload (settings debounce, action handlers)
+smol = "2.0"
+
+# Serialization / utilities
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+uuid = { version = "1.10", features = ["v4"] }
+base64 = "0.22"
+parking_lot = "0.12"
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", features = ["test-support"] }

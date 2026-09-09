@@ -1,0 +1,70 @@
+[package]
+name = "velowork-app"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+# Shared core types + lower-level crates the UI/app layer builds on.
+velowork-core = { path = "../velowork-core" }
+velowork-state = { path = "../velowork-state" }
+velowork-monitor = { path = "../velowork-monitor" }
+velowork-app-core = { path = "../velowork-app-core" }
+velowork-workspace = { path = "../velowork-workspace" }
+velowork-terminal = { path = "../velowork-terminal" }
+velowork-ui = { path = "../velowork-ui" }
+velowork-theme = { path = "../velowork-theme" }
+velowork-markdown = { path = "../velowork-markdown" }
+velowork-i18n = { path = "../velowork-i18n" }
+velowork-ai = { path = "../velowork-ai" }
+
+# View crates
+velowork-views-terminal = { path = "../velowork-views-terminal" }
+
+# Extension system
+velowork-extensions = { path = "../velowork-extensions" }
+velowork-updater = { path = "../velowork-updater" }
+
+# UI Framework (from Zed repo)
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+
+# UI Components
+
+# Async / concurrency
+smol = "2.0"
+futures = "0.3"
+async-channel = "2.3"
+parking_lot = "0.12"
+tokio = { version = "1", features = ["sync", "rt", "rt-multi-thread"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# System info (status bar memory/cpu readout)
+sysinfo = "0.33"
+
+# Native desktop notifications (OSC 9 / OSC 777 terminal alerts).
+notify-rust = "4"
+
+# Utilities
+uuid = { version = "1.10", features = ["v4"] }
+regex = "1.10"
+dirs = "5.0"
+chrono = "0.4"
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+# Standalone RUST_LOG-syntax filter (the same crate env_logger 0.11 uses) for
+# the runtime-reloadable capture filter behind the in-app log console.
+env_filter = "0.1"
+# Lock-free swap of the capture filter at runtime (no logging-path lock).
+arc-swap = "1"
+anyhow = "1.0"
+
+# Time handling (cross-platform, thread-safe)
+time = { version = "0.3", features = ["local-offset"] }
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", features = ["test-support"] }

@@ -1,0 +1,27 @@
+#![recursion_limit = "512"]
+#![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
+
+pub mod access_history;
+pub mod actions;
+pub mod focus;
+pub mod importer;
+pub mod lifecycle;
+pub mod persistence;
+pub mod repositories;
+pub mod request_broker;
+pub mod requests;
+pub mod secure_storage;
+pub mod security;
+pub mod dock_controller;
+pub mod folder_path;
+pub mod settings;
+pub mod state;
+pub mod ssh_sessions;
+pub mod services;
+pub mod tunnels;
+pub mod quick_commands;
+pub mod stores;
+pub mod sync;
+pub mod toast;
+pub mod visibility;
+pub mod project_export;

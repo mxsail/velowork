@@ -1,0 +1,24 @@
+[package]
+name = "velowork-ai"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+# 基础类型与下游 crate。
+velowork-core = { path = "../velowork-core" }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "blocking"] }
+velowork-workspace = { path = "../velowork-workspace" }
+velowork-terminal = { path = "../velowork-terminal" }
+velowork-i18n = { path = "../velowork-i18n" }
+
+# UI Framework（仅用于 Entity<...> / App 类型，不承载渲染逻辑）。
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+
+# 序列化与正则
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+regex = "1.10"
+
+[dev-dependencies]
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", features = ["test-support"] }

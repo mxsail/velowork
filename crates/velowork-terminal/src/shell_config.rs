@@ -1,0 +1,362 @@
+//! Shell configuration for Windows and cross-platform terminal support
+//!
+//! Provides shell type detection and command building for different shells:
+//! - cmd.exe (Command Prompt)
+//! - powershell.exe (Windows PowerShell)
+//! - pwsh.exe (PowerShell Core)
+//! - WSL (Windows Subsystem for Linux)
+//! - Custom shell paths
+
+use portable_pty::CommandBuilder;
+
+// `ShellType` itself is pure data and lives in `velowork-core` so data-only crates
+// can use it without the PTY stack. Re-exported here so existing
+// `velowork_terminal::shell_config::ShellType` paths keep working.
+pub use velowork_core::shell::ShellType;
+
+/// Build a spawnable `CommandBuilder` from a [`ShellType`].
+///
+/// This is the behavioral half of `ShellType` — kept in `velowork-terminal`
+/// because it depends on `portable_pty`. Implemented as an extension trait so
+/// call sites keep the ergonomic `shell.build_command(cwd)` form.
+pub trait ShellCommandExt {
+    fn build_command(&self, cwd: &str) -> CommandBuilder;
+}
+
+impl ShellCommandExt for ShellType {
+    /// Build a CommandBuilder for this shell type
+    fn build_command(&self, cwd: &str) -> CommandBuilder {
+        match self {
+            ShellType::Default => {
+                let mut cmd = CommandBuilder::new_default_prog();
+                cmd.cwd(cwd);
+                cmd
+            }
+            #[cfg(windows)]
+            ShellType::Cmd => {
+                let mut cmd = CommandBuilder::new("cmd.exe");
+                cmd.cwd(cwd);
+                cmd
+            }
+            #[cfg(windows)]
+            ShellType::PowerShell { core } => {
+                let exe = if *core { "pwsh.exe" } else { "powershell.exe" };
+                let mut cmd = CommandBuilder::new(exe);
+                // -NoLogo reduces startup noise
+                cmd.arg("-NoLogo");
+                cmd.cwd(cwd);
+                cmd
+            }
+            #[cfg(windows)]
+            ShellType::Wsl { distro } => {
+                let mut cmd = CommandBuilder::new("wsl.exe");
+                if let Some(d) = distro {
+                    cmd.arg("-d");
+                    cmd.arg(d);
+                }
+                // Convert Windows path to WSL path
+                let wsl_path = windows_path_to_wsl(cwd);
+                cmd.arg("--cd");
+                cmd.arg(&wsl_path);
+                cmd
+            }
+            ShellType::Custom { path, args } => {
+                let mut cmd = CommandBuilder::new(path);
+                for arg in args {
+                    cmd.arg(arg);
+                }
+                cmd.cwd(cwd);
+                cmd
+            }
+            ShellType::Welcome => {
+                let mut cmd = CommandBuilder::new_default_prog();
+                cmd.cwd(cwd);
+                cmd
+            }
+        }
+    }
+}
+
+/// Information about an available shell
+#[derive(Clone, Debug)]
+pub struct AvailableShell {
+    pub shell_type: ShellType,
+    pub name: String,
+    pub available: bool,
+}
+
+/// Detect all available shells on the system
+pub fn available_shells() -> Vec<AvailableShell> {
+    let mut shells = vec![AvailableShell {
+        shell_type: ShellType::Default,
+        name: "System Default".to_string(),
+        available: true,
+    }];
+
+    #[cfg(windows)]
+    {
+        // Command Prompt is always available on Windows
+        shells.push(AvailableShell {
+            shell_type: ShellType::Cmd,
+            name: "Command Prompt".to_string(),
+            available: true,
+        });
+
+        // Windows PowerShell is always available on modern Windows
+        shells.push(AvailableShell {
+            shell_type: ShellType::PowerShell { core: false },
+            name: "Windows PowerShell".to_string(),
+            available: true,
+        });
+
+        // Check for PowerShell Core (pwsh.exe)
+        let pwsh_available = is_pwsh_available();
+        shells.push(AvailableShell {
+            shell_type: ShellType::PowerShell { core: true },
+            name: "PowerShell Core".to_string(),
+            available: pwsh_available,
+        });
+
+        // Check for WSL
+        let wsl_distros = detect_wsl_distros();
+        if !wsl_distros.is_empty() {
+            // Add default WSL option
+            shells.push(AvailableShell {
+                shell_type: ShellType::Wsl { distro: None },
+                name: "WSL (Default)".to_string(),
+                available: true,
+            });
+
+            // Add each specific distro
+            for distro in wsl_distros {
+                shells.push(AvailableShell {
+                    shell_type: ShellType::Wsl {
+                        distro: Some(distro.clone()),
+                    },
+                    name: format!("WSL ({})", distro),
+                    available: true,
+                });
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        // On Unix, check for common shells
+        let unix_shells = [
+            ("/bin/bash", "Bash", "Bourne Again Shell"),
+            ("/bin/zsh", "Zsh", "Z Shell"),
+            ("/bin/fish", "Fish", "Friendly Interactive Shell"),
+            ("/bin/sh", "sh", "Bourne Shell"),
+        ];
+
+        for (path, name, _desc) in unix_shells {
+            if std::path::Path::new(path).exists() {
+                shells.push(AvailableShell {
+                    shell_type: ShellType::Custom {
+                        path: path.to_string(),
+                        args: vec![],
+                    },
+                    name: name.to_string(),
+                    available: true,
+                });
+            }
+        }
+    }
+
+    shells
+}
+
+/// Check if PowerShell Core (pwsh.exe) is available
+#[cfg(windows)]
+fn is_pwsh_available() -> bool {
+    crate::process::safe_output(crate::process::command("pwsh.exe").arg("-Version"))
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Detect installed WSL distributions
+#[cfg(windows)]
+pub fn detect_wsl_distros() -> Vec<String> {
+    let output = match crate::process::safe_output(
+        crate::process::command("wsl.exe").args(["-l", "-q"]),
+    ) {
+        Ok(o) if o.status.success() => o,
+        _ => return Vec::new(),
+    };
+
+    // WSL outputs UTF-16LE encoded text
+    let stdout = &output.stdout;
+    let mut distros = Vec::new();
+
+    // Parse UTF-16LE output
+    if stdout.len() >= 2 {
+        let utf16_chars: Vec<u16> = stdout
+            .chunks(2)
+            .filter_map(|chunk| {
+                if chunk.len() == 2 {
+                    Some(u16::from_le_bytes([chunk[0], chunk[1]]))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if let Ok(text) = String::from_utf16(&utf16_chars) {
+            for line in text.lines() {
+                let trimmed = line.trim().trim_matches('\0');
+                if !trimmed.is_empty() {
+                    distros.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+
+    distros
+}
+
+/// Parse a WSL UNC path into (distro_name, linux_path).
+///
+/// Recognized formats:
+/// - `\\wsl.localhost\Distro\path` or `\\wsl$\Distro\path` (backslash)
+/// - `//wsl.localhost/Distro/path` or `//wsl$/Distro/path` (forward-slash)
+#[cfg(windows)]
+pub fn parse_wsl_unc_path(path: &str) -> Option<(String, String)> {
+    let normalized = path.replace('\\', "/");
+
+    // Must start with // (UNC prefix after normalization)
+    let rest = normalized.strip_prefix("//")?;
+
+    // Check for wsl.localhost/ or wsl$/
+    let after_host = rest.strip_prefix("wsl.localhost/")
+        .or_else(|| rest.strip_prefix("wsl$/"))?;
+
+    // Next segment is the distro name
+    let (distro, linux_path) = match after_host.find('/') {
+        Some(idx) => (&after_host[..idx], &after_host[idx..]),
+        None => (after_host, "/"),
+    };
+
+    if distro.is_empty() {
+        return None;
+    }
+
+    Some((distro.to_string(), linux_path.to_string()))
+}
+
+/// Convert a Windows path to WSL path format
+/// Example: C:\Users\name -> /mnt/c/Users/name
+/// Also handles WSL UNC paths: \\wsl.localhost\Ubuntu\home\user -> /home/user
+#[cfg(windows)]
+pub fn windows_path_to_wsl(windows_path: &str) -> String {
+    // Check for WSL UNC paths first
+    if let Some((_distro, linux_path)) = parse_wsl_unc_path(windows_path) {
+        return linux_path;
+    }
+
+    let path = windows_path.replace('\\', "/");
+
+    // Check for drive letter (e.g., C:/)
+    if path.len() >= 2 && path.chars().nth(1) == Some(':') {
+        if let Some(drive) = path.chars().next() {
+            let rest = &path[2..];
+            format!("/mnt/{}{}", drive.to_ascii_lowercase(), rest)
+        } else {
+            // Fallback: should not happen if len >= 2, but return path as-is
+            path
+        }
+    } else {
+        // Relative path or already Unix-style
+        path
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(windows)]
+    fn test_windows_path_to_wsl() {
+        assert_eq!(
+            windows_path_to_wsl("C:\\Users\\test"),
+            "/mnt/c/Users/test"
+        );
+        assert_eq!(
+            windows_path_to_wsl("D:\\Projects\\app"),
+            "/mnt/d/Projects/app"
+        );
+        assert_eq!(windows_path_to_wsl("/already/unix"), "/already/unix");
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_wsl_unc_path_conversion() {
+        // Backslash UNC paths
+        assert_eq!(
+            windows_path_to_wsl("\\\\wsl.localhost\\Ubuntu\\home\\user\\project"),
+            "/home/user/project"
+        );
+        assert_eq!(
+            windows_path_to_wsl("\\\\wsl$\\Ubuntu\\home\\user"),
+            "/home/user"
+        );
+        // Forward-slash UNC paths
+        assert_eq!(
+            windows_path_to_wsl("//wsl.localhost/Debian/tmp"),
+            "/tmp"
+        );
+        assert_eq!(
+            windows_path_to_wsl("//wsl$/Arch/etc/config"),
+            "/etc/config"
+        );
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn test_parse_wsl_unc_path() {
+        // wsl.localhost backslash
+        let (distro, path) = parse_wsl_unc_path("\\\\wsl.localhost\\Ubuntu\\home\\user").unwrap();
+        assert_eq!(distro, "Ubuntu");
+        assert_eq!(path, "/home/user");
+
+        // wsl$ backslash
+        let (distro, path) = parse_wsl_unc_path("\\\\wsl$\\Debian\\tmp\\file").unwrap();
+        assert_eq!(distro, "Debian");
+        assert_eq!(path, "/tmp/file");
+
+        // Forward-slash variant
+        let (distro, path) = parse_wsl_unc_path("//wsl.localhost/Arch/etc").unwrap();
+        assert_eq!(distro, "Arch");
+        assert_eq!(path, "/etc");
+
+        // Distro only (no sub-path)
+        let (distro, path) = parse_wsl_unc_path("\\\\wsl.localhost\\Ubuntu").unwrap();
+        assert_eq!(distro, "Ubuntu");
+        assert_eq!(path, "/");
+
+        // Not a WSL UNC path
+        assert!(parse_wsl_unc_path("C:\\Users\\test").is_none());
+        assert!(parse_wsl_unc_path("/regular/path").is_none());
+    }
+
+    #[test]
+    fn to_command_string_custom_no_args() {
+        let shell = ShellType::Custom {
+            path: "/usr/bin/fish".to_string(),
+            args: vec![],
+        };
+        assert_eq!(shell.to_command_string(), "/usr/bin/fish");
+    }
+
+    #[test]
+    fn test_shell_type_display_name() {
+        assert_eq!(ShellType::Default.display_name(), "System Default");
+
+        let custom = ShellType::Custom {
+            path: "/bin/bash".to_string(),
+            args: vec![],
+        };
+        assert_eq!(custom.display_name(), "bash");
+    }
+}

@@ -1,0 +1,227 @@
+use crate::theme::theme;
+use crate::views::layout::navigation::PaneMap;
+use crate::workspace::focus::FocusManager;
+use crate::workspace::state::Workspace;
+use crate::ui::tokens::ui_text;
+use gpui::*;
+use velowork_ui::design::semantic::SemanticPalette;
+use velowork_ui::tokens::{SPACE_XL, SPACE_MD, RADIUS_LG, RADIUS_CARD};
+
+use super::WindowView;
+
+/// Labels for pane indices: 0-9 then a-z (up to 36 panes).
+const PANE_LABELS: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
+
+/// Map a key string to a pane index.
+/// Accepts "0"-"9" and "a"-"z".
+fn key_to_pane_index(key: &str) -> Option<usize> {
+    if key.len() != 1 {
+        return None;
+    }
+    let ch = key.as_bytes()[0];
+    PANE_LABELS.iter().position(|&l| l == ch)
+}
+
+/// Get the display label for a pane index.
+fn pane_label(index: usize) -> String {
+    PANE_LABELS
+        .get(index)
+        .map(|&b| (b as char).to_uppercase().to_string())
+        .unwrap_or_default()
+}
+
+/// Pane switcher overlay entity - shows labelled badges on each visible pane.
+///
+/// Rendered as a separate entity so it gets its own focus path,
+/// preventing key events from reaching the terminal panes underneath.
+pub(super) struct PaneSwitcher {
+    focus_handle: FocusHandle,
+    workspace: Entity<Workspace>,
+    focus_manager: Entity<FocusManager>,
+    /// Pane info: (project_id, layout_path, bounds, focus_handle) sorted by reading order
+    panes: Vec<(String, Vec<usize>, Bounds<Pixels>, Option<FocusHandle>)>,
+}
+
+impl PaneSwitcher {
+    pub fn new(workspace: Entity<Workspace>, focus_manager: Entity<FocusManager>, pane_map: &PaneMap, cx: &mut Context<Self>) -> Self {
+        let panes = pane_map
+            .sorted_by_reading_order()
+            .into_iter()
+            .take(PANE_LABELS.len())
+            .map(|p| (p.project_id.clone(), p.layout_path.clone(), p.bounds, p.focus_handle.clone()))
+            .collect();
+
+        Self {
+            focus_handle: cx.focus_handle(),
+            workspace,
+            focus_manager,
+            panes,
+        }
+    }
+}
+
+impl Render for PaneSwitcher {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx);
+        let p = SemanticPalette::from_theme(&t);
+        let badge_bg = p.surface_accent;
+        let badge_fg = p.text_on_accent;
+
+        // Focus on every render (same pattern as CommandPalette)
+        if !self.focus_handle.is_focused(window) {
+            window.focus(&self.focus_handle, cx);
+        }
+
+        // Build anchored overlays for each pane using window coordinates
+        let mut overlay_elements: Vec<AnyElement> = Vec::new();
+        for (i, (project_id, layout_path, bounds, focus_handle)) in self.panes.iter().enumerate() {
+            let label = pane_label(i);
+            let pid = project_id.clone();
+            let lp = layout_path.clone();
+            let fh = focus_handle.clone();
+            let workspace = self.workspace.clone();
+            let focus_manager = self.focus_manager.clone();
+
+            overlay_elements.push(
+                deferred(
+                    anchored()
+                        .position(bounds.origin)
+                        .child(
+                            div()
+                                .w(bounds.size.width)
+                                .h(bounds.size.height)
+                                .rounded(RADIUS_CARD)
+                                .overflow_hidden()
+                                .bg(hsla(0.0, 0.0, 0.0, 0.5))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .cursor(CursorStyle::PointingHand)
+                                .on_mouse_down(
+                                    MouseButton::Left,
+                                    cx.listener(move |_this, _event: &MouseDownEvent, window, cx| {
+                                        let pid = pid.clone();
+                                        let lp = lp.clone();
+                                        let fh = fh.clone();
+                                        focus_manager.update(cx, |fm, cx| {
+                                            workspace.update(cx, |ws, cx| {
+                                                ws.set_focused_terminal(fm, pid, lp, cx);
+                                            });
+                                            cx.notify();
+                                        });
+                                        if let Some(ref fh) = fh {
+                                            window.focus(fh, cx);
+                                        }
+                                        cx.emit(PaneSwitcherEvent::Select);
+                                    }),
+                                )
+                                .child(
+                                    div()
+                                        .px(SPACE_XL)
+                                        .py(SPACE_MD)
+                                        .rounded(RADIUS_LG)
+                                        .bg(badge_bg)
+                                        .shadow_lg()
+                                        .child(
+                                            div()
+                                                .text_size(ui_text(32.0, cx))
+                                                .font_weight(FontWeight::BOLD)
+                                                .text_color(badge_fg)
+                                                .child(label),
+                                        ),
+                                ),
+                        ),
+                )
+                .into_any_element(),
+            );
+        }
+
+        div()
+            .id("pane-switcher-overlay")
+            .occlude()
+            .track_focus(&self.focus_handle)
+            .absolute()
+            .inset_0()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                let key = &event.keystroke.key;
+
+                // Try to map key to pane index (0-9, a-z)
+                if let Some(index) = key_to_pane_index(key)
+                    && let Some((project_id, layout_path, _, focus_handle)) = this.panes.get(index) {
+                        let pid = project_id.clone();
+                        let lp = layout_path.clone();
+                        let fh = focus_handle.clone();
+                        let workspace = this.workspace.clone();
+                        this.focus_manager.update(cx, |fm, cx| {
+                            workspace.update(cx, |ws, cx| {
+                                ws.set_focused_terminal(fm, pid, lp, cx);
+                            });
+                            cx.notify();
+                        });
+                        if let Some(ref fh) = fh {
+                            window.focus(fh, cx);
+                        }
+                        cx.emit(PaneSwitcherEvent::Select);
+                        return;
+                    }
+
+                // Any other key deactivates without switching
+                cx.emit(PaneSwitcherEvent::Cancel);
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_this, _: &MouseDownEvent, _window, cx| {
+                    cx.emit(PaneSwitcherEvent::Cancel);
+                }),
+            )
+            .children(overlay_elements)
+    }
+}
+
+pub(super) enum PaneSwitcherEvent {
+    Select,
+    Cancel,
+}
+
+impl EventEmitter<PaneSwitcherEvent> for PaneSwitcher {}
+
+// === WindowView integration ===
+
+impl WindowView {
+    /// Create and show the pane switcher overlay entity.
+    pub(super) fn show_pane_switcher(&mut self, pane_map: PaneMap, cx: &mut Context<Self>) {
+        // Clear terminal focus so TerminalPane doesn't steal focus from the overlay
+        let workspace = self.workspace.clone();
+        self.focus_manager.update(cx, |fm, cx| {
+            workspace.update(cx, |ws, cx| ws.clear_focused_terminal(fm, cx));
+            cx.notify();
+        });
+
+        let workspace = self.workspace.clone();
+        let focus_manager = self.focus_manager.clone();
+        let entity = cx.new(|cx| PaneSwitcher::new(workspace, focus_manager, &pane_map, cx));
+
+        cx.subscribe(&entity, |this, _, event: &PaneSwitcherEvent, cx| {
+            match event {
+                PaneSwitcherEvent::Select => {
+                    this.pane_switch_active = false;
+                    this.pane_switcher_entity = None;
+                    cx.notify();
+                }
+                PaneSwitcherEvent::Cancel => {
+                    this.pane_switch_active = false;
+                    this.pane_switcher_entity = None;
+                    let workspace = this.workspace.clone();
+                    this.focus_manager.update(cx, |fm, cx| {
+                        workspace.update(cx, |ws, cx| ws.restore_focused_terminal(fm, cx));
+                        cx.notify();
+                    });
+                    cx.notify();
+                }
+            }
+        })
+        .detach();
+
+        self.pane_switcher_entity = Some(entity);
+    }
+}

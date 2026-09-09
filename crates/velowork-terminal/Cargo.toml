@@ -1,0 +1,55 @@
+[package]
+name = "velowork-terminal"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+# GPUI (for `GlobalTunnelEngine` global handle).
+gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+# Shared core types
+velowork-core = { path = "../velowork-core" }
+velowork-state = { path = "../velowork-state" }
+velowork-monitor = { path = "../velowork-monitor" }
+
+# Terminal Emulation
+alacritty_terminal = "0.25"
+
+# PTY Management
+portable-pty = "0.9"
+
+# Async & Threading
+async-channel = "2.3"
+parking_lot = "0.12"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "io-util"] }
+russh = "0.62.2"
+tokio-socks = "0.5"
+ssh-key = { version = "0.7.0-rc.11", features = ["ed25519", "p256", "p384", "p521", "encryption", "ppk", "sha1"] }
+ssh-encoding = "0.3"
+async-trait = "0.1"
+serialport = "4.7"
+tokio-serial = "5.4"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# System
+libc = "0.2"
+
+# Utilities
+uuid = { version = "1.10", features = ["v4"] }
+log = "0.4"
+anyhow = "1.0"
+regex = "1.10"
+# Decoding base64 payloads in the OSC 99 (kitty) notification protocol.
+base64 = "0.22"
+encoding_rs = "0.8"
+
+# macOS process introspection via libproc syscalls, replacing fork+exec of
+# `pgrep` / `lsof` (slow on macOS). Linux uses /proc directly instead.
+[target.'cfg(target_os = "macos")'.dependencies]
+libproc = "0.14"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_UI_WindowsAndMessaging", "Win32_System_Memory", "Win32_Foundation", "Win32_Security"] }

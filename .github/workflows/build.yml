@@ -1,0 +1,233 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  RUSTUP_MAX_RETRIES: 10
+
+jobs:
+  # Runs on every push: Linux check + tests
+  check:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93"
+          components: clippy
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: x86_64-unknown-linux-gnu
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libegl1-mesa-dev \
+            libssl-dev \
+            libfontconfig-dev \
+            pkg-config \
+            cmake
+
+      - name: Check compilation
+        run: cargo check --release
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test
+
+  # Full multi-platform build: tags + manual trigger
+  build:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: velowork-linux-x64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: velowork-macos-arm64
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: velowork-macos-x64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: velowork-windows-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.93"
+          targets: ${{ matrix.target }}
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.target }}
+          save-if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libwayland-dev \
+            libvulkan-dev \
+            libegl1-mesa-dev \
+            libssl-dev \
+            libfontconfig-dev \
+            pkg-config \
+            cmake
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare artifact (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/icons
+          cp target/${{ matrix.target }}/release/velowork dist/
+          chmod +x dist/velowork
+          # Bundle icons for Linux installation
+          cp assets/app-icon-16.png assets/app-icon-32.png assets/app-icon-48.png \
+             assets/app-icon-64.png assets/app-icon-128.png assets/app-icon-256.png \
+             assets/app-icon-512.png dist/icons/
+          cp velowork.desktop dist/
+
+      - name: Create macOS app bundle
+        if: runner.os == 'macOS'
+        run: |
+          chmod +x scripts/bundle-macos.sh
+          ./scripts/bundle-macos.sh --target ${{ matrix.target }} --skip-build --dmg
+
+      - name: Prepare artifact (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir dist
+          copy target\${{ matrix.target }}\release\velowork.exe dist\
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          retention-days: 7
+
+  # Create release when a tag is pushed
+  release:
+    needs: [build]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare release assets
+        run: |
+          cd artifacts
+          for dir in */; do
+            name="${dir%/}"
+            if [[ "$name" == *windows* ]]; then
+              zip -r "../${name}.zip" "$dir"
+            elif [[ "$name" == *macos* ]]; then
+              # macOS: DMG is already created, just move it
+              mv "$dir"/*.dmg "../" 2>/dev/null || true
+              # Also create a zip of the .app for those who prefer it
+              cd "$dir" && zip -r "../../${name}.zip" "Velowork.app" && cd ..
+            else
+              tar -czvf "../${name}.tar.gz" -C "$dir" .
+            fi
+          done
+
+      - name: Generate ContemberBot token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.CONTEMBER_BOT_APP_ID }}
+          private-key: ${{ secrets.CONTEMBER_BOT_APP_PRIVATE_KEY }}
+          owner: mxsail
+          repositories: homebrew-velowork
+
+      - name: Update Homebrew tap
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+
+          # Calculate SHA256 from local zip files
+          ARM64_SHA=$(sha256sum velowork-macos-arm64.zip | cut -d' ' -f1)
+          X64_SHA=$(sha256sum velowork-macos-x64.zip | cut -d' ' -f1)
+
+          # Clone the tap repo
+          git clone https://x-access-token:${GH_TOKEN}@github.com/mxsail/homebrew-velowork.git /tmp/homebrew-velowork
+
+          # Update cask
+          sed -i "s/version \".*\"/version \"${VERSION}\"/" /tmp/homebrew-velowork/Casks/velowork.rb
+          sed -i "s/sha256 arm:   \".*\",/sha256 arm:   \"${ARM64_SHA}\",/" /tmp/homebrew-velowork/Casks/velowork.rb
+          sed -i "s/         intel: \".*\"/         intel: \"${X64_SHA}\"/" /tmp/homebrew-velowork/Casks/velowork.rb
+
+          cat /tmp/homebrew-velowork/Casks/velowork.rb
+
+          # Commit and push
+          cd /tmp/homebrew-velowork
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/velowork.rb
+          git commit -m "chore: update cask to v${VERSION}"
+          git push origin main
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
+            *.zip
+            *.dmg
+            *.apk
+          generate_release_notes: true
