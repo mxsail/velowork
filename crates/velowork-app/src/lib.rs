@@ -30,7 +30,6 @@ pub mod keybindings;
 pub mod logging;
 /// 后台自动同步引擎（定时 + 配置变更触发 WebDAV 双向同步）。
 pub mod sync_engine;
-#[cfg(target_os = "linux")]
 pub mod simple_root;
 pub mod platform;
 pub mod soft_close;

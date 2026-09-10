@@ -28,12 +28,14 @@ impl Default for BellRuntimeState {
 /// 触发跨平台原生系统蜂鸣/提示音，安全降级。
 pub fn play_system_beep() {
     #[cfg(target_os = "windows")]
-    unsafe {
+    {
         #[link(name = "user32")]
-        extern "system" {
+        unsafe extern "system" {
             fn MessageBeep(uType: u32) -> i32;
         }
-        MessageBeep(0);
+        unsafe {
+            MessageBeep(0);
+        }
     }
     #[cfg(target_os = "macos")]
     {

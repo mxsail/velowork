@@ -7,6 +7,7 @@
 //! - X11 connection setup packet inspection and rewriting.
 //! - Bidirectional asynchronous bridging between russh X11 channels and local X11 display server sockets.
 
+#[allow(unused_imports)]
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};

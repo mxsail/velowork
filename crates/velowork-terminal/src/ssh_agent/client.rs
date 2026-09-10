@@ -66,8 +66,6 @@ pub enum AgentStream {
     #[cfg(unix)]
     Unix(tokio::net::UnixStream),
     #[cfg(windows)]
-    Unix(tokio::net::UnixStream),
-    #[cfg(windows)]
     NamedPipe(tokio::net::windows::named_pipe::NamedPipeClient),
     #[cfg(windows)]
     Pageant,
@@ -78,8 +76,6 @@ impl AgentStream {
     pub async fn read_framed_message(&mut self) -> Result<Vec<u8>, AgentClientError> {
         match self {
             #[cfg(unix)]
-            Self::Unix(s) => read_stream_framed(s).await,
-            #[cfg(windows)]
             Self::Unix(s) => read_stream_framed(s).await,
             #[cfg(windows)]
             Self::NamedPipe(p) => read_stream_framed(p).await,
@@ -94,12 +90,6 @@ impl AgentStream {
     pub async fn write_framed_message(&mut self, framed: &[u8]) -> Result<(), AgentClientError> {
         match self {
             #[cfg(unix)]
-            Self::Unix(s) => {
-                s.write_all(framed).await?;
-                s.flush().await?;
-                Ok(())
-            }
-            #[cfg(windows)]
             Self::Unix(s) => {
                 s.write_all(framed).await?;
                 s.flush().await?;
@@ -122,12 +112,6 @@ impl AgentStream {
     pub async fn exchange_raw(&mut self, request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
         match self {
             #[cfg(unix)]
-            Self::Unix(s) => {
-                s.write_all(request_frame).await?;
-                s.flush().await?;
-                read_stream_framed(s).await
-            }
-            #[cfg(windows)]
             Self::Unix(s) => {
                 s.write_all(request_frame).await?;
                 s.flush().await?;
@@ -209,9 +193,19 @@ impl AgentClient {
         }
 
         // Try Unix domain socket
-        match tokio::net::UnixStream::connect(path).await {
-            Ok(stream) => Ok(AgentStream::Unix(stream)),
-            Err(err) => Err(AgentClientError::SocketNotFound(format!("{}: {}", path, err))),
+        #[cfg(unix)]
+        {
+            match tokio::net::UnixStream::connect(path).await {
+                Ok(stream) => Ok(AgentStream::Unix(stream)),
+                Err(err) => Err(AgentClientError::SocketNotFound(format!("{}: {}", path, err))),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            Err(AgentClientError::SocketNotFound(format!(
+                "{}: Unix domain socket not supported on this platform",
+                path
+            )))
         }
     }
 
@@ -284,12 +278,20 @@ const AGENT_COPYDATA_ID: usize = 0x804e50ba;
 const AGENT_MAX_MSGLEN: usize = 8192;
 
 #[cfg(windows)]
+#[repr(C)]
+struct COPYDATASTRUCT {
+    dwData: usize,
+    cbData: u32,
+    lpData: *mut std::ffi::c_void,
+}
+
+#[cfg(windows)]
 fn is_pageant_available() -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::FindWindowA;
     unsafe {
         let class_name = b"Pageant\0";
         let hwnd = FindWindowA(class_name.as_ptr(), class_name.as_ptr());
-        hwnd != 0
+        hwnd != std::ptr::null_mut()
     }
 }
 
@@ -306,9 +308,7 @@ fn pageant_exchange(request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
     use windows_sys::Win32::System::Memory::{
         CreateFileMappingA, MapViewOfFile, UnmapViewOfFile, FILE_MAP_ALL_ACCESS, PAGE_READWRITE,
     };
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        FindWindowA, SendMessageA, COPYDATASTRUCT, WM_COPYDATA,
-    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{FindWindowA, SendMessageA, WM_COPYDATA};
 
     if request_frame.len() > AGENT_MAX_MSGLEN {
         return Err(AgentClientError::PageantError("Request exceeds Pageant maximum message length".to_string()));
@@ -317,11 +317,11 @@ fn pageant_exchange(request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
     unsafe {
         let class_name = b"Pageant\0";
         let hwnd = FindWindowA(class_name.as_ptr(), class_name.as_ptr());
-        if hwnd == 0 {
+        if hwnd == null_mut() {
             return Err(AgentClientError::PageantError("Pageant window not found".to_string()));
         }
 
-        let map_name_str = format!("PageantRequest_{}_{}\0", std::process::id(), fastrand::u64(..));
+        let map_name_str = format!("PageantRequest_{}_{}\0", std::process::id(), uuid::Uuid::new_v4());
         let map_name = map_name_str.as_bytes();
 
         let h_map = CreateFileMappingA(
@@ -332,7 +332,7 @@ fn pageant_exchange(request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
             AGENT_MAX_MSGLEN as u32,
             map_name.as_ptr(),
         );
-        if h_map == 0 {
+        if h_map == null_mut() {
             return Err(AgentClientError::PageantError(format!(
                 "Failed to create file mapping: error {}",
                 GetLastError()
@@ -340,7 +340,7 @@ fn pageant_exchange(request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
         }
 
         let p_map = MapViewOfFile(h_map, FILE_MAP_ALL_ACCESS, 0, 0, AGENT_MAX_MSGLEN);
-        if p_map.is_null() {
+        if p_map.Value.is_null() {
             CloseHandle(h_map);
             return Err(AgentClientError::PageantError(format!(
                 "Failed to map view of file: error {}",
@@ -348,8 +348,10 @@ fn pageant_exchange(request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
             )));
         }
 
+        let p_buf = p_map.Value as *mut u8;
+
         // Copy request into mapped memory
-        std::ptr::copy_nonoverlapping(request_frame.as_ptr(), p_map as *mut u8, request_frame.len());
+        std::ptr::copy_nonoverlapping(request_frame.as_ptr(), p_buf, request_frame.len());
 
         let cds = COPYDATASTRUCT {
             dwData: AGENT_COPYDATA_ID,
@@ -366,7 +368,7 @@ fn pageant_exchange(request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
 
         // Read response: first 4 bytes are length
         let mut len_bytes = [0u8; 4];
-        std::ptr::copy_nonoverlapping(p_map as *const u8, len_bytes.as_mut_ptr(), 4);
+        std::ptr::copy_nonoverlapping(p_buf, len_bytes.as_mut_ptr(), 4);
         let resp_len = u32::from_be_bytes(len_bytes) as usize;
 
         if resp_len + 4 > AGENT_MAX_MSGLEN {
@@ -377,7 +379,7 @@ fn pageant_exchange(request_frame: &[u8]) -> Result<Vec<u8>, AgentClientError> {
 
         let mut body = vec![0u8; resp_len];
         std::ptr::copy_nonoverlapping(
-            (p_map as *const u8).add(4),
+            p_buf.add(4),
             body.as_mut_ptr(),
             resp_len,
         );
