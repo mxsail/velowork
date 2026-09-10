@@ -294,14 +294,47 @@ cargo check
 
 ---
 
-## 📄 License & Acknowledgments
+## 💡 Development Story & Authorship
 
-### License
+### Why Reinvent the Wheel?
+Throughout daily systems administration and development workflows, existing terminal and SSH client solutions consistently fell short of personal expectations:
+- **Aesthetic Mismatch with Native Desktops**: As a user working primarily across **KDE Plasma (Breeze theme)** and **Windows 11**, most existing terminal tools feel visually disconnected and clunky compared to the sleek aesthetic of modern desktop environments.
+- **Pseudo-Lightweight & Hidden Resource Bloat**: While several modern tools advertise themselves as "built with Rust," many are fundamentally wrappers around web technologies (Tauri / Webviews). Despite the marketing, prolonged usage with high-throughput log streams and multiple split panes inevitably leads to noticeable memory bloat and UI lag.
+- **Friction in Daily Workflows (Quick Commands / Snippets)**: In routine operations, many commands have fixed prefixes while arguments require dynamic inputs based on real-time context. Most terminal managers either only support rigid full-line snippets or lack intuitive interactive variable placeholders (e.g., `{{variable}}`), resulting in constant back-and-forth manual text editing.
+
+After extensive technical evaluation, the combination of **Rust + GPUI** emerged as the definitive solution: true native compilation guarantees rock-solid memory efficiency, while GPU-accelerated rendering delivers sub-millisecond 120 FPS smoothness.
+
+### A Novice's "Vibe Coding" Paradigm
+However, as a creator with **zero prior Rust development experience**, tackling a complex desktop application with Rust's steep learning curve seemed nearly impossible. I chose to embrace the frontier paradigm of **Vibe Coding**:
+- **The Human's Role**: Guided strictly by personal daily habits, aesthetic standards, and real workflow friction points, I focused exclusively on product vision, feature architecture, UX design, and functional requirements.
+- **100% AI Code Authoring**: 100% of the Rust codebase across the entire repository—terminal multiplexing, GPUI view trees, platform abstractions, and CI/CD pipelines—was authored by AI.
+  - Early prototyping and feasibility experiments were assisted by tools like **mimocode** and **codebuddy**;
+  - As the project scaled, all daily engineering, complex refactoring, bug fixes, and release management transitioned fully to **Google Antigravity** (powered by the **Gemini** model).
+
+### Embracing Bugs & Building Together
+Because the codebase is entirely AI-generated and rapidly evolving, encountering edge cases and bugs is completely natural and expected.
+
+- **Bugs Are Expected**: If you run into any quirks, crashes, or unexpected behavior, please don't hesitate to open an [Issue](https://github.com/mxsail/velowork/issues). I will promptly feed the diagnostics to Antigravity for investigation and resolution.
+- **Feature Ideas & Feedback Welcome**: If you have creative ideas, workflow improvements, or feature suggestions that could make Velowork even more powerful and enjoyable, your feedback is warmly welcomed!
+
+---
+
+## 📄 License, Acknowledgments & Disclaimer
+
+### 📜 License
 Released under the [AGPLv3 License](LICENSE). Copyright © 2026 Velowork Team.
 
-### Upstream & Acknowledgments
-Velowork stands on the shoulders of fantastic open-source projects. We express our sincere gratitude to:
+### 💖 Acknowledgments
+Velowork stands on the shoulders of fantastic open-source projects and AI innovations:
 
-- **[Okena](https://github.com/contember/okena)** — Velowork is a brand-new remote terminal management software developed based on Okena. We are deeply grateful to the Okena team for their pioneering work on GPUI-powered terminal multiplexing, workspace layout, and core architecture.
-- **[GPUI (Zed)](https://github.com/zed-industries/zed)** — For the GPU-accelerated UI framework powering sub-millisecond 120 FPS rendering.
+- **[Google Antigravity & Gemini](https://deepmind.google/technologies/gemini/)** — For the primary AI pair-programming and agentic engineering capabilities powering ongoing development.
+- **[Okena](https://github.com/contember/okena)** — Velowork is developed based on Okena. We are deeply grateful to the Okena team for their pioneering work on GPUI-powered terminal multiplexing, workspace layout, and core architecture.
+- **[GPUI (Zed)](https://github.com/zed-industries/zed)** — For the blazing-fast, GPU-accelerated UI framework powering sub-millisecond 120 FPS rendering.
 - **[Alacritty](https://github.com/alacritty/alacritty)** — For the robust, high-performance terminal emulation backend.
+- **Early AI Toolings** — Thanks to **mimocode** and **codebuddy** for their assistance during early prototyping.
+- **The Rust Community** — For the rich ecosystem of crates (`tokio`, `smol`, `portable-pty`, `serde`, `keyring`, etc.) that make native systems development reliable and performant.
+
+### ⚠️ Disclaimer
+- **As-Is Provision**: Velowork is an open-source project shared in good faith under the AGPLv3 license. It is provided "AS IS" without warranties of any kind.
+- **AI-Assisted Notice**: The codebase is generated and iterated with AI assistance. While automated tests and quality checks are maintained, please test in non-critical environments before relying on it for important workloads.
+- **User Discretion**: When connecting to remote servers via SSH or executing system commands, please handle credentials responsibly and practice routine backups. Users assume normal discretion and responsibility for their own terminal operations and remote sessions.
