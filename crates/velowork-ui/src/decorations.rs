@@ -87,7 +87,7 @@ pub fn is_custom_titlebar(window: &Window, cx: &App) -> bool {
     cx.try_global::<GlobalIsCustomTitlebar>()
         .map(|g| (g.0)(window, cx))
         .unwrap_or_else(|| {
-            if cfg!(target_os = "macos") {
+            if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
                 true
             } else {
                 matches!(window.window_decorations(), Decorations::Client { .. })

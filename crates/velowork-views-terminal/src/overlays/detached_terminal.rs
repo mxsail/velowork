@@ -328,7 +328,7 @@ impl Render for DetachedTerminalView {
         let focus_handle = self.focus_handle.clone();
 
         let (is_custom_titlebar, window_corner_radius) = if let Some(global) = cx.try_global::<velowork_app_core::settings::GlobalSettings>() {
-            let custom = if cfg!(target_os = "macos") {
+            let custom = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
                 global.0.read(cx).settings.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
             } else {
                 matches!(window.window_decorations(), Decorations::Client { .. })
@@ -338,7 +338,14 @@ impl Render for DetachedTerminalView {
                 global.0.read(cx).settings.window_corner_radius,
             )
         } else {
-            (matches!(window.window_decorations(), Decorations::Client { .. }), 8.0)
+            (
+                if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
+                    true
+                } else {
+                    matches!(window.window_decorations(), Decorations::Client { .. })
+                },
+                8.0,
+            )
         };
 
         let is_maximized = window.is_maximized();

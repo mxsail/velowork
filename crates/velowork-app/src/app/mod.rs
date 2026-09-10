@@ -680,7 +680,7 @@ impl Render for Velowork {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = crate::theme::theme(cx);
         let settings = &crate::settings::settings_entity(cx).read(cx).settings;
-        let is_custom_titlebar = if cfg!(target_os = "macos") {
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             settings.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
             matches!(window.window_decorations(), gpui::Decorations::Client { .. })

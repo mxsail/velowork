@@ -175,7 +175,7 @@ where
 
         let is_custom_titlebar = if self.hide_titlebar {
             false
-        } else if cfg!(target_os = "macos") {
+        } else if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             if let Some(global) = cx.try_global::<velowork_app_core::settings::GlobalSettings>() {
                 global.0.read(cx).settings.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
             } else {

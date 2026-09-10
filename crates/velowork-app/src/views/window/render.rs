@@ -157,7 +157,7 @@ impl WindowView {
         let is_maximized = mode == velowork_ui::dock::PanelMode::Maximized
             || mode == velowork_ui::dock::PanelMode::Fullscreen;
 
-        let is_custom_titlebar = if cfg!(target_os = "macos") {
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
             matches!(window.window_decorations(), gpui::Decorations::Client { .. })
@@ -428,7 +428,7 @@ impl WindowView {
         let hovered_project = crate::views::overlays::project_hover::hovered_project(cx);
         let ring_color = theme(cx).border_active;
 
-        let is_custom_titlebar = if cfg!(target_os = "macos") {
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
             matches!(window.window_decorations(), gpui::Decorations::Client { .. })
@@ -789,7 +789,7 @@ impl Render for WindowView {
             }
         }
 
-        let is_custom_titlebar = if cfg!(target_os = "macos") {
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
             matches!(window.window_decorations(), gpui::Decorations::Client { .. })

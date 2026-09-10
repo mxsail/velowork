@@ -3241,7 +3241,7 @@ impl AiAssistantPanel {
                 .into_any();
         }
 
-        let is_custom_titlebar = if cfg!(target_os = "macos") {
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             settings_entity(cx).read(cx).settings.titlebar_style
                 == velowork_workspace::settings::TitlebarStyle::Custom
         } else {

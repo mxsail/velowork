@@ -89,7 +89,7 @@ impl Render for SimpleRoot {
         let decorations = window.window_decorations();
         let t = theme(cx);
 
-        let is_custom_titlebar = if cfg!(target_os = "macos") {
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             crate::settings::settings_entity(cx)
                 .read(cx)
                 .settings

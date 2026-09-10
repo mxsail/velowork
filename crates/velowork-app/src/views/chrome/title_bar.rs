@@ -35,8 +35,17 @@ pub fn window_decorations_and_titlebar(
                     }),
                     Some(WindowDecorations::Server),
                 )
+            } else if cfg!(target_os = "windows") {
+                (
+                    Some(TitlebarOptions {
+                        title: Some(title.into()),
+                        appears_transparent: true,
+                        ..Default::default()
+                    }),
+                    Some(WindowDecorations::Client),
+                )
             } else {
-                // Windows & Linux: no system titlebar, client-side decorations (CSD)
+                // Linux: no system titlebar, client-side decorations (CSD)
                 (None, Some(WindowDecorations::Client))
             }
         }
@@ -642,7 +651,7 @@ impl Render for TitleBar {
 
         let context_menu_open = self.context_menu_open;
 
-        let is_custom_titlebar = if cfg!(target_os = "macos") {
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             settings.titlebar_style == TitlebarStyle::Custom
         } else {
             matches!(window.window_decorations(), Decorations::Client { .. })

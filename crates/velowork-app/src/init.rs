@@ -403,8 +403,13 @@ pub fn init_stores(
 
     // Register custom titlebar check provider for all crates
     cx.set_global(velowork_ui::decorations::GlobalIsCustomTitlebar(|window, cx| {
-        if cfg!(target_os = "macos") {
-            settings::settings_entity(cx).read(cx).settings.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
+        let is_custom_setting = settings::settings_entity(cx).read(cx).settings.titlebar_style
+            == velowork_workspace::settings::TitlebarStyle::Custom;
+        if !is_custom_setting {
+            return false;
+        }
+        if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
+            true
         } else {
             matches!(window.window_decorations(), gpui::Decorations::Client { .. })
         }
