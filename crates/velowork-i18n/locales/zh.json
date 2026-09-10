@@ -1182,7 +1182,9 @@
     "memory": "内存",
     "time": "时间",
     "focused": "聚焦：",
-    "toggle_right_toolbar": "切换右侧 Dock",
+    "toggle_right_toolbar": "切换右侧工具栏",
+    "hide_right_toolbar": "隐藏右侧工具栏",
+    "show_right_toolbar": "显示右侧工具栏",
     "toggle_left_toolbar": "切换左侧 Dock",
     "encoding": "字符编码"
   },

@@ -13,7 +13,7 @@ use super::{
     ShowProfileManager, ShowProjectManageDialog, ShowQuickCommandsPanel, ShowServicesPanel,
     ShowSettings, ShowThemeSelector, ShowTunnelsPanel, ShowUpdateDialog, SplitHorizontal,
     SplitVertical, ToggleCommandsPanel, ToggleFullscreen, ToggleLeftDock, ToggleLeftDockAutoHide,
-    TogglePaneSwitcher, ToggleRightDock, ToggleSftpPanel, ZoomIn, ZoomOut,
+    TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel, ZoomIn, ZoomOut,
 };
 
 /// Get human-readable descriptions for all actions
@@ -87,6 +87,17 @@ pub fn get_action_descriptions() -> HashMap<&'static str, ActionDescription> {
             scope: ActionScope::Global,
             show_in_palette: true,
             factory: || Box::new(ToggleRightDock),
+        },
+    );
+    map.insert(
+        "ToggleRightToolbar",
+        ActionDescription {
+            name: "Toggle Right Toolbar",
+            description: "Show or hide the right vertical toolbar strip",
+            category: "View",
+            scope: ActionScope::Global,
+            show_in_palette: true,
+            factory: || Box::new(ToggleRightToolbar),
         },
     );
     map.insert(

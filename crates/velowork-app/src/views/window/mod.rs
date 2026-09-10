@@ -589,6 +589,10 @@ impl WindowView {
 
         // Observe settings entity to dynamically update toolbar panel visibility and close hidden panel
         cx.observe(&crate::settings::settings_entity(cx), |this, _, cx| {
+            let new_toolbar_open = crate::settings::settings_entity(cx).read(cx).settings.right_toolbar_open;
+            if this.right_toolbar_open != new_toolbar_open {
+                this.right_toolbar_open = new_toolbar_open;
+            }
             if let Some(active_id) = this.right_toolbar_active.clone() {
                 if !this.right_toolbar_registry.is_panel_visible(&active_id, cx) {
                     this.right_toolbar_active = None;
@@ -619,7 +623,7 @@ impl WindowView {
             right_toolbar_active: None,
             right_toolbar_last_panel: None,
             right_toolbar_registry,
-            right_toolbar_open: true,
+            right_toolbar_open: app_settings.right_toolbar_open,
             bottom_dock,
             bottom_dock_ctrl,
             sftp_panel,

@@ -741,6 +741,9 @@ pub struct AppSettings {
     /// Right sidebar settings
     #[serde(default)]
     pub right_sidebar: SidebarSettings,
+    /// Whether the right vertical icon toolbar is open/visible
+    #[serde(default = "default_true")]
+    pub right_toolbar_open: bool,
     /// Whether to show border around focused terminal
     #[serde(default = "default_show_focused_border")]
     pub show_focused_border: bool,
@@ -1308,6 +1311,7 @@ impl Default for AppSettings {
                 is_open: false,
                 ..Default::default()
             },
+            right_toolbar_open: true,
             show_focused_border: default_show_focused_border(),
             titlebar_style: TitlebarStyle::default(),
             titlebar_preset: CustomTitlebarPreset::default(),

@@ -6,7 +6,7 @@ use crate::keybindings::{
     ShowProjectManageDialog, ShowQuickCommandsPanel, ShowServicesPanel,
     ShowSettings, ShowAiSettings, ShowThemeSelector, ShowTunnelsPanel, ShowUpdateDialog, ShowHelp, ShowAiAssistant,
     ToggleCommandsPanel, ToggleLeftDock, ToggleLeftDockAutoHide, TogglePaneSwitcher,
-    ToggleRightDock, ToggleSftpPanel,
+    ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel,
 };
 use crate::settings::{open_settings_file, settings_entity};
 use crate::theme::{surface_bg, theme};
@@ -1106,6 +1106,10 @@ impl Render for WindowView {
             // Handle right dock toggle action
             .on_action(cx.listener(|this, _: &ToggleRightDock, window, cx| {
                 this.toggle_right_dock_with_window(window, cx);
+            }))
+            // Handle right toolbar toggle action
+            .on_action(cx.listener(|this, _: &ToggleRightToolbar, _window, cx| {
+                this.toggle_right_toolbar(cx);
             }))
             // Handle toggle SFTP panel action
             .on_action(cx.listener(|this, _: &ToggleSftpPanel, window, cx| {

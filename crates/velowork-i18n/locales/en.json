@@ -1182,7 +1182,9 @@
     "memory": "Memory",
     "time": "Time",
     "focused": "Focused:",
-    "toggle_right_toolbar": "Toggle Right Dock",
+    "toggle_right_toolbar": "Toggle Right Toolbar",
+    "hide_right_toolbar": "Hide Right Toolbar",
+    "show_right_toolbar": "Show Right Toolbar",
     "toggle_left_toolbar": "Toggle Left Dock",
     "encoding": "Character Encoding"
   },

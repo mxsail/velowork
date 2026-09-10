@@ -494,6 +494,15 @@ impl SettingsState {
         self.save_and_notify(cx);
     }
 
+    /// Set right vertical icon toolbar open state
+    pub fn set_right_toolbar_open(&mut self, value: bool, cx: &mut Context<Self>) {
+        if self.settings.right_toolbar_open == value {
+            return;
+        }
+        self.settings.right_toolbar_open = value;
+        self.save_and_notify(cx);
+    }
+
     /// Set right sidebar auto-hide mode
     pub fn set_right_sidebar_auto_hide(&mut self, value: bool, cx: &mut Context<Self>) {
         self.settings.right_sidebar.auto_hide = value;

@@ -288,6 +288,16 @@ impl WindowView {
         self.right_toolbar_open
     }
 
+    /// Toggle visibility of the right vertical icon toolbar strip
+    pub(super) fn toggle_right_toolbar(&mut self, cx: &mut Context<Self>) {
+        self.right_toolbar_open = !self.right_toolbar_open;
+        let is_open = self.right_toolbar_open;
+        settings_entity(cx).update(cx, |s, cx| {
+            s.set_right_toolbar_open(is_open, cx);
+        });
+        cx.notify();
+    }
+
     /// Handle clicking a panel icon on the right toolbar strip or activating its shortcut.
     pub(super) fn handle_right_toolbar_click(
         &mut self,
