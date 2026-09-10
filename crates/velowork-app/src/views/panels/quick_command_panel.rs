@@ -125,6 +125,7 @@ pub struct QuickCommandsPanel {
     pub(crate) inline_command_sub: Option<Subscription>,
     pub(crate) overlay_registry: Option<Entity<velowork_ui::overlay_registry::OverlayRegistry>>,
     context_menu: Option<Entity<PopupMenu>>,
+    selected_node_bounds: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>>>,
 }
 
 impl QuickCommandsPanel {
@@ -218,6 +219,7 @@ impl QuickCommandsPanel {
             inline_command_sub: None,
             overlay_registry: None,
             context_menu: None,
+            selected_node_bounds: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
         };
 
         cx.observe(&panel.overlay_manager, |_this: &mut Self, _om, cx| {
@@ -576,7 +578,15 @@ impl QuickCommandsPanel {
                         QuickCommandContextMenuEvent::Delete { ids } => {
                             let ids = ids.clone();
                             let origin = Some(this.focus_handle.clone());
+                            let click_origin = ids.iter().find_map(|id| {
+                                this.selected_node_bounds.borrow().get(id).map(|b| b.center())
+                            }).or_else(|| {
+                                this.selected_node_bounds.borrow().values().next().map(|b| b.center())
+                            });
                             this.overlay_manager.update(cx, |om, cx| {
+                                if let Some(pt) = click_origin {
+                                    om.record_click_origin(pt);
+                                }
                                 om.request_quick_command_delete_confirm_with_origin(ids, origin.clone(), origin, cx);
                             });
                             cx.notify();
@@ -1402,7 +1412,20 @@ impl QuickCommandsPanel {
                         bg: surface_bg(t.bg_selection, cx),
                         fg: None,
                     })
-                    .when(is_selected, |d| d.border_color(rgb(t.border_active)))
+                    .when(is_selected, |d| {
+                        let nid = id.clone();
+                        let bounds_map = self.selected_node_bounds.clone();
+                        d.border_color(rgb(t.border_active)).child(
+                            canvas(
+                                move |bounds, _, _| {
+                                    bounds_map.borrow_mut().insert(nid, bounds);
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
+                    })
                     .on_drag(
                         QcDrag {
                             node_id: fid_drag.clone(),
@@ -1557,7 +1580,20 @@ impl QuickCommandsPanel {
                         bg: surface_bg(t.bg_selection, cx),
                         fg: None,
                     })
-                    .when(is_selected, |d| d.border_color(rgb(t.border_active)))
+                    .when(is_selected, |d| {
+                        let nid = id.clone();
+                        let bounds_map = self.selected_node_bounds.clone();
+                        d.border_color(rgb(t.border_active)).child(
+                            canvas(
+                                move |bounds, _, _| {
+                                    bounds_map.borrow_mut().insert(nid, bounds);
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
+                    })
                     .on_drag(
                         QcDrag {
                             node_id: cid_drag.clone(),
@@ -1784,6 +1820,7 @@ impl Render for QuickCommandsPanel {
                 }
             });
 
+        self.selected_node_bounds.borrow_mut().clear();
         let tree_children = vec![tree_widget.render(self, window, cx)];
         let is_empty = roots.is_empty();
 
@@ -1958,7 +1995,15 @@ impl Render for QuickCommandsPanel {
                             let ids: Vec<String> =
                                 this.selected_qc_ids.iter().cloned().collect();
                             let origin = Some(this.focus_handle.clone());
+                            let click_origin = ids.iter().find_map(|id| {
+                                this.selected_node_bounds.borrow().get(id).map(|b| b.center())
+                            }).or_else(|| {
+                                this.selected_node_bounds.borrow().values().next().map(|b| b.center())
+                            });
                             this.overlay_manager.update(cx, |om, cx| {
+                                if let Some(pt) = click_origin {
+                                    om.record_click_origin(pt);
+                                }
                                 om.request_quick_command_delete_confirm_with_origin(ids, origin.clone(), origin, cx);
                             });
                             cx.stop_propagation();

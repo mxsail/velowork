@@ -25,7 +25,7 @@ use velowork_workspace::project_export::{ProjectExportOptions, ProjectExportServ
 use velowork_workspace::state::Workspace;
 
 use crate::keybindings::Cancel;
-use crate::views::components::{modal_backdrop, modal_content, modal_header};
+use crate::views::components::{modal_content, modal_header};
 
 use velowork_ui::focus_group::{FocusGroup, FocusGroupExt};
 
@@ -476,64 +476,57 @@ impl Render for ProjectExportDialog {
                     .child(Scrollbar::vertical(&self.scroll_handle)),
             );
 
-        modal_backdrop("project-export-backdrop", &t, cx)
+        modal_content("project-export-modal", cx)
+            .relative()
+            .w(card_w)
+            .h(card_h)
+            .overflow_hidden()
+            .p(SPACE_XS)
             .track_focus(&self.focus_handle)
             .key_context("ProjectExportDialog")
             .tab_cycle(&focus_group)
             .on_action(cx.listener(|this, _: &Cancel, _, cx| this.close(cx)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.close(cx)),
-            )
+            .focus_scope_on_click(&self.focus_handle)
+            .child(modal_header(
+                i18n!(cx, "export_project.title"),
+                Some(i18n!(cx, "export_project.desc")),
+                &t,
+                cx,
+                cx.listener(|this: &mut Self, _, _, cx| this.close(cx)),
+            ))
+            .child(body_container)
             .child(
-                modal_content("project-export-modal", cx)
-                    .relative()
-                    .w(card_w)
-                    .h(card_h)
-                    .overflow_hidden()
-                    .p(SPACE_XS)
-                    .focus_scope_on_click(&self.focus_handle)
-                    .child(modal_header(
-                        &i18n!(cx, "export_project.title"),
-                        Some(&i18n!(cx, "export_project.desc")),
-                        &t,
-                        cx,
-                        cx.listener(|this: &mut Self, _, _, cx| this.close(cx)),
-                    ))
-                    .child(body_container)
+                // Footer actions
+                h_flex()
+                    .h(px(48.0))
+                    .flex_shrink_0()
+                    .px(SPACE_LG)
+                    .border_t_1()
+                    .border_color(p.border_subtle)
+                    .items_center()
+                    .justify_end()
+                    .gap(SPACE_MD)
                     .child(
-                        // Footer actions
-                        h_flex()
-                            .h(px(48.0))
-                            .flex_shrink_0()
-                            .px(SPACE_LG)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
-                            .items_center()
-                            .justify_end()
-                            .gap(SPACE_MD)
-                            .child(
-                                Button::new("export-cancel-btn", &t)
-                                    .size(ControlSize::Default)
-                                    .label(i18n!(cx, "common.cancel"))
-                                    .focus_handle(&self.cancel_focus)
-                                    .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
-                            )
-                            .child(
-                                Button::new("export-confirm-btn", &t)
-                                    .primary()
-                                    .size(ControlSize::Default)
-                                    .label(if self.is_exporting {
-                                        i18n!(cx, "export_project.exporting")
-                                    } else {
-                                        i18n!(cx, "export_project.export_btn")
-                                    })
-                                    .disabled(self.is_exporting)
-                                    .focus_handle(&self.confirm_focus)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.execute_export(window, cx);
-                                    })),
-                            ),
+                        Button::new("export-cancel-btn", &t)
+                            .size(ControlSize::Default)
+                            .label(i18n!(cx, "common.cancel"))
+                            .focus_handle(&self.cancel_focus)
+                            .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
+                    )
+                    .child(
+                        Button::new("export-execute-btn", &t)
+                            .primary()
+                            .size(ControlSize::Default)
+                            .label(if self.is_exporting {
+                                i18n!(cx, "export_project.exporting")
+                            } else {
+                                i18n!(cx, "export_project.export_btn")
+                            })
+                            .disabled(self.is_exporting)
+                            .focus_handle(&self.confirm_focus)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.execute_export(window, cx);
+                            })),
                     ),
             )
     }

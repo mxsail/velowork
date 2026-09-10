@@ -230,6 +230,7 @@ pub struct ServiceMonitorPanel {
     service_scroll_handle: ScrollHandle,
     operating_services: HashMap<String, ServiceOp>,
     _subscription: Option<Subscription>,
+    selected_node_bounds: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>>>,
 }
 
 impl ServiceMonitorPanel {
@@ -260,6 +261,7 @@ impl ServiceMonitorPanel {
             service_scroll_handle: ScrollHandle::new(),
             operating_services: HashMap::new(),
             _subscription: None,
+            selected_node_bounds: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
         };
 
         panel.reload_nodes(cx);
@@ -953,7 +955,20 @@ impl ServiceMonitorPanel {
                         bg: surface_bg(t.bg_selection, cx),
                         fg: None,
                     })
-                    .when(is_selected, |d| d.border_color(rgb(t.border_active)))
+                    .when(is_selected, |d| {
+                        let nid = id.clone();
+                        let bounds_map = self.selected_node_bounds.clone();
+                        d.border_color(rgb(t.border_active)).child(
+                            canvas(
+                                move |bounds, _, _| {
+                                    bounds_map.borrow_mut().insert(nid, bounds);
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
+                    })
                     .on_click(cx.listener(move |this, _event: &ClickEvent, window, cx| {
                         window.focus(&this.focus_handle, cx);
                         this.select_single_node(&node_id_click, cx);
@@ -1114,7 +1129,20 @@ impl ServiceMonitorPanel {
                         bg: surface_bg(t.bg_selection, cx),
                         fg: None,
                     })
-                    .when(is_selected, |d| d.border_color(rgb(t.border_active)))
+                    .when(is_selected, |d| {
+                        let nid = service_id.clone();
+                        let bounds_map = self.selected_node_bounds.clone();
+                        d.border_color(rgb(t.border_active)).child(
+                            canvas(
+                                move |bounds, _, _| {
+                                    bounds_map.borrow_mut().insert(nid, bounds);
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
+                    })
                     .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         window.focus(&this.focus_handle, cx);
                         if event.click_count() == 2 {
@@ -1465,6 +1493,7 @@ impl Render for ServiceMonitorPanel {
         let tree_nodes = convert_service_nodes(&self.nodes);
         let t_color = t.clone();
         let filter_clone = filter_text.clone();
+        self.selected_node_bounds.borrow_mut().clear();
         let tree_widget = velowork_ui::tree::<Self, String, ServiceNode>("service-tree")
             .nodes(tree_nodes)
             .expanded_keys(force_expanded)
@@ -1694,7 +1723,15 @@ impl Render for ServiceMonitorPanel {
                         if !this.selected_service_ids.is_empty() {
                             let ids: Vec<String> = this.selected_service_ids.iter().cloned().collect();
                             let origin = Some(this.focus_handle.clone());
+                            let click_origin = ids.iter().find_map(|id| {
+                                this.selected_node_bounds.borrow().get(id).map(|b| b.center())
+                            }).or_else(|| {
+                                this.selected_node_bounds.borrow().values().next().map(|b| b.center())
+                            });
                             this.overlay_manager.update(cx, |om, cx| {
+                                if let Some(pt) = click_origin {
+                                    om.record_click_origin(pt);
+                                }
                                 om.request_service_delete_confirm_with_origin(
                                     ids,
                                     origin.clone(),

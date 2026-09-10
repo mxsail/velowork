@@ -8,9 +8,10 @@ use std::time::Instant;
 use gpui::prelude::*;
 use gpui::*;
 
-use crate::motion::{DURATION_MODAL_ENTER, DURATION_MODAL_LEAVE, ModalMotionState};
+use crate::motion::{DURATION_MODAL_ENTER, DURATION_MODAL_LEAVE, DURATION_MODAL_MORPH, ModalMotionState};
 use crate::overlay::modal::modal_backdrop;
-use crate::theme::theme;
+use crate::theme::{theme, with_alpha};
+use crate::design::semantic::SemanticPalette;
 
 /// 全局动画开关配置（可选注入，默认为 true）。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,6 +47,7 @@ pub struct AnimatedModal {
     focus_handle: FocusHandle,
     animations_enabled: bool,
     alignment: ModalAlignment,
+    measured_card_bounds: Option<Bounds<Pixels>>,
 }
 
 impl EventEmitter<AnimatedModalEvent> for AnimatedModal {}
@@ -53,6 +55,15 @@ impl EventEmitter<AnimatedModalEvent> for AnimatedModal {}
 impl AnimatedModal {
     /// 创建一个新的动效模态外壳并自动启动入场弹性过冲动画。
     pub fn new(content: AnyView, cx: &mut Context<Self>) -> Self {
+        Self::new_with_origin(content, None, cx)
+    }
+
+    /// 创建一个指定触发源点（例如鼠标点击位置）的动效模态外壳。
+    pub fn new_with_origin(
+        content: AnyView,
+        origin: Option<Point<Pixels>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let animations_enabled = cx
             .try_global::<ModalAnimationsEnabled>()
             .map(|g| g.0)
@@ -61,7 +72,7 @@ impl AnimatedModal {
         let mut modal = Self {
             content,
             motion_state: if animations_enabled {
-                ModalMotionState::new_opening(None)
+                ModalMotionState::new_opening(origin)
             } else {
                 ModalMotionState::default()
             },
@@ -70,6 +81,7 @@ impl AnimatedModal {
             focus_handle: cx.focus_handle(),
             animations_enabled,
             alignment: ModalAlignment::default(),
+            measured_card_bounds: None,
         };
 
         if animations_enabled {
@@ -77,6 +89,12 @@ impl AnimatedModal {
         }
 
         modal
+    }
+
+    /// 设置动画展开的源点坐标。
+    pub fn with_origin(mut self, origin: Option<Point<Pixels>>) -> Self {
+        self.motion_state.origin = origin;
+        self
     }
 
     /// 设置弹窗在屏幕中的对齐方式。
@@ -164,8 +182,69 @@ impl AnimatedModal {
         cx.emit(AnimatedModalEvent::Dismissed);
     }
 
+    /// 启动灵动岛形变收缩退场动画至指定目标几何边界（如终端录制胶囊）。
+    pub fn start_morph_exit(
+        &mut self,
+        target_bounds: Bounds<Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.motion_state.is_closing {
+            return;
+        }
+
+        cx.emit(AnimatedModalEvent::Closing);
+
+        if self.animations_enabled && self.motion_state.progress > 0.05 {
+            let start_bounds = self.measured_card_bounds.unwrap_or_else(|| {
+                let card_w = px(400.0);
+                let card_h = px(280.0);
+                let fallback_x = (target_bounds.origin.x + target_bounds.size.width / 2.0 - card_w / 2.0).max(px(20.0));
+                let fallback_y = target_bounds.origin.y + px(150.0);
+                Bounds::new(
+                    Point::new(fallback_x, fallback_y),
+                    Size::new(card_w, card_h),
+                )
+            });
+
+            self.motion_state.morph_exit = Some(crate::motion::MorphExitState {
+                start_bounds,
+                target_bounds,
+                start_radius: px(16.0),
+                target_radius: crate::tokens::RADIUS_LG,
+            });
+            self.motion_state.start_closing();
+            self.motion_state.progress = 1.0;
+
+            let total_dur = DURATION_MODAL_MORPH;
+
+            self._anim_task = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                let start = Instant::now();
+                loop {
+                    let elapsed = start.elapsed();
+                    let t = (elapsed.as_secs_f32() / total_dur.as_secs_f32()).min(1.0);
+                    let progress = 1.0 - t;
+                    let res = this.update(cx, |this, cx| {
+                        this.motion_state.progress = progress;
+                        cx.notify();
+                    });
+                    if res.is_err() || t >= 1.0 {
+                        break;
+                    }
+                    smol::Timer::after(std::time::Duration::from_millis(8)).await;
+                }
+                let _ = this.update(cx, |_, cx| {
+                    cx.emit(AnimatedModalEvent::Dismissed);
+                });
+            }));
+            return;
+        }
+
+        cx.emit(AnimatedModalEvent::Dismissed);
+    }
+
     fn start_enter_animation(&mut self, cx: &mut Context<Self>) {
-        self.motion_state = ModalMotionState::new_opening(None);
+        let origin = self.motion_state.origin;
+        self.motion_state = ModalMotionState::new_opening(origin);
         let total_dur = DURATION_MODAL_ENTER;
 
         self._anim_task = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
@@ -191,27 +270,72 @@ impl AnimatedModal {
     }
 }
 
+use crate::tokens::SPACE_LG;
+
 impl Render for AnimatedModal {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let win_size = window.viewport_size();
-        let motion_values = self.motion_state.compute_values(win_size);
+        let p = SemanticPalette::from_theme(&t);
 
-        let mut backdrop = modal_backdrop("animated-modal-backdrop", &t, cx)
-            .opacity(motion_values.backdrop_opacity)
-            .track_focus(&self.focus_handle);
+        // Check if currently executing Dynamic Island morph exit
+        if let Some(mv) = self.motion_state.compute_morph_values() {
+            let backdrop = modal_backdrop("animated-modal-backdrop", &t, cx)
+                .opacity(mv.backdrop_opacity);
 
-        match self.alignment {
-            ModalAlignment::Center => {}
-            ModalAlignment::Top(offset) => {
-                backdrop = backdrop.items_start().justify_center().pt(offset);
-            }
+            let border_color = if mv.inner_content_opacity < 0.5 {
+                with_alpha(t.error, 0.35)
+            } else {
+                p.border_subtle
+            };
+
+            let morph_card = deferred(
+                anchored()
+                    .position(mv.current_bounds.origin)
+                    .snap_to_window()
+                    .child(
+                        div()
+                            .id("animated-modal-morph-card")
+                            .w(mv.current_bounds.size.width)
+                            .h(mv.current_bounds.size.height)
+                            .rounded(mv.border_radius)
+                            .bg(p.surface_overlay)
+                            .border_1()
+                            .border_color(border_color)
+                            .shadow_xl()
+                            .overflow_hidden()
+                            .opacity(mv.card_opacity)
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .child(
+                                div()
+                                    .size_full()
+                                    .opacity(mv.inner_content_opacity)
+                                    .child(self.content.clone()),
+                            ),
+                    ),
+            );
+
+            return div()
+                .id("animated-modal-root")
+                .occlude()
+                .absolute()
+                .inset_0()
+                .size_full()
+                .track_focus(&self.focus_handle)
+                .key_context("AnimatedModal")
+                .child(backdrop)
+                .child(morph_card);
         }
 
-        backdrop = backdrop.on_action(cx.listener(|this, _: &crate::Cancel, _, cx| {
-            cx.stop_propagation();
-            this.request_close(cx);
-        }));
+        let win_size = window.viewport_size();
+        let target_center = match self.alignment {
+            ModalAlignment::Center => Point::new(win_size.width / 2.0, win_size.height / 2.0),
+            ModalAlignment::Top(offset) => Point::new(win_size.width / 2.0, offset + px(225.0)),
+        };
+        let motion_values = self.motion_state.compute_values_at(win_size, target_center);
+
+        // Layer 1: Semi-transparent backdrop with smooth ease_out_cubic dimming
+        let mut backdrop = modal_backdrop("animated-modal-backdrop", &t, cx)
+            .opacity(motion_values.backdrop_opacity);
 
         if self.dismiss_on_click_outside {
             backdrop = backdrop.on_mouse_down(
@@ -223,9 +347,50 @@ impl Render for AnimatedModal {
             );
         }
 
+        // Layer 2: Card wrapper positioned over the backdrop as a sibling layer
         let is_closing = self.motion_state.is_closing;
+        let mut card_wrapper = div()
+            .id("animated-modal-card-wrapper")
+            .absolute()
+            .inset_0()
+            .size_full()
+            .flex();
+
+        match self.alignment {
+            ModalAlignment::Center => {
+                card_wrapper = card_wrapper.items_center().justify_center().p(SPACE_LG);
+            }
+            ModalAlignment::Top(offset) => {
+                card_wrapper = card_wrapper.items_start().justify_center().pt(offset).px(SPACE_LG);
+            }
+        }
+
+        if self.dismiss_on_click_outside {
+            card_wrapper = card_wrapper.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.request_close(cx);
+                }),
+            );
+        }
+
+        let this_weak = cx.entity().downgrade();
+        let bounds_tracker = canvas(
+            move |bounds, _, cx| {
+                if let Some(this) = this_weak.upgrade() {
+                    this.update(cx, |this, _| {
+                        this.measured_card_bounds = Some(bounds);
+                    });
+                }
+            },
+            |_, _, _, _| {},
+        );
+
         let mut card_container = div()
+            .id("animated-modal-card-container")
             .relative()
+            .left(motion_values.offset.x)
             .top(motion_values.offset.y)
             .opacity(motion_values.card_opacity)
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
@@ -238,8 +403,25 @@ impl Render for AnimatedModal {
             });
         }
 
-        let card_container = card_container.child(self.content.clone());
+        let card_container = card_container
+            .child(bounds_tracker.absolute().inset_0())
+            .child(self.content.clone());
+        let card_wrapper = card_wrapper.child(card_container);
 
-        backdrop.child(card_container)
+        // Sibling layer container: Root covers window, intercepts Cancel action and tracks focus
+        div()
+            .id("animated-modal-root")
+            .occlude()
+            .absolute()
+            .inset_0()
+            .size_full()
+            .track_focus(&self.focus_handle)
+            .key_context("AnimatedModal")
+            .on_action(cx.listener(|this, _: &crate::Cancel, _, cx| {
+                cx.stop_propagation();
+                this.request_close(cx);
+            }))
+            .child(backdrop)
+            .child(card_wrapper)
     }
 }

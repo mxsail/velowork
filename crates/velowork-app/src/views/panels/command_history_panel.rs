@@ -81,6 +81,7 @@ pub struct CommandHistoryPanel {
     selected_id: Option<i64>,
     items: Vec<HistoryEntry>,
     context_menu: Option<Entity<PopupMenu>>,
+    selected_item_bounds: std::rc::Rc<std::cell::RefCell<Option<Bounds<Pixels>>>>,
 }
 
 impl CommandHistoryPanel {
@@ -122,6 +123,7 @@ impl CommandHistoryPanel {
             selected_id: None,
             items: Vec::new(),
             context_menu: None,
+            selected_item_bounds: std::rc::Rc::new(std::cell::RefCell::new(None)),
         };
 
         cx.observe(&panel.overlay_manager, |_this: &mut Self, _om, cx| {
@@ -312,7 +314,11 @@ impl CommandHistoryPanel {
         let self_entity = cx.entity().clone();
         let origin = self.focus_handle.clone();
         let panel = self.focus_handle.clone();
+        let click_origin = self.selected_item_bounds.borrow().map(|b| b.center());
         self.overlay_manager.update(cx, |om, cx| {
+            if let Some(pt) = click_origin {
+                om.record_click_origin(pt);
+            }
             om.show_command_history_delete_confirm_with_origin(
                 entry.command.clone(),
                 Some(origin),
@@ -624,7 +630,9 @@ impl Render for CommandHistoryPanel {
                             .when(is_empty, |d| {
                                 d.child(velowork_ui::empty_state::empty_state(empty_text, &t, cx))
                             })
-                            .children(self.items.iter().map(|entry| {
+                            .children({
+                                *self.selected_item_bounds.borrow_mut() = None;
+                                self.items.iter().map(|entry| {
                                 let entry_clone = entry.clone();
                                 let is_selected = is_panel_active && self.selected_id == Some(entry.id);
                                 let row_id = format!("hist-row-{}", entry.id);
@@ -651,7 +659,19 @@ impl Render for CommandHistoryPanel {
                                     .cursor_pointer()
                                     .border_1()
                                     .border_color(with_alpha(0x00000000, 0.0))
-                                    .when(is_selected, |d| d.border_color(rgb(t.border_active)))
+                                    .when(is_selected, |d| {
+                                        let bounds_slot = self.selected_item_bounds.clone();
+                                        d.border_color(rgb(t.border_active)).child(
+                                            canvas(
+                                                move |bounds, _, _| {
+                                                    *bounds_slot.borrow_mut() = Some(bounds);
+                                                },
+                                                |_, _, _, _| {},
+                                            )
+                                            .absolute()
+                                            .size_full(),
+                                        )
+                                    })
                                     .bg(if is_selected {
                                         surface_bg_t(t.bg_selection, &t)
                                     } else {
@@ -713,7 +733,8 @@ impl Render for CommandHistoryPanel {
                                             .flex_shrink_0()
                                             .child(format_short_timestamp(&entry.timestamp)),
                                     )
-                            })),
+                                })
+                            }),
                     )
                     .child(
                         div()

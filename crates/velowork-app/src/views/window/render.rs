@@ -1041,6 +1041,9 @@ impl Render for WindowView {
                                 return;
                             }
                             overlay_manager.update(cx, |om, cx| {
+                                if e.button == MouseButton::Left {
+                                    om.record_click_origin(e.position);
+                                }
                                 om.handle_overlay_mouse_down(e.position, window, cx);
                             });
                             // 全局物理焦点失焦自愈兜底：若任何非预期路径导致焦点悬空，在交互发生时无感对齐
