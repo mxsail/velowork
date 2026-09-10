@@ -1,22 +1,20 @@
 use crate::keybindings::{
-    About, AddTab, Cancel, CheckForUpdates, CloseWindow, CyclePanelNext, CyclePanelPrev, EqualizeLayout,
-    FocusBottomDock, FocusCenterDock, FocusLeftDock, FocusRightDock,
-    InstallUpdate, NewProject, NewSession, NewWindow, OpenSettingsFile, Quit, ShowAboutDialog, ShowCommandPalette,
-    ShowHistoryPanel, ShowImportSessionDialog, ShowKeybindings, ShowLogConsole, ShowProfileManager,
-    ShowProjectManageDialog, ShowQuickCommandsPanel, ShowServicesPanel,
-    ShowSettings, ShowAiSettings, ShowThemeSelector, ShowTunnelsPanel, ShowUpdateDialog, ShowHelp, ShowAiAssistant,
-    ToggleCommandsPanel, ToggleLeftDock, ToggleLeftDockAutoHide, TogglePaneSwitcher,
-    ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel,
+    About, AddTab, Cancel, CheckForUpdates, CloseWindow, CyclePanelNext, CyclePanelPrev,
+    EqualizeLayout, FocusBottomDock, FocusCenterDock, FocusLeftDock, FocusRightDock, InstallUpdate,
+    NewProject, NewSession, NewWindow, OpenSettingsFile, Quit, ShowAboutDialog, ShowAiAssistant,
+    ShowAiSettings, ShowCommandPalette, ShowHelp, ShowHistoryPanel, ShowImportSessionDialog,
+    ShowKeybindings, ShowLogConsole, ShowProfileManager, ShowProjectManageDialog,
+    ShowQuickCommandsPanel, ShowServicesPanel, ShowSettings, ShowThemeSelector, ShowTunnelsPanel,
+    ShowUpdateDialog, ToggleCommandsPanel, ToggleLeftDock, ToggleLeftDockAutoHide,
+    TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel,
 };
 use crate::settings::{open_settings_file, settings_entity};
 use crate::theme::{surface_bg, theme};
 use crate::ui::tokens::{
-    ui_right_toolbar_width, ui_space_card_gap, ui_space_md, ui_text_md, ui_text_xl, RADIUS_CARD,
+    RADIUS_CARD, ui_right_toolbar_width, ui_space_card_gap, ui_space_md, ui_text_md, ui_text_xl,
 };
 use crate::views::layout::navigation::{get_pane_map, prune_pane_map};
-use crate::views::layout::split_pane::{
-    DragState, compute_resize, render_project_divider,
-};
+use crate::views::layout::split_pane::{DragState, compute_resize, render_project_divider};
 use gpui::prelude::*;
 use gpui::*;
 use velowork_i18n::i18n;
@@ -160,7 +158,10 @@ impl WindowView {
         let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
-            matches!(window.window_decorations(), gpui::Decorations::Client { .. })
+            matches!(
+                window.window_decorations(),
+                gpui::Decorations::Client { .. }
+            )
         };
         let window_corner_radius = settings_entity(cx).read(cx).settings.window_corner_radius;
 
@@ -192,9 +193,7 @@ impl WindowView {
 
         let t = theme(cx);
         let _palette = SemanticPalette::from_theme(&t);
-        let mut container = div()
-            .id("bottom-dock-container")
-            .flex_shrink_0();
+        let mut container = div().id("bottom-dock-container").flex_shrink_0();
 
         if is_maximized {
             // When maximized, the bottom dock takes up all remaining space
@@ -207,17 +206,27 @@ impl WindowView {
                 })
                 .child(bottom_dock);
         } else {
-            // Normal mode - render at animated height
+            let is_animating = self.bottom_dock_ctrl.is_animating();
+            let card_gap = f32::from(ui_space_card_gap(cx));
+            let dynamic_gap = animation * card_gap;
+            // Normal mode - render at animated height with smooth gap and physical drawer sliding
             container = container
                 .h(px(current_height))
+                .mt(px(dynamic_gap))
                 .w_full()
                 .relative()
-                .child(
+                .overflow_hidden()
+                .child(if is_animating {
                     div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
                         .h(px(configured_height))
-                        .w_full()
-                        .child(bottom_dock),
-                );
+                        .child(bottom_dock)
+                } else {
+                    div().size_full().child(bottom_dock)
+                });
         }
 
         container.into_any_element()
@@ -395,26 +404,38 @@ impl WindowView {
         };
         let dynamic_container_size = {
             let window_bounds = window.window_bounds().get_bounds();
+            let card_gap = f32::from(ui_space_card_gap(cx));
             let total_axis = f32::from(if is_rows {
                 window_bounds.size.height - px(62.0)
             } else {
                 window_bounds.size.width
             });
             let left_sb = if self.left_dock_ctrl.should_render() {
-                self.left_dock_ctrl.current_width()
+                self.left_dock_ctrl.current_width() + self.left_dock_ctrl.animation() * card_gap
             } else {
                 0.0
             };
             let right_sb = if self.right_dock_ctrl.should_render() {
-                self.right_dock_ctrl.current_width()
+                self.right_dock_ctrl.current_width() + self.right_dock_ctrl.animation() * card_gap
             } else {
                 0.0
             };
-            (total_axis - left_sb - right_sb).max(200.0)
+            let right_tb = if settings_entity(cx).read(cx).settings.right_toolbar_open {
+                f32::from(ui_right_toolbar_width(cx)) + card_gap
+            } else {
+                0.0
+            };
+            let padding_overhead = 2.0 * card_gap;
+            (total_axis - left_sb - right_sb - right_tb - padding_overhead).max(200.0)
         };
 
-        let container_size = if measured_container_size > 0.0 {
-            measured_container_size.max(dynamic_container_size)
+        let is_any_dock_animating =
+            self.left_dock_ctrl.is_animating() || self.right_dock_ctrl.is_animating();
+
+        let container_size = if is_any_dock_animating {
+            dynamic_container_size
+        } else if measured_container_size > 0.0 {
+            measured_container_size
         } else {
             dynamic_container_size
         };
@@ -431,7 +452,10 @@ impl WindowView {
         let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
-            matches!(window.window_decorations(), gpui::Decorations::Client { .. })
+            matches!(
+                window.window_decorations(),
+                gpui::Decorations::Client { .. }
+            )
         };
         let window_corner_radius = settings.window_corner_radius;
         let is_maximized = window.is_maximized();
@@ -453,9 +477,7 @@ impl WindowView {
                 let palette = SemanticPalette::from_theme(&t);
                 let col_element = div()
                     .overflow_hidden()
-                    .when(!terminal_fullscreen, |d| {
-                        d.rounded(RADIUS_CARD)
-                    })
+                    .when(!terminal_fullscreen, |d| d.rounded(RADIUS_CARD))
                     .when(terminal_fullscreen && has_rounded_corners, |d| {
                         d.rounded_bl(corner_radius).rounded_br(corner_radius)
                     })
@@ -781,8 +803,8 @@ impl Render for WindowView {
                     if let Ok(ai) = active
                         .view
                         .clone()
-                        .downcast::<crate::views::panels::ai_assistant_panel::AiAssistantPanel>()
-                    {
+                        .downcast::<crate::views::panels::ai_assistant_panel::AiAssistantPanel>(
+                    ) {
                         ai.update(cx, |ai, cx| ai.set_quote(quote, cx));
                     }
                 }
@@ -792,7 +814,10 @@ impl Render for WindowView {
         let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
-            matches!(window.window_decorations(), gpui::Decorations::Client { .. })
+            matches!(
+                window.window_decorations(),
+                gpui::Decorations::Client { .. }
+            )
         };
 
         // Get overlay visibility state from overlay manager
@@ -821,8 +846,7 @@ impl Render for WindowView {
         let focus_handle = self.focus_handle.clone();
 
         // 渲染期物理焦点自愈状态机（事件驱动 + 状态转移 + Focus Watchdog 三重防线）：
-        let has_modal = om.has_modal()
-            || self.sidebar.read(cx).active_dialog.is_some();
+        let has_modal = om.has_modal() || self.sidebar.read(cx).active_dialog.is_some();
         let modal_just_closed = self.last_had_modal && !has_modal;
         self.last_had_modal = has_modal;
 
@@ -1431,7 +1455,6 @@ impl Render for WindowView {
                         d.px(ui_space_card_gap(cx))
                             .pt(ui_space_card_gap(cx))
                             .pb(ui_space_card_gap(cx))
-                            .gap(ui_space_card_gap(cx))
                     })
                     // Hide left sidebar when right sidebar, bottom dock, or a
                     // terminal is fullscreen/maximized, or when left sidebar is closed.
@@ -1462,6 +1485,9 @@ impl Render for WindowView {
 
                             let sidebar_width = self.left_dock_ctrl.current_width();
                             let configured_width = self.left_dock_ctrl.width();
+                            let card_gap = f32::from(ui_space_card_gap(cx));
+                            let left_dynamic_gap = self.left_dock_ctrl.animation() * card_gap;
+                            let is_animating = self.left_dock_ctrl.is_animating();
 
                             if is_left_dock_maximized {
                                 d.child(
@@ -1482,14 +1508,24 @@ impl Render for WindowView {
                                         .id("sidebar-container")
                                         .h_full()
                                         .w(px(sidebar_width))
+                                        .mr(px(left_dynamic_gap))
                                         .flex_shrink_0()
                                         .relative()
+                                        .overflow_hidden()
                                         .child(
-                                            // Inner wrapper to maintain sidebar at full width for clipping effect
-                                            div()
-                                                .w(px(configured_width))
-                                                .h_full()
-                                                .child(self.left_dock.clone()),
+                                            if is_animating {
+                                                div()
+                                                    .absolute()
+                                                    .top_0()
+                                                    .bottom_0()
+                                                    .right_0()
+                                                    .w(px(configured_width))
+                                                    .child(self.left_dock.clone())
+                                            } else {
+                                                div()
+                                                    .size_full()
+                                                    .child(self.left_dock.clone())
+                                            },
                                         ),
                                 )
                             }
@@ -1526,9 +1562,6 @@ impl Render for WindowView {
                                 .min_h_0()
                                 .min_w_0()
                                 .overflow_hidden()
-                                .when(show_bottom_dock && !terminal_fullscreen && !bottom_fullscreen, |d| {
-                                    d.gap(ui_space_card_gap(cx))
-                                })
                                 // When bottom dock is fullscreen, hide projects grid
                                 .when(!bottom_fullscreen, |d| {
                                     d.child(
@@ -1604,7 +1637,9 @@ impl Render for WindowView {
                                             .into_any_element(),
                                     )
                                 } else {
-                                    let is_animating = (right_dock_width - configured_width).abs() > 0.5;
+                                    let is_animating = self.right_dock_ctrl.is_animating();
+                                    let card_gap = f32::from(ui_space_card_gap(cx));
+                                    let right_dynamic_gap = self.right_dock_ctrl.animation() * card_gap;
                                     Some(
                                         div()
                                             .id("right-sidebar-container")
@@ -1612,13 +1647,16 @@ impl Render for WindowView {
                                             .flex_shrink_0()
                                             .w(px(right_dock_width))
                                             .relative()
+                                            .overflow_hidden()
+                                            .when(show_right_toolbar, |d| d.mr(px(right_dynamic_gap)))
+                                            .when(!show_right_toolbar, |d| d.ml(px(right_dynamic_gap)))
                                             .child(
                                                 if is_animating {
                                                     div()
                                                         .absolute()
                                                         .top_0()
                                                         .bottom_0()
-                                                        .right_0()
+                                                        .left_0()
                                                         .w(px(configured_width))
                                                         .child(self.right_dock.clone().unwrap())
                                                 } else {
@@ -1711,12 +1749,17 @@ impl Render for WindowView {
                                 (Some(dock), Some(tb)) => d.child(
                                     h_flex()
                                         .h_full()
-                                        .gap(ui_space_card_gap(cx))
+                                        .ml(ui_space_card_gap(cx))
                                         .child(dock)
                                         .child(tb),
                                 ),
                                 (Some(dock), None) => d.child(dock),
-                                (None, Some(tb)) => d.child(tb),
+                                (None, Some(tb)) => d.child(
+                                    div()
+                                        .h_full()
+                                        .ml(ui_space_card_gap(cx))
+                                        .child(tb),
+                                ),
                                 (None, None) => d,
                             }
                         },

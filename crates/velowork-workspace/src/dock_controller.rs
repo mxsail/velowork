@@ -221,6 +221,10 @@ impl DockController {
         self.animation > 0.01
     }
 
+    pub fn is_animating(&self) -> bool {
+        self.animation > 0.001 && self.animation < 0.999
+    }
+
     pub fn toggle(&mut self) -> AnimationTarget {
         self.open = !self.open;
         self.hover_shown = false;
