@@ -478,6 +478,9 @@ fn main() {
             .add_fonts(embedded_fonts())
             .expect("Failed to register embedded fonts");
 
+        // Preload system fonts asynchronously in background to eliminate modal opening freeze
+        velowork_app::font_cache::preload_system_fonts(cx.text_system().clone());
+
         // Register keybindings
         keybindings::register_keybindings(cx);
 
@@ -489,6 +492,23 @@ fn main() {
 
         // Initialize global settings + i18n, then load workspace and build theme.
         let (settings_entity, app_settings) = init::init_settings(cx);
+
+        // Apply initial text antialiasing rendering mode
+        let to_text_rendering_mode = |mode: velowork_workspace::settings::TextAntialiasingMode| match mode {
+            velowork_workspace::settings::TextAntialiasingMode::PlatformDefault => gpui::TextRenderingMode::PlatformDefault,
+            velowork_workspace::settings::TextAntialiasingMode::Subpixel => gpui::TextRenderingMode::Subpixel,
+            velowork_workspace::settings::TextAntialiasingMode::Grayscale => gpui::TextRenderingMode::Grayscale,
+        };
+        cx.set_text_rendering_mode(to_text_rendering_mode(app_settings.text_antialiasing));
+
+        // Observe text_antialiasing changes and apply them in real-time
+        let settings_for_aa = settings_entity.clone();
+        cx.observe(&settings_for_aa, move |entity, cx| {
+            let mode = entity.read(cx).settings.text_antialiasing;
+            cx.set_text_rendering_mode(to_text_rendering_mode(mode));
+            cx.refresh_windows();
+        })
+        .detach();
 
         // Initialize updater service (sets GlobalUpdateInfo, starts background checker if enabled)
         init::init_updater(&app_settings, cx);

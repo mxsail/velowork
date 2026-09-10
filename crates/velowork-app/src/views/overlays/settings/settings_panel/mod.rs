@@ -30,6 +30,7 @@ use crate::theme::theme;
 use crate::ui::tokens::{ui_font_family, use_custom_ui_font};
 use crate::views::components::{PathAutoCompleteState, dropdown_anchored_below};
 use crate::workspace::settings::SyncProvider;
+use crate::workspace::settings::TextAntialiasingMode;
 use crate::workspace::state::Workspace;
 use gpui::prelude::*;
 use gpui::*;
@@ -72,6 +73,7 @@ pub struct SettingsPanel {
     pub(super) ui_font_select: Entity<SelectState<String>>,
     pub(super) font_select: Entity<SelectState<String>>,
     pub(super) font_weight_select: Entity<SelectState<String>>,
+    pub(super) text_antialiasing_select: Entity<SelectState<TextAntialiasingMode>>,
     pub(super) shell_select: Entity<SelectState<ShellType>>,
     pub(super) session_backend_select: Entity<SelectState<SessionBackend>>,
     pub(super) charset_select: Entity<SelectState<String>>,
@@ -760,7 +762,7 @@ impl SettingsPanel {
         )
         .detach();
 
-        let mut system_fonts = cx.text_system().all_font_names();
+        let mut system_fonts = crate::font_cache::get_system_font_names();
         if system_fonts.is_empty() {
             system_fonts = components::FONT_FAMILIES
                 .iter()
@@ -855,6 +857,36 @@ impl SettingsPanel {
                     let w = w.clone();
                     settings_entity(cx).update(cx, |state, cx| {
                         state.set_font_weight(w, cx);
+                    });
+                }
+            },
+        )
+        .detach();
+
+        let cur_text_aa = s.text_antialiasing;
+        let text_antialiasing_select = cx.new(|cx| {
+            SelectState::new(cx)
+                .options(
+                    TextAntialiasingMode::all_variants()
+                        .iter()
+                        .map(|&mode| {
+                            SelectOption::new(
+                                mode,
+                                i18n!(cx, mode.translation_key()).to_string(),
+                            )
+                        })
+                        .collect(),
+                )
+                .selected(Some(cur_text_aa))
+                .placement(SelectPlacement::Below)
+        });
+        cx.subscribe(
+            &text_antialiasing_select,
+            |_, _, event: &SelectEvent<TextAntialiasingMode>, cx| {
+                if let SelectEvent::Change(Some(mode)) = event {
+                    let mode = *mode;
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_text_antialiasing(mode, cx);
                     });
                 }
             },
@@ -1130,6 +1162,7 @@ impl SettingsPanel {
             ui_font_select,
             font_select,
             font_weight_select,
+            text_antialiasing_select,
             shell_select,
             session_backend_select,
             charset_select,
@@ -1401,6 +1434,8 @@ impl SettingsPanel {
         self.font_select
             .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.font_weight_select
+            .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
+        self.text_antialiasing_select
             .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.shell_select
             .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
@@ -1891,6 +1926,7 @@ impl SettingsPanel {
                 }
                 handles.push(self.font_select.read(cx).focus_handle().clone());
                 handles.push(self.font_weight_select.read(cx).focus_handle().clone());
+                handles.push(self.text_antialiasing_select.read(cx).focus_handle().clone());
                 if let Some(input) = self.stepper_inputs.get("line-height") {
                     handles.push(input.read(cx).focus_handle(cx));
                 }

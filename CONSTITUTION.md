@@ -38,6 +38,12 @@
 - 焦点变更必须是**纯事件驱动（Event-Driven）**的，只能由用户交互事件回调（`on_action`、`on_mouse_down`、键盘按键、面板折叠委托等）显式触发。
 - 派生聚焦状态（如面板是否处于聚焦态）必须直接基于 GPUI 焦点树实时派生（`focus_handle.contains_focused(window, cx)`），严禁自建状态双写。
 
+### 红线 7：编码与提交前必核验分支 (Verify Branch Before Coding)
+- AI Agent 与开发者在编写任何业务代码或执行 `git commit` 前，必须首先核验当前所在分支（`git branch --show-current`）。
+- **严禁在 `backup-*`、`detached HEAD` 或未经授权的保护分支上进行任何业务编码与提交**。
+- 所有新功能、优化与修复必须严格从最新的 `main` 主干分支检出 `feat/*`、`fix/*`、`perf/*` 等临时特性分支后方可修改代码。
+- **严禁在未经用户明确显式要求前擅自执行 `git push`**。
+
 ---
 
 ## 核心架构原则

@@ -183,6 +183,34 @@ impl TitlebarStyle {
     }
 }
 
+/// 文本抗锯齿模式 (Text Antialiasing Mode)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TextAntialiasingMode {
+    #[default]
+    PlatformDefault,
+    Subpixel,
+    Grayscale,
+}
+
+impl TextAntialiasingMode {
+    pub fn translation_key(self) -> &'static str {
+        match self {
+            TextAntialiasingMode::PlatformDefault => "settings.text_antialiasing.platform_default",
+            TextAntialiasingMode::Subpixel => "settings.text_antialiasing.subpixel",
+            TextAntialiasingMode::Grayscale => "settings.text_antialiasing.grayscale",
+        }
+    }
+
+    pub fn all_variants() -> &'static [TextAntialiasingMode] {
+        &[
+            TextAntialiasingMode::PlatformDefault,
+            TextAntialiasingMode::Subpixel,
+            TextAntialiasingMode::Grayscale,
+        ]
+    }
+}
+
 /// Preset visual style for custom titlebar buttons
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -784,6 +812,9 @@ pub struct AppSettings {
     /// Empty string = System Default.
     #[serde(default = "default_markdown_font_family")]
     pub markdown_font_family: String,
+    /// 文本抗锯齿渲染模式（系统默认 / ClearType 次像素 / 灰度抗锯齿）
+    #[serde(default)]
+    pub text_antialiasing: TextAntialiasingMode,
 
     // Terminal settings
     /// Cursor shape: Block, Bar, or Underline (default: Bar)
@@ -1299,6 +1330,7 @@ impl Default for AppSettings {
             file_font_size: default_file_font_size(),
             mono_font_family: default_mono_font_family(),
             markdown_font_family: default_markdown_font_family(),
+            text_antialiasing: TextAntialiasingMode::default(),
             cursor_style: CursorShape::default(),
             cursor_blink: default_cursor_blink(),
             bell_style: velowork_core::types::BellStyle::default(),

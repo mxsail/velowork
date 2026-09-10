@@ -2702,7 +2702,7 @@ pub(crate) fn dropdown_option_list(
                 String::new(),
                 cur.is_empty(),
             )];
-            let mut system_fonts: Vec<String> = cx.text_system().all_font_names();
+            let mut system_fonts: Vec<String> = crate::font_cache::get_system_font_names();
             system_fonts.retain(|f| {
                 let trimmed = f.trim();
                 !trimmed.is_empty() && !trimmed.starts_with('.')

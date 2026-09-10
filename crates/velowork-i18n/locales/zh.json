@@ -271,7 +271,8 @@
       "ui_size": "UI 字体大小",
       "ui_family": "UI 字体",
       "ui_scale": "UI 缩放比例",
-      "weight": "终端字重"
+      "weight": "终端字重",
+      "text_antialiasing": "文本抗锯齿模式"
     },
     "path": "路径",
     "start_on_boot": "开机自启",
@@ -495,6 +496,12 @@
     "state": {
       "on": "开",
       "off": "关"
+    },
+    "text_antialiasing": {
+      "label": "文本抗锯齿模式",
+      "platform_default": "系统默认",
+      "subpixel": "ClearType 次像素",
+      "grayscale": "灰度抗锯齿"
     },
     "titlebar_style": {
       "label": "标题栏样式",

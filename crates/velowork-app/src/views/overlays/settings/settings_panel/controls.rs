@@ -452,6 +452,13 @@ impl SettingsPanel {
             .child(div().w(SELECT_WIDTH_SM).child(Select::new(&self.font_weight_select)))
     }
 
+    pub(super) fn render_text_antialiasing_dropdown_row(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx);
+        let label = i18n!(cx, "settings.font.text_antialiasing");
+        settings_row("text-antialiasing".to_string(), &label, &t, cx, true)
+            .child(div().w(SELECT_WIDTH_MD).child(Select::new(&self.text_antialiasing_select)))
+    }
+
     pub(super) fn render_shell_dropdown_row(&mut self, _current_shell: &ShellType, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let shell_label = i18n!(cx, "settings.default_shell");

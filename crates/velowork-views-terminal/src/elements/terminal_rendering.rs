@@ -66,8 +66,8 @@ impl BatchedTextRun {
         cx: &mut App,
     ) {
         let pos = Point::new(
-            origin.x + self.start_col as f32 * cell_width,
-            origin.y + self.start_line as f32 * line_height,
+            px((f32::from(origin.x) + self.start_col as f32 * f32::from(cell_width)).floor()),
+            px((f32::from(origin.y) + self.start_line as f32 * f32::from(line_height)).floor()),
         );
 
         // Create style for the entire text run
@@ -129,7 +129,7 @@ impl LayoutRect {
     pub fn paint(&self, origin: Point<Pixels>, cell_width: Pixels, line_height: Pixels, window: &mut Window) {
         let position = point(
             px((f32::from(origin.x) + self.start_col as f32 * f32::from(cell_width)).floor()),
-            origin.y + line_height * self.line as f32,
+            px((f32::from(origin.y) + self.line as f32 * f32::from(line_height)).floor()),
         );
         let size = size(
             px((f32::from(cell_width) * self.num_cells as f32).ceil()),

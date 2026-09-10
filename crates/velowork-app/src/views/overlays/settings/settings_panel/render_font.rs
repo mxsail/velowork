@@ -45,6 +45,7 @@ impl SettingsPanel {
                                 cx,
                             ))
                             .child(self.render_ui_font_dropdown_row(&s.ui_font_family, cx))
+                            .child(self.render_text_antialiasing_dropdown_row(cx))
                             .child(self.render_number_stepper(
                                 "ui-scale",
                                 &ui_scale_label,

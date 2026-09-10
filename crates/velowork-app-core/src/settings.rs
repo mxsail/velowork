@@ -601,6 +601,7 @@ impl SettingsState {
 
     // Font settings
     setting_setter!(set_ui_font_family, ui_font_family, String);
+    setting_setter!(set_text_antialiasing, text_antialiasing, crate::workspace::settings::TextAntialiasingMode);
 
     // Terminal settings
     setting_setter!(set_color_scheme, color_scheme, String);
