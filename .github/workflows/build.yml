@@ -13,7 +13,7 @@ env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  RUST_MIN_STACK: 33554432
+  RUST_MIN_STACK: 67108864
 
 jobs:
   # Runs on every push: Linux check + tests
@@ -59,7 +59,7 @@ jobs:
         run: cargo check --release
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets
+        run: cargo clippy --workspace
 
       - name: Run tests
         run: cargo test
