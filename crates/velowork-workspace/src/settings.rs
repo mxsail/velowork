@@ -124,9 +124,9 @@ impl ProxyMode {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CloseBehavior {
-    #[default]
     #[serde(alias = "minimizetotray", alias = "closetotray")]
     Minimize,
+    #[default]
     #[serde(alias = "quit")]
     Exit,
 }

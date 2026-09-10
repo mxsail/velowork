@@ -733,28 +733,25 @@ impl WindowView {
         window.on_window_should_close(cx, move |window, cx| {
             if let Some(view) = view_handle.upgrade() {
                 if wid == WindowId::Main {
-                    let behavior = crate::settings::settings_entity(cx)
-                        .read(cx)
-                        .settings
-                        .close_behavior;
-                    match behavior {
-                        crate::workspace::settings::CloseBehavior::Minimize => {
-                            window.minimize_window();
-                            return false;
-                        }
-                        crate::workspace::settings::CloseBehavior::Exit => {
-                            let (allow, session_count, terminal_count) = view.update(cx, |v, cx| {
-                                (v.allow_force_quit, v.active_session_count(cx), v.open_terminal_count())
-                            });
+                    let (allow, session_count, terminal_count) = view.update(cx, |v, cx| {
+                        (v.allow_force_quit, v.active_session_count(cx), v.open_terminal_count())
+                    });
 
-                            if !allow && (session_count > 0 || terminal_count > 0) {
-                                view.update(cx, |v, cx| {
-                                    v.request_quit(window, cx);
-                                });
-                                return false;
-                            }
-                        }
+                    if !allow && (session_count > 0 || terminal_count > 0) {
+                        window.activate_window();
+                        window.refresh();
+                        view.update(cx, |v, cx| {
+                            v.request_quit(window, cx);
+                        });
+                        return false;
                     }
+
+                    Self::flush_all_state(cx);
+                    if let Some(window_store) = cx.try_global::<GlobalWindowStore>().map(|g| g.0.clone()) {
+                        window_store.update(cx, |s, cx| s.close(wid, cx));
+                    }
+                    cx.quit();
+                    return true;
                 }
             }
 

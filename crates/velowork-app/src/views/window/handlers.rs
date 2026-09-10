@@ -1079,7 +1079,7 @@ impl WindowView {
         self.terminals.lock().len()
     }
 
-    fn flush_all_state(cx: &mut App) {
+    pub(crate) fn flush_all_state(cx: &mut App) {
         if let Some(gs) = cx.try_global::<GlobalSettings>() {
             gs.0.read(cx).flush_pending_save();
         }
@@ -1097,7 +1097,7 @@ impl WindowView {
 
     /// Request application quit. If there are open terminal tabs or active
     /// session connections, prompts for confirmation; otherwise quits immediately.
-    pub fn request_quit(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.allow_force_quit {
             Self::flush_all_state(cx);
             cx.quit();
@@ -1112,6 +1112,10 @@ impl WindowView {
             cx.quit();
             return;
         }
+
+        // Before prompting confirmation, ensure window is unminimized and brought to foreground
+        window.activate_window();
+        window.refresh();
 
         let weak = cx.entity().downgrade();
         self.overlay_manager.update(cx, |om, cx| {
