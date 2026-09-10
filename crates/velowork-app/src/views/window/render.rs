@@ -11,7 +11,7 @@ use crate::keybindings::{
 use crate::settings::{open_settings_file, settings_entity};
 use crate::theme::{surface_bg, theme};
 use crate::ui::tokens::{
-    ui_space_card_gap, ui_space_md, ui_text_md, ui_text_xl, RADIUS_CARD,
+    ui_right_toolbar_width, ui_space_card_gap, ui_space_md, ui_text_md, ui_text_xl, RADIUS_CARD,
 };
 use crate::views::layout::navigation::{get_pane_map, prune_pane_map};
 use crate::views::layout::split_pane::{
@@ -1643,7 +1643,7 @@ impl Render for WindowView {
                                 Some(
                                     div()
                                         .id("right-toolbar")
-                                        .w(px(36.0))
+                                        .w(ui_right_toolbar_width(cx))
                                         .h_full()
                                         .overflow_hidden()
                                         .rounded(RADIUS_CARD)

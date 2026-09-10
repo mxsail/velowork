@@ -90,6 +90,8 @@ pub fn dialog_footer_height(cx: &App) -> Pixels {
 pub const HEIGHT_CHIP: Pixels = px(18.0);
 /// Status bar height (24px) - bottom status strip
 pub const HEIGHT_STATUS_BAR: Pixels = px(24.0);
+/// Right vertical icon toolbar strip width (30px)
+pub const RIGHT_TOOLBAR_WIDTH: Pixels = px(30.0);
 
 pub fn ui_height_chip(cx: &App) -> Pixels {
     px(18.0 * super::scale::ui_zoom_factor(cx))
@@ -97,6 +99,10 @@ pub fn ui_height_chip(cx: &App) -> Pixels {
 
 pub fn ui_height_status_bar(cx: &App) -> Pixels {
     px(24.0 * super::scale::ui_zoom_factor(cx))
+}
+
+pub fn ui_right_toolbar_width(cx: &App) -> Pixels {
+    px(30.0 * super::scale::ui_zoom_factor(cx))
 }
 
 // =============================================================================
