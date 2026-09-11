@@ -67,9 +67,6 @@ pub struct ManageProjectsDialog {
     rename_input: Option<Entity<InputState>>,
     rename_sub: Option<Subscription>,
     scroll_handle: UniformListScrollHandle,
-    export_dialog: Option<Entity<ProjectExportDialog>>,
-    import_dialog: Option<Entity<ProjectImportDialog>>,
-    project_form_dialog: Option<Entity<AddProjectDialog>>,
     search_input: Option<Entity<InputState>>,
     search_sub: Option<Subscription>,
     query: String,
@@ -124,9 +121,6 @@ impl ManageProjectsDialog {
             rename_input: None,
             rename_sub: None,
             scroll_handle: UniformListScrollHandle::new(),
-            export_dialog: None,
-            import_dialog: None,
-            project_form_dialog: None,
             search_input: None,
             search_sub: None,
             query: String::new(),
@@ -143,7 +137,7 @@ impl ManageProjectsDialog {
     }
 
     fn trigger_delete_on_selected(&mut self, cx: &mut Context<Self>) {
-        if self.delete_confirming_id.is_some() || self.project_form_dialog.is_some() {
+        if self.delete_confirming_id.is_some() {
             return;
         }
         if self.workspace.read(cx).projects().len() <= 1 {
@@ -236,15 +230,16 @@ impl ManageProjectsDialog {
         let ws = self.workspace.clone();
         let win_id = self.window_id;
         let dlg = cx.new(|cx| AddProjectDialog::new_create(ws, win_id, cx));
-        cx.subscribe(&dlg, |this, _, event: &AddProjectDialogEvent, cx| {
+        let om = self.overlay_manager.clone();
+        cx.subscribe(&dlg, move |this, _, event: &AddProjectDialogEvent, cx| {
             match event {
                 AddProjectDialogEvent::Close => {
-                    this.project_form_dialog = None;
+                    om.update(cx, |om, cx| om.close_modal(cx));
                     this.pending_focus = Some(PendingFocus::SearchInput);
                     cx.notify();
                 }
                 AddProjectDialogEvent::Saved { project_id, .. } => {
-                    this.project_form_dialog = None;
+                    om.update(cx, |om, cx| om.close_modal(cx));
                     let pid = project_id.clone();
                     this.recompute_filtered(cx);
                     if let Some(pos) = this.filtered_indices.iter().position(|&raw_idx| {
@@ -259,8 +254,10 @@ impl ManageProjectsDialog {
             }
         })
         .detach();
-        self.project_form_dialog = Some(dlg);
-        cx.notify();
+        let origin_focus = self.new_button_focus.clone();
+        self.overlay_manager.update(cx, |om, cx| {
+            om.open_modal_with_origin(dlg, Some(origin_focus), None, cx);
+        });
     }
 
     fn open_edit_dialog(&mut self, project_id: &str, cx: &mut Context<Self>) {
@@ -269,15 +266,16 @@ impl ManageProjectsDialog {
         let win_id = self.window_id;
         let pid = project_id.to_string();
         let dlg = cx.new(|cx| AddProjectDialog::new_edit(ws, win_id, &pid, cx));
-        cx.subscribe(&dlg, |this, _, event: &AddProjectDialogEvent, cx| {
+        let om = self.overlay_manager.clone();
+        cx.subscribe(&dlg, move |this, _, event: &AddProjectDialogEvent, cx| {
             match event {
                 AddProjectDialogEvent::Close => {
-                    this.project_form_dialog = None;
+                    om.update(cx, |om, cx| om.close_modal(cx));
                     this.pending_focus = Some(PendingFocus::SearchInput);
                     cx.notify();
                 }
                 AddProjectDialogEvent::Saved { project_id, .. } => {
-                    this.project_form_dialog = None;
+                    om.update(cx, |om, cx| om.close_modal(cx));
                     let pid = project_id.clone();
                     this.recompute_filtered(cx);
                     if let Some(pos) = this.filtered_indices.iter().position(|&raw_idx| {
@@ -292,8 +290,9 @@ impl ManageProjectsDialog {
             }
         })
         .detach();
-        self.project_form_dialog = Some(dlg);
-        cx.notify();
+        self.overlay_manager.update(cx, |om, cx| {
+            om.open_modal(dlg, cx);
+        });
     }
 
     fn duplicate_project(&mut self, project_id: &str, cx: &mut Context<Self>) {
@@ -444,14 +443,16 @@ impl ManageProjectsDialog {
         let ws = self.workspace.clone();
         let pid = project_id.to_string();
         let dlg = cx.new(|cx| ProjectExportDialog::new(ws, pid, cx));
-        cx.subscribe(&dlg, |this, _, _: &ProjectExportDialogEvent, cx| {
-            this.export_dialog = None;
+        let om = self.overlay_manager.clone();
+        cx.subscribe(&dlg, move |this, _, _: &ProjectExportDialogEvent, cx| {
+            om.update(cx, |om, cx| om.close_modal(cx));
             this.pending_focus = Some(PendingFocus::SearchInput);
             cx.notify();
         })
         .detach();
-        self.export_dialog = Some(dlg);
-        cx.notify();
+        self.overlay_manager.update(cx, |om, cx| {
+            om.open_modal(dlg, cx);
+        });
     }
 
     fn open_import_dialog(&mut self, cx: &mut Context<Self>) {
@@ -459,15 +460,16 @@ impl ManageProjectsDialog {
         let ws = self.workspace.clone();
         let win_id = self.window_id;
         let dlg = cx.new(|cx| ProjectImportDialog::new(ws, win_id, cx));
-        cx.subscribe(&dlg, |this, _, event: &ProjectImportDialogEvent, cx| {
+        let om = self.overlay_manager.clone();
+        cx.subscribe(&dlg, move |this, _, event: &ProjectImportDialogEvent, cx| {
             match event {
                 ProjectImportDialogEvent::Close => {
-                    this.import_dialog = None;
+                    om.update(cx, |om, cx| om.close_modal(cx));
                     this.pending_focus = Some(PendingFocus::SearchInput);
                     cx.notify();
                 }
                 ProjectImportDialogEvent::ProjectImported(pid) => {
-                    this.import_dialog = None;
+                    om.update(cx, |om, cx| om.close_modal(cx));
                     this.query.clear();
                     if let Some(inp) = this.search_input.as_ref() {
                         inp.update(cx, |i, cx| i.set_value("", cx));
@@ -485,8 +487,10 @@ impl ManageProjectsDialog {
             }
         })
         .detach();
-        self.import_dialog = Some(dlg);
-        cx.notify();
+        let origin_focus = self.import_button_focus.clone();
+        self.overlay_manager.update(cx, |om, cx| {
+            om.open_modal_with_origin(dlg, Some(origin_focus), None, cx);
+        });
     }
 
 
@@ -1203,12 +1207,6 @@ impl Render for ManageProjectsDialog {
                     .tab_cycle(&focus_group)
                     .key_context("ManageProjectsDialog")
                     .on_action(cx.listener(|this, _: &Cancel, _window, cx| {
-                if this.export_dialog.is_some()
-                    || this.import_dialog.is_some()
-                    || this.project_form_dialog.is_some()
-                {
-                    return;
-                }
                 if this.action_menu_project_id.is_some() {
                     this.action_menu_project_id = None;
                     this.pending_focus = Some(PendingFocus::SearchInput);
@@ -1228,10 +1226,7 @@ impl Render for ManageProjectsDialog {
                 this.dismiss(cx);
             }))
             .on_action(cx.listener(|this, _: &RenameActiveNode, window, cx| {
-                if this.rename_input.is_some()
-                    || this.action_menu_project_id.is_some()
-                    || this.project_form_dialog.is_some()
-                {
+                if this.rename_input.is_some() || this.action_menu_project_id.is_some() {
                     return;
                 }
                 if let Some(pid) = this.current_selected_project_id(cx) {
@@ -1239,12 +1234,7 @@ impl Render for ManageProjectsDialog {
                 }
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if this.rename_input.is_some()
-                    || this.action_menu_project_id.is_some()
-                    || this.export_dialog.is_some()
-                    || this.import_dialog.is_some()
-                    || this.project_form_dialog.is_some()
-                {
+                if this.rename_input.is_some() || this.action_menu_project_id.is_some() {
                     return;
                 }
 
@@ -1397,15 +1387,6 @@ impl Render for ManageProjectsDialog {
                     ),
             )
             .when_some(action_menu_element, |d, o| d.child(o))
-            .when_some(self.export_dialog.as_ref(), |d, export_dlg| {
-                d.child(export_dlg.clone())
-            })
-            .when_some(self.import_dialog.as_ref(), |d, import_dlg| {
-                d.child(import_dlg.clone())
-            })
-            .when_some(self.project_form_dialog.as_ref(), |d, form_dlg| {
-                d.child(form_dlg.clone())
-            })
     }
 }
 

@@ -681,6 +681,17 @@ impl OverlayManager {
             .or_else(|| self.active_modal.clone())
     }
 
+    /// Get all active modals for rendering in stack order (bottom to top).
+    pub fn render_modals(&self) -> Vec<AnyView> {
+        if !self.modal_stack.is_empty() {
+            self.modal_stack.iter().map(|e| e.view.clone()).collect()
+        } else if let Some(m) = self.active_modal.clone() {
+            vec![m]
+        } else {
+            Vec::new()
+        }
+    }
+
     // ========================================================================
     // Centralized overlay registry (window-level click-outside dismissal)
     // ========================================================================

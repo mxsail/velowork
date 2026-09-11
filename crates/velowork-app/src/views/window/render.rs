@@ -850,13 +850,13 @@ impl Render for WindowView {
         let modal_just_closed = self.last_had_modal && !has_modal;
         self.last_had_modal = has_modal;
 
-        if has_modal {
-            // 场景 B（弹窗打开中）：完全静默，绝不抢焦，保证弹窗首项 initial_focus_done 顺畅获焦
-            self.needs_focus_restore = false;
-        } else if self.needs_focus_restore || modal_just_closed {
-            // 场景 C / D / E（弹窗关闭）：专用发起源精准原路归还 + 三级降级兜底链
+        if self.needs_focus_restore || modal_just_closed {
+            // 场景 C / D / E（弹窗关闭）：专用发起源精准原路归还 + 三级降级兜底链（支持嵌套父级弹窗）
             self.needs_focus_restore = false;
             self.restore_modal_closed_focus(window, cx);
+        } else if has_modal {
+            // 场景 B（弹窗打开中）：完全静默，绝不抢焦，保证弹窗首项 initial_focus_done 顺畅获焦
+            self.needs_focus_restore = false;
         } else if !self.initial_focus_done {
             // 场景 A（冷启动首帧）：执行欢迎界面输入框 / 终端初次获焦
             self.initial_focus_done = true;
@@ -1795,18 +1795,16 @@ impl Render for WindowView {
                     })
                     // Content modal overlays — positioned relative to content-root,
                     // so they cover the content area + status bar but NOT the titlebar.
-                    // Single active modal overlay
-                    .when_some(self.overlay_manager.read(cx).render_modal(), |d, modal| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .when(has_rounded_corners, |d| {
-                                    d.rounded(corner_radius).overflow_hidden()
-                                })
-                                .child(modal),
-                        )
-                    })
+                    // Stacked modal overlays (renders bottom-to-top so child modals layer over parent modals)
+                    .children(self.overlay_manager.read(cx).render_modals().into_iter().map(|modal| {
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .when(has_rounded_corners, |d| {
+                                d.rounded(corner_radius).overflow_hidden()
+                            })
+                            .child(modal)
+                    }))
                     // Sidebar active dialog overlay (session add/edit)
                     .when_some(self.sidebar.read(cx).active_dialog.clone(), |d, dialog| {
                         let content = self.sidebar.update(cx, |panel, cx| {
