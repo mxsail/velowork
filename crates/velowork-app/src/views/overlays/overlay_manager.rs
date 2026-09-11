@@ -424,14 +424,25 @@ impl OverlayManager {
 
     /// Close the active (topmost) modal with smooth Dynamic Island morph exit towards `target_bounds`.
     pub fn close_modal_with_morph(&mut self, target_bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+        self.close_modal_with_morph_content(target_bounds, None, cx);
+    }
+
+    /// Close the active (topmost) modal with smooth Dynamic Island morph exit towards `target_bounds`
+    /// and optional destination content for cross-dissolving preview.
+    pub fn close_modal_with_morph_content(
+        &mut self,
+        target_bounds: Bounds<Pixels>,
+        destination_content: Option<AnyView>,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(am) = self.active_animated_modal.clone() {
             am.update(cx, |modal, cx| {
-                modal.start_morph_exit(target_bounds, cx);
+                modal.start_morph_exit_with_content(target_bounds, destination_content, cx);
             });
         } else if let Some(last) = self.modal_stack.last() {
             let am = last.animated.clone();
             am.update(cx, |modal, cx| {
-                modal.start_morph_exit(target_bounds, cx);
+                modal.start_morph_exit_with_content(target_bounds, destination_content, cx);
             });
         } else {
             self.finish_modal_closed(cx);
@@ -2254,7 +2265,8 @@ impl OverlayManager {
                         append_mode: *append_mode,
                         auto_save_interval: *auto_save_interval,
                     });
-                    this.close_modal_with_morph(target_bounds, cx);
+                    let preview = cx.new(|_| crate::views::overlays::dialogs::log_record_dialog::LogToolbarPreview);
+                    this.close_modal_with_morph_content(target_bounds, Some(preview.into()), cx);
                 }
             }
         })

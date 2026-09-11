@@ -209,3 +209,111 @@ impl Render for LogRecordDialog {
                     )
     }
 }
+
+/// 1:1 录制工具条高保真预览组件，用于弹窗收缩飞行动画后半程（110ms-250ms）内交叉淡入。
+pub struct LogToolbarPreview;
+
+impl Render for LogToolbarPreview {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use velowork_ui::tokens::{ICON_STD, RADIUS_MD, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, ui_text_md, ui_text_ms};
+        use velowork_ui::theme::{theme, with_alpha};
+        use velowork_ui::design::semantic::SemanticPalette;
+
+        let t = theme(cx);
+        let p = SemanticPalette::from_context(cx);
+        let status_label = i18n!(cx, "toolbar.log.recording");
+
+        let dot_indicator = div()
+            .w(px(14.0))
+            .h(px(14.0))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(with_alpha(t.error, 0.28))
+            .child(
+                div()
+                    .w(px(8.0))
+                    .h(px(8.0))
+                    .rounded_full()
+                    .bg(p.status_error)
+                    .opacity(0.85),
+            );
+
+        div()
+            .w(px(304.0))
+            .h(px(42.0))
+            .flex()
+            .items_center()
+            .justify_between()
+            .px(SPACE_LG)
+            .py(SPACE_SM)
+            .gap(SPACE_MD)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(SPACE_MD)
+                    .child(dot_indicator)
+                    .child(
+                        div()
+                            .text_size(ui_text_md(cx))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(p.text_primary)
+                            .child(status_label),
+                    )
+                    .child(
+                        div()
+                            .text_size(ui_text_ms(cx))
+                            .font_family("JetBrains Mono")
+                            .text_color(p.text_muted)
+                            .px(SPACE_SM)
+                            .py(px(2.0))
+                            .bg(with_alpha(t.bg_hover, if t.is_dark() { 0.55 } else { 0.85 }))
+                            .rounded(RADIUS_MD)
+                            .child("00:00:00"),
+                    ),
+            )
+            .child(
+                div()
+                    .w(px(1.0))
+                    .h(px(16.0))
+                    .bg(p.border_subtle),
+            )
+            .child(
+                h_flex()
+                    .gap(SPACE_SM)
+                    .items_center()
+                    .child(
+                        div()
+                            .w(px(24.0))
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(RADIUS_STD)
+                            .child(AppIcon::Pause.size(ICON_STD).text_color(p.text_secondary)),
+                    )
+                    .child(
+                        div()
+                            .w(px(24.0))
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(RADIUS_STD)
+                            .child(AppIcon::Stop.size(ICON_STD).text_color(p.status_error)),
+                    )
+                    .child(
+                        div()
+                            .w(px(24.0))
+                            .h(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(RADIUS_STD)
+                            .child(AppIcon::Close.size(ICON_STD).text_color(p.text_secondary)),
+                    ),
+            )
+    }
+}

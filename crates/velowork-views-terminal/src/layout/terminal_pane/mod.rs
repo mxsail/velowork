@@ -759,14 +759,6 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             } else {
                 (0.0, px(-16.0))
             }
-        } else if let Some(start) = self.log_toolbar_start_time {
-            let elapsed = start.elapsed();
-            if elapsed < Duration::from_millis(360) {
-                let t = ((elapsed.as_millis() as f32 - 280.0) / 80.0).clamp(0.0, 1.0);
-                (t, px(0.0))
-            } else {
-                (1.0, px(0.0))
-            }
         } else {
             (1.0, px(0.0))
         };

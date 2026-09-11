@@ -152,6 +152,7 @@ pub struct MorphMotionValues {
     pub current_bounds: Bounds<Pixels>,
     pub border_radius: Pixels,
     pub inner_content_opacity: f32,
+    pub dest_content_opacity: f32,
     pub backdrop_opacity: f32,
     pub card_opacity: f32,
     pub is_morphing: bool,
@@ -237,12 +238,22 @@ impl ModalMotionState {
         let content_factor = (t / 0.2857).min(1.0);
         let inner_content_opacity = (1.0 - content_factor).max(0.0);
 
+        // Destination toolbar preview fades in during 110ms ~ 250ms (0.38 ~ 0.88 progress)
+        let dest_content_opacity = if t <= 0.38 {
+            0.0
+        } else if t >= 0.88 {
+            1.0
+        } else {
+            let p = (t - 0.38) / 0.50;
+            (p * p * (3.0 - 2.0 * p)).clamp(0.0, 1.0)
+        };
+
         // Backdrop fades out in 180ms of 280ms (~0.6428 progress)
         let mask_factor = (t / 0.6428).min(1.0);
         let backdrop_opacity = (1.0 - motion_ease_out_circ(mask_factor)).max(0.0);
 
-        let card_opacity = if t >= 0.95 {
-            (1.0 - t) / 0.05
+        let card_opacity = if t >= 0.98 {
+            (1.0 - t) / 0.02
         } else {
             1.0
         };
@@ -251,6 +262,7 @@ impl ModalMotionState {
             current_bounds: Bounds::new(Point::new(cur_x, cur_y), Size::new(cur_w, cur_h)),
             border_radius,
             inner_content_opacity,
+            dest_content_opacity,
             backdrop_opacity,
             card_opacity,
             is_morphing: true,
@@ -541,13 +553,15 @@ mod tests {
         assert_eq!(val_start.current_bounds.size.width, px(400.0));
         assert_eq!(val_start.current_bounds.size.height, px(300.0));
         assert_eq!(val_start.inner_content_opacity, 1.0);
+        assert_eq!(val_start.dest_content_opacity, 0.0);
         assert_eq!(val_start.border_radius, px(16.0));
 
         // At 80ms into 280ms morph (~t=0.2857, progress = 1.0 - 0.2857 = 0.7143):
-        // Inner form content should have completely faded out
+        // Inner form content should have completely faded out, preview not yet shown
         state.progress = 1.0 - (80.0 / 280.0);
         let val_80ms = state.compute_morph_values().unwrap();
         assert_eq!(val_80ms.inner_content_opacity, 0.0);
+        assert_eq!(val_80ms.dest_content_opacity, 0.0);
 
         // At end of morph (progress=0.0, t=1.0):
         state.progress = 0.0;
@@ -558,5 +572,6 @@ mod tests {
         assert_eq!(val_end.current_bounds.size.height, px(36.0));
         assert_eq!(val_end.border_radius, crate::tokens::RADIUS_LG);
         assert_eq!(val_end.backdrop_opacity, 0.0);
+        assert_eq!(val_end.dest_content_opacity, 1.0);
     }
 }

@@ -48,6 +48,7 @@ pub struct AnimatedModal {
     animations_enabled: bool,
     alignment: ModalAlignment,
     measured_card_bounds: Option<Bounds<Pixels>>,
+    morph_destination_content: Option<AnyView>,
 }
 
 impl EventEmitter<AnimatedModalEvent> for AnimatedModal {}
@@ -82,6 +83,7 @@ impl AnimatedModal {
             animations_enabled,
             alignment: ModalAlignment::default(),
             measured_card_bounds: None,
+            morph_destination_content: None,
         };
 
         if animations_enabled {
@@ -188,10 +190,21 @@ impl AnimatedModal {
         target_bounds: Bounds<Pixels>,
         cx: &mut Context<Self>,
     ) {
+        self.start_morph_exit_with_content(target_bounds, None, cx);
+    }
+
+    /// 启动带有终点内容预览交叉渐变的形变收缩退场动画。
+    pub fn start_morph_exit_with_content(
+        &mut self,
+        target_bounds: Bounds<Pixels>,
+        destination_content: Option<AnyView>,
+        cx: &mut Context<Self>,
+    ) {
         if self.motion_state.is_closing {
             return;
         }
 
+        self.morph_destination_content = destination_content;
         cx.emit(AnimatedModalEvent::Closing);
 
         if self.animations_enabled && self.motion_state.progress > 0.05 {
@@ -295,6 +308,7 @@ impl Render for AnimatedModal {
                     .child(
                         div()
                             .id("animated-modal-morph-card")
+                            .relative()
                             .w(mv.current_bounds.size.width)
                             .h(mv.current_bounds.size.height)
                             .rounded(mv.border_radius)
@@ -305,11 +319,35 @@ impl Render for AnimatedModal {
                             .overflow_hidden()
                             .opacity(mv.card_opacity)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(
-                                div()
-                                    .size_full()
-                                    .opacity(mv.inner_content_opacity)
-                                    .child(self.content.clone()),
+                            .when(mv.inner_content_opacity > 0.001, |el| {
+                                el.child(
+                                    div()
+                                        .absolute()
+                                        .inset_0()
+                                        .size_full()
+                                        .opacity(mv.inner_content_opacity)
+                                        .child(self.content.clone()),
+                                )
+                            })
+                            .when_some(
+                                if mv.dest_content_opacity > 0.001 {
+                                    self.morph_destination_content.as_ref()
+                                } else {
+                                    None
+                                },
+                                |el, dest| {
+                                    el.child(
+                                        div()
+                                            .absolute()
+                                            .inset_0()
+                                            .size_full()
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .opacity(mv.dest_content_opacity)
+                                            .child(dest.clone()),
+                                    )
+                                },
                             ),
                     ),
             );
