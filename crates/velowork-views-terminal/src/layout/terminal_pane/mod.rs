@@ -403,6 +403,9 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             }
         }
     }
+}
+
+impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
     /// Reconnect the terminal process / session.
     pub fn handle_reconnect(&mut self, cx: &mut Context<Self>) {

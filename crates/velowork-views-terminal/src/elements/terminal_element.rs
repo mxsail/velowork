@@ -507,7 +507,8 @@ impl Element for TerminalElement {
         let cell_size_changed = (cell_width_f - current_size.cell_width).abs() > 0.001
             || (line_height_f - current_size.cell_height).abs() > 0.001;
 
-        if cols_rows_changed && self.terminal.is_resize_owner_local() {
+        let is_valid_layout = available_width >= 50.0 && available_height >= 50.0;
+        if is_valid_layout && cols_rows_changed && self.terminal.is_resize_owner_local() {
             let target = if n_viewers <= 1 {
                 desired_size
             } else {

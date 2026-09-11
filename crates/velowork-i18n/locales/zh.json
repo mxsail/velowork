@@ -797,6 +797,8 @@
     "fullscreen": "全屏",
     "minimize": "最小化",
     "restore": "还原",
+    "minimize_tab": "最小化标签页",
+    "restore_tab": "还原标签页",
     "search": "搜索",
     "add_tab": "新建标签页",
     "export_buffer": "导出缓冲区到文件",

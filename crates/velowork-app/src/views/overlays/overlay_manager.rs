@@ -236,6 +236,8 @@ pub enum OverlayManagerEvent {
     TabCloseInactive { project_id: String, layout_path: Vec<usize> },
     /// Tab context menu: open session settings
     TabSessionSettings { project_id: String, layout_path: Vec<usize>, tab_index: usize },
+    /// Tab context menu: toggle minimize terminal
+    TabToggleMinimize { project_id: String, layout_path: Vec<usize>, tab_index: usize },
 
     /// Profile manager: switch to a different profile (triggers relaunch)
     SwitchProfile(String),
@@ -1534,6 +1536,7 @@ impl OverlayManager {
     // ========================================================================
 
     /// Show tab context menu.
+    #[allow(clippy::too_many_arguments)]
     pub fn show_tab_context_menu(
         &mut self,
         tab_index: usize,
@@ -1542,19 +1545,39 @@ impl OverlayManager {
         layout_path: Vec<usize>,
         position: gpui::Point<gpui::Pixels>,
         is_ssh: bool,
+        is_minimized: bool,
+        minimize_shortcut: Option<SharedString>,
         cx: &mut Context<Self>,
     ) {
         self.close_modal(cx);
         self.close_all_context_menus();
 
         let menu = cx.new(|cx| {
-            TabContextMenu::new(tab_index, num_tabs, project_id, layout_path, position, is_ssh, cx)
+            TabContextMenu::new(
+                tab_index,
+                num_tabs,
+                project_id,
+                layout_path,
+                position,
+                is_ssh,
+                is_minimized,
+                minimize_shortcut,
+                cx,
+            )
         });
 
         cx.subscribe(&menu, |this, _, event: &TabContextMenuEvent, cx| {
             match event {
                 TabContextMenuEvent::Close => {
                     this.hide_tab_context_menu(cx);
+                }
+                TabContextMenuEvent::ToggleMinimize { project_id, layout_path, tab_index } => {
+                    this.hide_tab_context_menu(cx);
+                    cx.emit(OverlayManagerEvent::TabToggleMinimize {
+                        project_id: project_id.clone(),
+                        layout_path: layout_path.clone(),
+                        tab_index: *tab_index,
+                    });
                 }
                 TabContextMenuEvent::DuplicateSession { project_id, layout_path, tab_index } => {
                     this.hide_tab_context_menu(cx);

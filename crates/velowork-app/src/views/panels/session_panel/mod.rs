@@ -2623,6 +2623,10 @@ impl SessionPanel {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
+        log::debug!(
+            "[session_panel:connect_ssh] session_id={} name={} protocol={:?}",
+            session.id, session.name, session.protocol
+        );
         let shell = match session.protocol {
             velowork_state::SessionProtocol::Serial => {
                 let port = session.serial_port.as_deref().unwrap_or("");
@@ -2739,7 +2743,18 @@ impl SessionPanel {
                             .filter(|state| state.project_id == project_id)
                             .map(|state| state.layout_path.clone())
                             .unwrap_or_else(Vec::new);
-                        ws.add_tab_with_shell(fm, &project_id, &path, shell.clone(), cx);
+                        // If the currently focused pane is a Welcome placeholder,
+                        // replace it in-place rather than adding a new Tab sibling.
+                        let focused_is_welcome = ws
+                            .get_terminal_shell(&project_id, &path)
+                            .map(|st| st == velowork_terminal::shell_config::ShellType::Welcome)
+                            .unwrap_or(false);
+                        if focused_is_welcome {
+                            ws.replace_terminal_shell(&project_id, &path, shell.clone(), cx);
+                            ws.set_focused_terminal(fm, project_id.clone(), path.clone(), cx);
+                        } else {
+                            ws.add_tab_with_shell(fm, &project_id, &path, shell.clone(), cx);
+                        }
                     } else {
                         ws.add_terminal_with_shell(fm, &project_id, shell.clone(), cx);
                     }

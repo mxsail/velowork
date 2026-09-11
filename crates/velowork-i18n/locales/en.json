@@ -797,6 +797,8 @@
     "fullscreen": "Fullscreen",
     "minimize": "Minimize",
     "restore": "Restore",
+    "minimize_tab": "Minimize Tab",
+    "restore_tab": "Restore Tab",
     "search": "Search",
     "add_tab": "New Tab",
     "export_buffer": "Export Buffer to File",

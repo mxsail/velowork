@@ -60,6 +60,21 @@ pub fn ease_out_morph(t: f32) -> f32 {
     cubic_bezier(t, 0.32, 0.72, 0.0, 1.0)
 }
 
+/// Panel morphing curve matching HTML prototype `cubic-bezier(0.22, 1, 0.36, 1)`.
+pub fn ease_out_panel(t: f32) -> f32 {
+    cubic_bezier(t, 0.22, 1.0, 0.36, 1.0)
+}
+
+/// Tab collapse easing curve `cubic-bezier(0.4, 0, 0.2, 1)`.
+pub fn ease_tab_collapse(t: f32) -> f32 {
+    cubic_bezier(t, 0.4, 0.0, 0.2, 1.0)
+}
+
+/// Tab expand easing curve `cubic-bezier(0.2, 0, 0, 1)`.
+pub fn ease_tab_expand(t: f32) -> f32 {
+    cubic_bezier(t, 0.2, 0.0, 0.0, 1.0)
+}
+
 /// Ant Design 6.6.3 Modal Open easing `motionEaseInOutCirc`: `cubic-bezier(0.78, 0.14, 0.15, 0.86)`.
 pub fn motion_ease_in_out_circ(t: f32) -> f32 {
     cubic_bezier(t, 0.78, 0.14, 0.15, 0.86)

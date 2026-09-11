@@ -575,6 +575,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
     ) {
         match action {
             crate::welcome::WelcomeAction::StartTerminal => {
+                log::debug!(
+                    "[terminal_pane:start_terminal] project_id={} path={:?}",
+                    self.project_id, self.layout_path
+                );
                 self.start_terminal_with_shell(velowork_core::shell::ShellType::Default, cx);
             }
             crate::welcome::WelcomeAction::ConnectSession(session) => {

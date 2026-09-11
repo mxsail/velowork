@@ -307,7 +307,7 @@ pub fn render_welcome_dashboard(
     on_key_down: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
     on_submit: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_action: impl Fn(&WelcomeAction, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
+) -> gpui::Stateful<Div> {
     let t = theme(cx);
     let p = SemanticPalette::from_context(cx);
 

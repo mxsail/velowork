@@ -43,6 +43,30 @@ impl Workspace {
         });
     }
 
+    /// Replace shell type for a terminal at a layout path, resetting its terminal_id to None
+    /// so a new terminal process can be spawned in its place without creating additional tabs.
+    pub fn replace_terminal_shell(
+        &mut self,
+        project_id: &str,
+        path: &[usize],
+        shell_type: ShellType,
+        cx: &mut Context<Self>,
+    ) {
+        self.with_layout_node(project_id, path, cx, |node| {
+            if let LayoutNode::Terminal {
+                shell_type: st,
+                terminal_id: tid,
+                ..
+            } = node
+            {
+                *st = shell_type;
+                *tid = None;
+                return true;
+            }
+            false
+        });
+    }
+
     /// Get shell type for a terminal at a layout path
     pub fn get_terminal_shell(&self, project_id: &str, path: &[usize]) -> Option<ShellType> {
         let project = self.project(project_id)?;
@@ -108,6 +132,36 @@ impl Workspace {
                 }
             self.set_focused_terminal(focus_manager, project_id.to_string(), path.to_vec(), cx);
         }
+    }
+
+    /// Restore (un-minimize) a terminal by ID (finds path automatically)
+    pub fn restore_terminal_by_id(
+        &mut self,
+        focus_manager: &mut crate::focus::FocusManager,
+        project_id: &str,
+        terminal_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let mut target_path = None;
+
+        if let Some(project) = self.project_mut(project_id)
+            && let Some(ref mut layout) = project.layout
+                && let Some(path) = layout.find_terminal_path(terminal_id)
+                    && let Some(node) = layout.get_at_path_mut(&path)
+                        && let LayoutNode::Terminal { minimized, .. } = node {
+                            if *minimized {
+                                *minimized = false;
+                                target_path = Some(path);
+                            }
+                        }
+
+        let Some(path) = target_path else { return; };
+        if let Some(project) = self.project_mut(project_id)
+            && let Some(ref mut layout) = project.layout {
+                layout.activate_tabs_along_path(&path);
+            }
+        self.notify_data(cx);
+        self.set_focused_terminal(focus_manager, project_id.to_string(), path, cx);
     }
 
     /// Toggle terminal minimized state by terminal ID (finds path automatically)
@@ -378,6 +432,123 @@ mod tests {
         assert_eq!(
             fm.focused_terminal_state().map(|f| (f.project_id.clone(), f.layout_path.clone())),
             Some(("p1".to_string(), vec![0]))
+        );
+
+        // Minimize term-2
+        ws.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_terminal_minimized_by_id(&mut fm, "p1", "term-2", cx);
+        });
+        assert!(cx.read(|cx| ws.read(cx).is_terminal_minimized("p1", "term-2")));
+
+        // Restore term-2 using restore_terminal_by_id
+        ws.update(cx, |ws: &mut Workspace, cx| {
+            ws.restore_terminal_by_id(&mut fm, "p1", "term-2", cx);
+        });
+        assert!(!cx.read(|cx| ws.read(cx).is_terminal_minimized("p1", "term-2")));
+        assert_eq!(
+            fm.focused_terminal_state().map(|f| (f.project_id.clone(), f.layout_path.clone())),
+            Some(("p1".to_string(), vec![1]))
+        );
+    }
+
+    #[gpui::test]
+    fn test_tabs_terminal_minimize_and_restore_by_id(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        let mut proj = make_test_project("p1");
+        let t1 = LayoutNode::Terminal {
+            terminal_id: Some("term-tab-1".to_string()),
+            minimized: false,
+            detached: false,
+            shell_type: velowork_core::shell::ShellType::Default,
+            zoom_level: 1.0,
+        };
+        let t2 = LayoutNode::Terminal {
+            terminal_id: Some("term-tab-2".to_string()),
+            minimized: false,
+            detached: false,
+            shell_type: velowork_core::shell::ShellType::Default,
+            zoom_level: 1.0,
+        };
+        proj.layout = Some(LayoutNode::Tabs {
+            children: vec![t1, t2],
+            active_tab: 0,
+        });
+        data.projects = vec![proj];
+        data.project_order = vec!["p1".to_string()];
+        let ws = cx.new(|_cx| Workspace::new(data));
+
+        let mut fm = FocusManager::new();
+        fm.focus_terminal("p1".to_string(), vec![0]);
+
+        // Minimize term-tab-1
+        ws.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_terminal_minimized_by_id(&mut fm, "p1", "term-tab-1", cx);
+        });
+        assert!(cx.read(|cx| ws.read(cx).is_terminal_minimized("p1", "term-tab-1")));
+        // Active tab switched to 1
+        assert_eq!(
+            cx.read(|cx| match ws.read(cx).project("p1").unwrap().layout.as_ref().unwrap() {
+                LayoutNode::Tabs { active_tab, .. } => *active_tab,
+                _ => 999,
+            }),
+            1
+        );
+        assert_eq!(
+            fm.focused_terminal_state().map(|f| (f.project_id.clone(), f.layout_path.clone())),
+            Some(("p1".to_string(), vec![1]))
+        );
+
+        // Restore term-tab-1 using restore_terminal_by_id
+        ws.update(cx, |ws: &mut Workspace, cx| {
+            ws.restore_terminal_by_id(&mut fm, "p1", "term-tab-1", cx);
+        });
+        assert!(!cx.read(|cx| ws.read(cx).is_terminal_minimized("p1", "term-tab-1")));
+        // Active tab switched back to 0
+        assert_eq!(
+            cx.read(|cx| match ws.read(cx).project("p1").unwrap().layout.as_ref().unwrap() {
+                LayoutNode::Tabs { active_tab, .. } => *active_tab,
+                _ => 999,
+            }),
+            0
+        );
+        assert_eq!(
+            fm.focused_terminal_state().map(|f| (f.project_id.clone(), f.layout_path.clone())),
+            Some(("p1".to_string(), vec![0]))
+        );
+    }
+
+    #[gpui::test]
+    fn test_single_terminal_minimize_and_restore_by_id(cx: &mut gpui::TestAppContext) {
+        let mut data = make_workspace_data();
+        let mut proj = make_test_project("p1");
+        proj.layout = Some(LayoutNode::Terminal {
+            terminal_id: Some("term-single".to_string()),
+            minimized: false,
+            detached: false,
+            zoom_level: 1.0,
+            shell_type: velowork_core::shell::ShellType::Default,
+        });
+        data.projects = vec![proj];
+        data.project_order = vec!["p1".to_string()];
+        let ws = cx.new(|_cx| Workspace::new(data));
+
+        let mut fm = FocusManager::new();
+        fm.focus_terminal("p1".to_string(), vec![]);
+
+        // Minimize single terminal
+        ws.update(cx, |ws: &mut Workspace, cx| {
+            ws.toggle_terminal_minimized_by_id(&mut fm, "p1", "term-single", cx);
+        });
+        assert!(cx.read(|cx| ws.read(cx).is_terminal_minimized("p1", "term-single")));
+
+        // Restore single terminal by id
+        ws.update(cx, |ws: &mut Workspace, cx| {
+            ws.restore_terminal_by_id(&mut fm, "p1", "term-single", cx);
+        });
+        assert!(!cx.read(|cx| ws.read(cx).is_terminal_minimized("p1", "term-single")));
+        assert_eq!(
+            fm.focused_terminal_state().map(|f| (f.project_id.clone(), f.layout_path.clone())),
+            Some(("p1".to_string(), vec![]))
         );
     }
 }

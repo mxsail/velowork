@@ -24,7 +24,8 @@ use velowork_ui::overlay_menu::{
 };
 use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::tab::{tab_height, tab_style};
-use velowork_ui::theme::{bg_opacity, theme, with_alpha};
+use velowork_ui::theme::{bg_opacity, surface_bg_t, theme, with_alpha};
+use velowork_ui::motion::ease_out_panel;
 use velowork_ui::tokens::{
     RADIUS_CARD, RADIUS_MD, RADIUS_STD, RADIUS_XS, SPACE_MD,
     SPACE_SM, SPACE_XS, ui_icon_std_ts, ui_text_md, ui_text_sm,
@@ -351,9 +352,13 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         &mut self,
         children: &[LayoutNode],
         active_tab: usize,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        log::debug!(
+            "[tabs:render] project_id={} path={:?} active_tab={} num_children={}",
+            self.project_id, self.layout_path, active_tab, children.len()
+        );
         if let Some(zoomed_idx) = self.find_zoomed_child_index(children, cx) {
             let mut child_path = self.layout_path.clone();
             child_path.push(zoomed_idx);
@@ -412,13 +417,149 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .map(|(i, _)| i)
             .collect();
 
+        let enable_animations = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.enable_animations)
+            .unwrap_or(true);
+
+        let parent_bounds = *self.container_bounds_ref.borrow();
+        let w = f32::from(parent_bounds.size.width).max(300.0);
+        let h = f32::from(parent_bounds.size.height).max(200.0);
+        let bar_h = f32::from(super::layout_container::compute_tab_bar_height(cx));
+        let content_h = (h - bar_h).max(100.0);
+        let capsule_x = 8.0f32;
+        let capsule_y = (content_h - 36.0).max(0.0);
+        let capsule_w = 160.0f32.min(w * 0.6);
+        let capsule_h = 28.0f32;
+        let capsule_radius = 6.0f32;
+
+        let bounds_canvas = canvas(
+            {
+                let container_bounds_ref = self.container_bounds_ref.clone();
+                move |bounds, _window, _cx| {
+                    *container_bounds_ref.borrow_mut() = bounds;
+                }
+            },
+            |_bounds, _prepaint, _window, _cx| {},
+        )
+        .absolute()
+        .size_full();
+
+        let make_ghost_collapsing_cards = |this: &Self, cx: &App| -> Vec<AnyElement> {
+            let mut cards = Vec::new();
+            if enable_animations {
+                let t = theme(cx);
+                let p = SemanticPalette::from_theme(&t);
+                let t_border = t.border;
+                let suffixes = duplicate_session_suffixes(&this.workspace.read(cx));
+                for (i, child) in children.iter().enumerate() {
+                    if let LayoutNode::Terminal { terminal_id: Some(tid), .. } = child {
+                        if let Some(&(start, seq)) = this.collapsing_tabs.get(tid) {
+                            if start.elapsed() < std::time::Duration::from_millis(280) {
+                                let mut child_path = this.layout_path.clone();
+                                child_path.push(i);
+                                let terminal_pane = this.child_containers.get(&child_path)
+                                    .and_then(|c| c.read(cx).terminal_pane.clone());
+                                let tab_title = this.tab_display_label(children, i, cx, &suffixes);
+
+                                let ghost_card = div()
+                                    .id(ElementId::Name(format!("tabs-ghost-card-{}-{}", tid, seq).into()))
+                                    .bg(surface_bg_t(t.bg_panel, &t))
+                                    .border_1()
+                                    .border_color(rgb(t.border))
+                                    .shadow_lg()
+                                    .overflow_hidden()
+                                    .child(
+                                        v_flex()
+                                            .size_full()
+                                            .bg(surface_bg_t(t.bg_panel, &t))
+                                            .child(
+                                                h_flex()
+                                                    .h(px(26.0))
+                                                    .px(SPACE_SM)
+                                                    .items_center()
+                                                    .gap(SPACE_XS)
+                                                    .border_b_1()
+                                                    .border_color(rgb(t.border))
+                                                    .bg(p.surface_header)
+                                                    .child(AppIcon::Terminal.size(ui_icon_std_ts(cx)).text_color(p.status_success))
+                                                    .child(
+                                                        div()
+                                                            .text_size(ui_text_sm(cx))
+                                                            .text_color(p.text_primary)
+                                                            .truncate()
+                                                            .child(tab_title)
+                                                    )
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .size_full()
+                                                    .bg(p.surface_card)
+                                                    .overflow_hidden()
+                                                    .when_some(terminal_pane, |d, pane| {
+                                                        d.child(AnyView::from(pane).cached(StyleRefinement::default().size_full()))
+                                                    })
+                                            )
+                                    );
+
+                                let tid_str = tid.clone();
+                                let contracting_el = ghost_card.with_animation(
+                                    format!("tabs-ghost-contract-{}-{}", tid_str, seq),
+                                    Animation::new(std::time::Duration::from_millis(280))
+                                        .with_easing(ease_out_panel),
+                                    move |this, delta| {
+                                        let t = delta;
+                                        if t >= 0.98 {
+                                            this.absolute()
+                                                .left(px(capsule_x))
+                                                .top(px(capsule_y))
+                                                .w(px(capsule_w))
+                                                .h(px(capsule_h))
+                                                .opacity(0.0)
+                                        } else {
+                                            let cur_x = px(capsule_x * t);
+                                            let cur_y = px(capsule_y * t);
+                                            let cur_w = px(w + (capsule_w - w) * t);
+                                            let cur_h = px(content_h + (capsule_h - content_h) * t);
+                                            let cur_radius = px(capsule_radius * t);
+                                            let fade = if t >= 0.65 {
+                                                ((0.98 - t) / 0.33).clamp(0.0, 1.0)
+                                            } else {
+                                                1.0
+                                            };
+                                            this.absolute()
+                                                .left(cur_x)
+                                                .top(cur_y)
+                                                .w(cur_w)
+                                                .h(cur_h)
+                                                .rounded(cur_radius)
+                                                .border_1()
+                                                .border_color(rgb(t_border))
+                                                .shadow_lg()
+                                                .overflow_hidden()
+                                                .opacity(fade)
+                                        }
+                                    },
+                                );
+                                cards.push(contracting_el.into_any_element());
+                            }
+                        }
+                    }
+                }
+            }
+            cards
+        };
+
         if visible_indices.is_empty() {
-            let t = theme(cx);
-            let p = SemanticPalette::from_theme(&t);
+            let tab_bar = self.render_tab_bar(children, active_tab, false, cx);
+            let welcome_view = self.render_welcome_empty_state(window, cx);
+            let ghost_cards = make_ghost_collapsing_cards(self, cx);
             return v_flex()
                 .size_full()
                 .relative()
-                .child(self.render_tab_bar(children, active_tab, false, cx))
+                .child(bounds_canvas)
+                .child(tab_bar)
                 .child(
                     div()
                         .id("console")
@@ -426,23 +567,8 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                         .size_full()
                         .overflow_hidden()
                         .relative()
-                        .child(
-                            div()
-                                .flex_1()
-                                .size_full()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .justify_center()
-                                .gap(SPACE_MD)
-                                .text_color(p.text_muted)
-                                .child(AppIcon::Terminal.size(px(28.0)).text_color(p.text_muted))
-                                .child(
-                                    div()
-                                        .text_size(ui_text_md(cx))
-                                        .child(i18n!(cx, "terminal.empty_tabs")),
-                                ),
-                        ),
+                        .child(welcome_view)
+                        .children(ghost_cards),
                 );
         }
 
@@ -489,25 +615,14 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             }
         }
 
-        let container_bounds_ref = self.container_bounds_ref.clone();
+        let tab_bar = self.render_tab_bar(children, effective_active_tab, false, cx);
+        let ghost_cards = make_ghost_collapsing_cards(self, cx);
 
         v_flex()
             .size_full()
             .relative()
-            .child(
-                canvas(
-                    {
-                        let container_bounds_ref = container_bounds_ref.clone();
-                        move |bounds, _window, _cx| {
-                            *container_bounds_ref.borrow_mut() = bounds;
-                        }
-                    },
-                    |_bounds, _prepaint, _window, _cx| {},
-                )
-                .absolute()
-                .size_full(),
-            )
-            .child(self.render_tab_bar(children, effective_active_tab, false, cx))
+            .child(bounds_canvas)
+            .child(tab_bar)
             .child(
                 div()
                     .id("console")
@@ -541,12 +656,21 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             })
                             .clone();
 
+                        *container.read(cx).container_bounds_ref.borrow_mut() = Bounds {
+                            origin: parent_bounds.origin,
+                            size: Size {
+                                width: px(w),
+                                height: px(content_h),
+                            },
+                        };
+
                         if let Some(reg) = self.overlay_registry.clone() {
                             container.update(cx, |c, _cx| c.set_overlay_registry(reg));
                         }
 
                         AnyView::from(container).cached(StyleRefinement::default().size_full())
-                    }),
+                    })
+                    .children(ghost_cards),
             )
     }
 
@@ -587,7 +711,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         &self,
         children: &[LayoutNode],
         index: usize,
-        cx: &Context<Self>,
+        cx: &App,
         suffixes: &HashMap<String, usize>,
     ) -> String {
         let child = &children[index];
@@ -711,11 +835,60 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         // dropdown and the command panel's target host list.
         let suffixes = duplicate_session_suffixes(&self.workspace.read(cx));
 
+        let enable_animations = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.enable_animations)
+            .unwrap_or(true);
+
+        let current_visible_ids: HashSet<String> = children
+            .iter()
+            .filter_map(|child| {
+                if !child.is_all_hidden() {
+                    if let LayoutNode::Terminal { terminal_id: Some(id), .. } = child {
+                        return Some(id.clone());
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if enable_animations {
+            for prev_id in &self.prev_visible_tab_ids {
+                if !current_visible_ids.contains(prev_id) && !self.collapsing_tabs.contains_key(prev_id) {
+                    self.tab_anim_seq = self.tab_anim_seq.wrapping_add(1);
+                    let seq = self.tab_anim_seq;
+                    self.restoring_tabs.remove(prev_id);
+                    self.collapsing_tabs.insert(prev_id.clone(), (std::time::Instant::now(), seq));
+                    let entity = cx.entity().downgrade();
+                    let tid_clone = prev_id.clone();
+                    cx.spawn(async move |_, cx| {
+                        smol::Timer::after(std::time::Duration::from_millis(290)).await;
+                        let _ = entity.update(cx, |this, cx| {
+                            this.collapsing_tabs.remove(&tid_clone);
+                            cx.notify();
+                        });
+                    }).detach();
+                }
+            }
+        }
+        self.prev_visible_tab_ids = current_visible_ids;
+        self.has_initialized_tabs = true;
+
         let this_weak = cx.entity().downgrade();
         let tab_elements: Vec<_> = children
             .iter()
             .enumerate()
-            .filter(|(_, child)| !child.is_all_hidden())
+            .filter(|(_, child)| {
+                if !child.is_all_hidden() {
+                    return true;
+                }
+                if let LayoutNode::Terminal { terminal_id: Some(id), .. } = child {
+                    if let Some((start, _)) = self.collapsing_tabs.get(id) {
+                        return start.elapsed() < std::time::Duration::from_millis(260);
+                    }
+                }
+                false
+            })
             .map(|(i, child)| {
             let is_active = i == active_tab;
             let workspace = workspace.clone();
@@ -1039,7 +1212,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 })
             };
 
-            tab_element
+            let tab_item = tab_element
                 .overflow_hidden()
                 .when(has_drop_animation, |d| {
                     let glow_alpha = animation_progress * 0.5;
@@ -1086,7 +1259,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                         let project_id_for_tab_close = project_id.clone();
                         let dispatcher_for_tab_close = self.action_dispatcher.clone();
                         let close_tab_label = i18n!(cx, "terminal.close_tab");
-                        let weak = this_weak.clone();
+                        let weak_close = this_weak.clone();
 
                         div()
                             .id(ElementId::Name(format!("tab-close-{}-{:?}", i, layout_path).into()))
@@ -1106,7 +1279,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             })
                             .on_click(move |_, _window, cx| {
                                 cx.stop_propagation();
-                                if let Some(this) = weak.upgrade() {
+                                if let Some(this) = weak_close.upgrade() {
                                     this.update(cx, |this, _| {
                                         this.hovered_tab = None;
                                     });
@@ -1368,7 +1541,65 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                 this.start_tab_rename(tid.clone(), tab_label.clone(), window, cx);
                             }
                     })
-                })
+                });
+
+            let collapsing_info = terminal_id
+                .as_ref()
+                .and_then(|tid| self.collapsing_tabs.get(tid).copied());
+            let restoring_info = terminal_id
+                .as_ref()
+                .and_then(|tid| self.restoring_tabs.get(tid).copied());
+
+            let base_tab_w = match tab_width_mode {
+                TabWidthMode::Compact => 85.0f32,
+                TabWidthMode::Equal => 155.0f32,
+                TabWidthMode::TitleLength => 140.0f32,
+            };
+
+            let is_hidden = child.is_all_hidden();
+            if enable_animations && is_hidden && let Some((_, seq)) = collapsing_info {
+                let tid = terminal_id.clone().unwrap_or_default();
+                div()
+                    .id(ElementId::Name(format!("tab-wrapper-collapse-{}-{}", tid, seq).into()))
+                    .with_animation(
+                        format!("tab-collapse-{}-{}", tid, seq),
+                        Animation::new(std::time::Duration::from_millis(280))
+                            .with_easing(velowork_ui::motion::ease_tab_collapse),
+                        move |this, delta| {
+                            let t = delta;
+                            let cur_w = (base_tab_w * (1.0 - t)).max(0.0);
+                            this.w(px(cur_w))
+                                .max_w(px(cur_w))
+                                .flex_shrink_0()
+                                .opacity((1.0 - t).max(0.0))
+                                .overflow_hidden()
+                        },
+                    )
+                    .child(tab_item.w_full())
+                    .into_any_element()
+            } else if enable_animations && !is_hidden && let Some((_, seq)) = restoring_info {
+                let tid = terminal_id.clone().unwrap_or_default();
+                div()
+                    .id(ElementId::Name(format!("tab-wrapper-expand-{}-{}", tid, seq).into()))
+                    .with_animation(
+                        format!("tab-expand-{}-{}", tid, seq),
+                        Animation::new(std::time::Duration::from_millis(280))
+                            .with_easing(velowork_ui::motion::ease_tab_expand),
+                        move |this, delta| {
+                            let t = delta;
+                            let cur_w = (base_tab_w * t).min(base_tab_w);
+                            this.w(px(cur_w))
+                                .max_w(px(cur_w))
+                                .flex_shrink_0()
+                                .opacity(t.min(1.0))
+                                .overflow_hidden()
+                        },
+                    )
+                    .child(tab_item.w_full())
+                    .into_any_element()
+            } else {
+                tab_item.into_any_element()
+            }
         }).collect();
 
         let project_id_for_new = self.project_id.clone();
@@ -1387,6 +1618,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 if this.empty_area_click_detector.check(())
                     && let Some(ref dispatcher) = dispatcher_for_new
                 {
+                    log::debug!(
+                        "[tabs:add_welcome_tab] project_id={} path={:?}",
+                        project_id_for_new, layout_path_for_new
+                    );
                     dispatcher.add_tab_with_shell(
                         &project_id_for_new,
                         &layout_path_for_new,
@@ -1535,7 +1770,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         let tab_list_btn_bounds = self.tab_list_btn_bounds.clone();
 
         let item_height = px((tab_height(cx) - 6.0).max(24.0));
-        let bar_height = item_height + SPACE_SM * 2.0;
+        let bar_height = super::layout_container::compute_tab_bar_height(cx);
         let image_set = terminal_view_settings(cx)
             .terminal_background_image
             .as_ref()
@@ -1654,6 +1889,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             let layout_path = self.layout_path.clone();
                             let action_dispatcher = self.action_dispatcher.clone();
                             move |_, _window, cx| {
+                                log::debug!(
+                                    "[tabs:add_tab] project_id={} path={:?} standalone={}",
+                                    project_id, layout_path, standalone
+                                );
                                 if let Some(ref dispatcher) = action_dispatcher {
                                     dispatcher.add_tab(&project_id, &layout_path, !standalone, cx);
                                 }

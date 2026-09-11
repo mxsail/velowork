@@ -200,6 +200,12 @@ impl TerminalContent {
         self.scrollbar.update(cx, |scrollbar, _| {
             scrollbar.set_terminal(terminal);
         });
+        // The pane renders this view through GPUI's `.cached()` element, which
+        // only re-renders when the entity is dirty. Without this notify the
+        // terminal area keeps replaying the *previous* terminal's painted frame
+        // until some unrelated update lands, showing a stale screen for one or
+        // more frames right after a session connects.
+        cx.notify();
     }
 
     pub(crate) fn deregister_resize_viewer(&mut self) {

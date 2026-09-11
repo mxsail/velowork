@@ -66,6 +66,16 @@ fn disconnect_ssh_sessions_for_closed_terminals(
     }
 }
 
+fn contains_screen_erase(data: &[u8]) -> bool {
+    data.windows(3).any(|w| w == b"\x1b[J")
+        || data.windows(4).any(|w| {
+            w == b"\x1b[0J"
+                || w == b"\x1b[1J"
+                || w == b"\x1b[2J"
+                || w == b"\x1b[3J"
+        })
+}
+
 /// Main application state and view
 pub struct Velowork {
     /// The single, always-present main window. Closing it quits the app
@@ -438,6 +448,15 @@ impl Velowork {
                 // Bytes parsed so far in this drain pass (across batched events).
                 let mut bytes_this_turn: usize = 0;
 
+                let mut erase_coalesce_deadline = if match &event {
+                    PtyEvent::Data { data, .. } => contains_screen_erase(data),
+                    _ => false,
+                } {
+                    Some(std::time::Instant::now() + std::time::Duration::from_millis(16))
+                } else {
+                    None
+                };
+
                 // Process first event (broadcasting handled by PtyOutputSink in reader threads)
                 match &event {
                     PtyEvent::Data { terminal_id, data } => {
@@ -465,7 +484,36 @@ impl Velowork {
                 while bytes_this_turn < MAX_BYTES_PER_TURN {
                     let event = match pty_events.try_recv() {
                         Ok(event) => event,
-                        Err(_) => break,
+                        Err(_) => {
+                            if let Some(deadline) = erase_coalesce_deadline {
+                                let now = std::time::Instant::now();
+                                if now < deadline {
+                                    let remaining = deadline - now;
+                                    let wait_chunk = remaining.min(std::time::Duration::from_millis(4));
+                                    smol::Timer::after(wait_chunk).await;
+                                    match pty_events.try_recv() {
+                                        Ok(ev) => ev,
+                                        Err(_) => {
+                                            let now2 = std::time::Instant::now();
+                                            if now2 < deadline {
+                                                let remaining2 = deadline - now2;
+                                                smol::Timer::after(remaining2.min(std::time::Duration::from_millis(4))).await;
+                                                match pty_events.try_recv() {
+                                                    Ok(ev) => ev,
+                                                    Err(_) => break,
+                                                }
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
                     };
                     match &event {
                         PtyEvent::Data { terminal_id, data } => {
@@ -473,6 +521,9 @@ impl Velowork {
                             if let Some(term) = term {
                                 bytes_this_turn += data.len();
                                 term.process_output(data);
+                            }
+                            if contains_screen_erase(data) {
+                                erase_coalesce_deadline = Some(std::time::Instant::now() + std::time::Duration::from_millis(16));
                             }
                             dirty_terminal_ids.insert(terminal_id.clone());
                         }
