@@ -14,42 +14,11 @@ fn main() {
         res.set("FileDescription", "Velowork");
         res.set("ProductName", "Velowork");
 
-        // Embed Windows application manifest for PerMonitorV2 HiDPI awareness and UTF-8 code page
-        res.set_manifest(r#"
-<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-    <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
-        <security>
-            <requestedPrivileges>
-                <requestedExecutionLevel level="asInvoker" uiAccess="false" />
-            </requestedPrivileges>
-        </security>
-    </trustInfo>
-    <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
-        <application>
-            <!-- Windows 10 and Windows 11 -->
-            <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
-        </application>
-    </compatibility>
-    <application xmlns="urn:schemas-microsoft-com:asm.v3">
-        <windowsSettings>
-            <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
-            <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
-            <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
-        </windowsSettings>
-    </application>
-    <dependency>
-        <dependentAssembly>
-            <assemblyIdentity
-                type='win32'
-                name='Microsoft.Windows.Common-Controls'
-                version='6.0.0.0'
-                processorArchitecture='*'
-                publicKeyToken='6595b64144ccf1df'
-            />
-        </dependentAssembly>
-    </dependency>
-</assembly>
-"#);
+        // Note: Do NOT call res.set_manifest here. GPUI (crates/gpui/build.rs) already
+        // embeds a Windows application manifest (resources/windows/gpui.manifest.xml)
+        // with PerMonitorV2 HiDPI awareness, SegmentHeap, Common-Controls 6.0, and OS
+        // compatibility. Calling set_manifest here results in duplicate RT_MANIFEST
+        // resources and causes MSVC link.exe to fail with CVTRES CVT1100 / LNK1123.
 
         if let Err(e) = res.compile() {
             eprintln!("Warning: Failed to compile Windows resource: {}", e);
