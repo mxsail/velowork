@@ -67,6 +67,14 @@ impl SessionStore {
         }
     }
 
+    /// Create a store instance with explicit in-memory configuration (useful for testing and mocks).
+    pub fn from_config(config: SshSessionConfig) -> Self {
+        Self {
+            config,
+            save_pending: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
     // ---- queries (UI reads ONLY through these) ----
 
     /// Immutable view of the session tree for default or legacy project.

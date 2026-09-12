@@ -277,7 +277,13 @@ impl ProjectColumn {
                 let is_remote = shell_type.is_remote() || project.is_remote || self.backend.is_remote();
                 let connection_lost = is_terminal_connection_lost(&terminal_id, cx);
                 let icon_color = if connection_lost { p.status_error } else { p.status_success };
-                let icon = if is_remote { AppIcon::Server } else { AppIcon::Terminal };
+                let icon = match &shell_type {
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "serial" => AppIcon::Serial,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "telnet" => AppIcon::Telnet,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "ssh" => AppIcon::Server,
+                    _ if is_remote => AppIcon::Server,
+                    _ => AppIcon::Terminal,
+                };
 
                 let terminal_name = {
                     let osc_title = self
@@ -666,7 +672,13 @@ impl ProjectColumn {
                 let is_remote = shell_type.is_remote() || project.is_remote || self.backend.is_remote();
                 let connection_lost = is_terminal_connection_lost(&terminal_id, cx);
                 let icon_color = if connection_lost { p.status_error } else { p.status_success };
-                let icon = if is_remote { AppIcon::Server } else { AppIcon::Terminal };
+                let icon = match &shell_type {
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "serial" => AppIcon::Serial,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "telnet" => AppIcon::Telnet,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "ssh" => AppIcon::Server,
+                    _ if is_remote => AppIcon::Server,
+                    _ => AppIcon::Terminal,
+                };
 
                 let terminal_name = {
                     let osc_title = self

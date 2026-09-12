@@ -610,6 +610,9 @@ fn field_block(
         .label(label.to_string())
         .focus(&fh);
     if let Some(fid) = FieldId::from_key(id) {
+        if fid == FieldId::Name {
+            item = item.required(true);
+        }
         if let Some(res) = model.ui.validation.get(fid) {
             if res.severity == ValidationSeverity::Error {
                 item = item.error(res.message.clone());
@@ -1042,6 +1045,7 @@ fn render_serial_basic_fields(
     cx: &App,
 ) -> AnyElement {
     let inputs = &model.inputs;
+    let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
     let detected_ports = velowork_terminal::list_available_serial_ports();
     let serial_port_input = &inputs.serial_port;
 
@@ -1056,9 +1060,21 @@ fn render_serial_basic_fields(
                 .justify_between()
                 .child(
                     div()
-                        .text_size(ui_text_ms(cx))
-                        .text_color(rgb(t.text_secondary))
-                        .child(i18n!(cx, "ssh.serial.port")),
+                        .flex()
+                        .items_center()
+                        .gap(SPACE_XS)
+                        .child(
+                            div()
+                                .text_size(ui_text_ms(cx))
+                                .text_color(p.status_error)
+                                .child("*"),
+                        )
+                        .child(
+                            div()
+                                .text_size(ui_text_ms(cx))
+                                .text_color(rgb(t.text_secondary))
+                                .child(i18n!(cx, "ssh.serial.port")),
+                        ),
                 )
                 .child(
                     div()
@@ -1076,6 +1092,19 @@ fn render_serial_basic_fields(
                 ),
         )
         .child(Input::new(serial_port_input))
+        .when_some(model.ui.validation.get(FieldId::SerialPort), |d, res| {
+            if res.severity == ValidationSeverity::Error {
+                let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
+                d.child(
+                    div()
+                        .text_size(ui_text_sm(cx))
+                        .text_color(p.status_error)
+                        .child(res.message.clone()),
+                )
+            } else {
+                d
+            }
+        })
         .when(!detected_ports.is_empty(), |d| {
             let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
             d.child(div().flex().flex_wrap().gap(SPACE_XS).pt(px(2.0)).children(

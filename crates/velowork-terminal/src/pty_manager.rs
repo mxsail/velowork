@@ -1014,9 +1014,11 @@ impl PtyManager {
                 }
             }
 
+            let shell_from_args = parse_local_shell_arg(args);
             effective_shell = local_session_cfg
                 .as_ref()
                 .and_then(|s| s.local_shell.as_deref())
+                .or(shell_from_args.as_deref())
                 .and_then(|s| serde_json::from_str::<ShellType>(s).ok())
                 .or(Some(ShellType::Default));
         }
@@ -2362,6 +2364,17 @@ pub fn parse_local_args(args: &[String]) -> Option<String> {
     let mut i = 0;
     while i < args.len() {
         if (args[i] == "--id" || args[i] == "--session-id") && i + 1 < args.len() {
+            return Some(args[i + 1].clone());
+        }
+        i += 1;
+    }
+    None
+}
+
+pub fn parse_local_shell_arg(args: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--shell" && i + 1 < args.len() {
             return Some(args[i + 1].clone());
         }
         i += 1;
@@ -4367,6 +4380,7 @@ mod tests {
         // Local args
         let local_args = vec!["--id".to_string(), "local-session-123".to_string(), "--shell".to_string(), "bash".to_string()];
         assert_eq!(parse_local_args(&local_args), Some("local-session-123".to_string()));
+        assert_eq!(parse_local_shell_arg(&local_args), Some("bash".to_string()));
 
         let local_session_id_flag = vec!["--session-id".to_string(), "local-sid-456".to_string()];
         assert_eq!(parse_local_args(&local_session_id_flag), Some("local-sid-456".to_string()));

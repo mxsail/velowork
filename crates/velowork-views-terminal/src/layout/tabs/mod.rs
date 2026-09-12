@@ -838,25 +838,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
     /// not depend on whether the tab is the active one.
     fn render_tab_icon_element(
         &self,
-        is_remote: bool,
-        _shell_short: &str,
-        connection_lost: bool,
+        icon: AppIcon,
+        color: Hsla,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let t = theme(cx);
-        let p = SemanticPalette::from_theme(&t);
-        let color = if connection_lost {
-            p.status_error
-        } else {
-            p.status_success
-        };
-
-        let icon_path = if is_remote {
-            AppIcon::Server
-        } else {
-            AppIcon::Terminal
-        };
-
         div()
             .flex_shrink_0()
             .size(ui_icon_std_ts(cx))
@@ -864,7 +849,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .items_center()
             .justify_center()
             .child(
-                icon_path
+                icon
                     .size(ui_icon_std_ts(cx))
                     .flex_shrink_0()
                     .text_color(color),
@@ -1003,7 +988,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 .as_ref()
                 .map_or(false, |tid| self.is_terminal_connection_lost(tid, cx));
 
-            let (is_remote_session, shell_short) = match child {
+            let (is_remote_session, _shell_short) = match child {
                 LayoutNode::Terminal { shell_type, .. } => {
                     let remote =
                         shell_type.is_remote() || self.backend.is_remote();
@@ -1203,7 +1188,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                 None
                             };
                             (
-                                AppIcon::Server,
+                                AppIcon::Telnet,
                                 Some("Telnet".to_string()),
                                 conn_info,
                                 if connection_lost { p.status_error } else { p.status_info },
@@ -1387,9 +1372,8 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             .into_any_element()
                     } else {
                         self.render_tab_icon_element(
-                            is_remote_session,
-                            &shell_short,
-                            connection_lost,
+                            preview_icon,
+                            preview_icon_color,
                             cx,
                         )
                     };
@@ -1829,9 +1813,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         // and the command panel's target host list.
         let suffixes = duplicate_session_suffixes(&self.workspace.read(cx));
 
-        // Flat list of (index, label, terminal_id, is_remote, shell_short) for
+        // Flat list of (index, label, terminal_id, icon, shell_short) for
         // the searchable tab-list dropdown.
-        let tab_infos: Vec<(usize, String, Option<String>, bool, String)> = children
+        let tab_infos: Vec<(usize, String, Option<String>, AppIcon, String)> = children
             .iter()
             .enumerate()
             .filter(|(_, child)| !child.is_all_hidden())
@@ -1840,23 +1824,29 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                     LayoutNode::Terminal { terminal_id, .. } => terminal_id.clone(),
                     _ => None,
                 };
-                let (is_remote, shell_short) = match child {
+                let (icon, shell_short) = match child {
                     LayoutNode::Terminal { shell_type, .. } => {
-                        let remote = shell_type.is_remote() || self.backend.is_remote();
-                        let short = if remote {
+                        let icon = match shell_type {
+                            velowork_core::shell::ShellType::Custom { path, .. } if path == "serial" => AppIcon::Serial,
+                            velowork_core::shell::ShellType::Custom { path, .. } if path == "telnet" => AppIcon::Telnet,
+                            velowork_core::shell::ShellType::Custom { path, .. } if path == "ssh" => AppIcon::Server,
+                            _ if shell_type.is_remote() || self.backend.is_remote() => AppIcon::Server,
+                            _ => AppIcon::Terminal,
+                        };
+                        let short = if shell_type.is_remote() || self.backend.is_remote() {
                             String::new()
                         } else {
                             shell_type.local_shell_name()
                         };
-                        (remote, short)
+                        (icon, short)
                     }
-                    _ => (false, "?".to_string()),
+                    _ => (AppIcon::Terminal, "?".to_string()),
                 };
                 (
                     i,
                     self.tab_display_label(children, i, cx, &suffixes),
                     tid,
-                    is_remote,
+                    icon,
                     shell_short,
                 )
             })
@@ -2025,7 +2015,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
     /// Toggle the searchable tab-list dropdown menu (`OverlayMenu`).
     fn toggle_tab_dropdown(
         &mut self,
-        tab_infos: Vec<(usize, String, Option<String>, bool, String)>,
+        tab_infos: Vec<(usize, String, Option<String>, AppIcon, String)>,
         active_tab: usize,
         standalone: bool,
         window: &mut Window,
@@ -2054,7 +2044,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         let focus_manager = self.focus_manager.clone();
         let this_weak = cx.entity().downgrade();
 
-        for (i, label, tid, is_remote, _shell_short) in tab_infos {
+        for (i, label, tid, icon, _shell_short) in tab_infos {
             let click_project_id = project_id.clone();
             let click_layout_path = layout_path.clone();
             let click_dispatcher = action_dispatcher.clone();
@@ -2066,12 +2056,6 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
 
             let ws = workspace.clone();
             let fm = focus_manager.clone();
-
-            let icon = if is_remote {
-                AppIcon::Server
-            } else {
-                AppIcon::Terminal
-            };
 
             let trailing_actions = if let Some(ref tid) = tid_for_close {
                 let tid_close = tid.clone();
