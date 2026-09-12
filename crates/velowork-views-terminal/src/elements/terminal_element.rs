@@ -179,6 +179,8 @@ pub struct TerminalElement {
     color_scheme: Option<String>,
     bottom_left_radius: f32,
     bottom_right_radius: f32,
+    allow_resize: bool,
+    is_preview: bool,
 }
 
 impl TerminalElement {
@@ -201,7 +203,49 @@ impl TerminalElement {
             color_scheme: None,
             bottom_left_radius: 0.0,
             bottom_right_radius: 0.0,
+            allow_resize: true,
+            is_preview: false,
         }
+    }
+
+    /// Lightweight static preview element for animations and thumbnails.
+    /// Strictly disables resize, IME input handling, and terminal reflow.
+    pub fn preview(terminal: Arc<Terminal>, focus_handle: FocusHandle) -> Self {
+        Self {
+            terminal,
+            focus_handle,
+            resize_viewer_id: 0,
+            search_matches: Arc::new(Vec::new()),
+            current_match_index: None,
+            url_matches: Arc::new(Vec::new()),
+            hovered_url_group: None,
+            cursor_visible: false,
+            cursor_style: CursorShape::Block,
+            zoom_level: 1.0,
+            scroll_x: 0.0,
+            bg_tint: None,
+            font_family: None,
+            font_size: None,
+            color_scheme: None,
+            bottom_left_radius: 0.0,
+            bottom_right_radius: 0.0,
+            allow_resize: false,
+            is_preview: true,
+        }
+    }
+
+    pub fn with_allow_resize(mut self, allow: bool) -> Self {
+        self.allow_resize = allow;
+        self
+    }
+
+    pub fn with_preview(mut self, preview: bool) -> Self {
+        self.is_preview = preview;
+        if preview {
+            self.allow_resize = false;
+            self.cursor_visible = false;
+        }
+        self
     }
 
     pub fn with_font_family(mut self, font_family: String) -> Self {
@@ -471,54 +515,58 @@ impl Element for TerminalElement {
             }
         });
 
-        // Register input handler
-        let input_handler = TerminalInputHandler {
-            terminal: self.terminal.clone(),
-            cursor_bounds,
-        };
-        window.handle_input(&self.focus_handle, input_handler, cx);
-
-        // Calculate terminal size and resize if needed
-        let available_width = f32::from(bounds.size.width);
-        let available_height = f32::from(bounds.size.height);
-
-        let visible_cols = ((available_width - 0.5) / cell_width_f).floor().max(1.0) as u16;
-        let new_rows = ((available_height - 0.5) / line_height_f).floor().max(1.0) as u16;
-        // PTY 列数必须始终与窗口可视列数 (visible_cols) 保持一致，
-        // 使得 zsh / bash / RPROMPT 等 shell 交互进程能正确感知真实屏幕宽度，
-        // 彻底防止在 NoWrap 模式下 zsh prompt 收到虚假 1000 列信号导致无限向右延伸与错位。
-        let new_cols = visible_cols;
-
-        let desired_size = TerminalSize {
-            cols: new_cols,
-            rows: new_rows,
-            cell_width: cell_width_f,
-            cell_height: line_height_f,
-        };
-        let (n_viewers, resize_size) = shared_resize_target(
-            &self.terminal.terminal_id,
-            self.resize_viewer_id,
-            desired_size,
-        );
-
-        let current_size = self.terminal.resize_state.lock().size;
-        let cols_rows_changed =
-            resize_size.cols != current_size.cols || resize_size.rows != current_size.rows;
-        let cell_size_changed = (cell_width_f - current_size.cell_width).abs() > 0.001
-            || (line_height_f - current_size.cell_height).abs() > 0.001;
-
-        let is_valid_layout = available_width >= 50.0 && available_height >= 50.0;
-        if is_valid_layout && cols_rows_changed && self.terminal.is_resize_owner_local() {
-            let target = if n_viewers <= 1 {
-                desired_size
-            } else {
-                resize_size
+        // Register input handler only for active interactive terminal panes
+        if !self.is_preview {
+            let input_handler = TerminalInputHandler {
+                terminal: self.terminal.clone(),
+                cursor_bounds,
             };
-            self.terminal.resize(target);
-        } else if cell_size_changed {
-            let mut rs = self.terminal.resize_state.lock();
-            rs.size.cell_width = cell_width_f;
-            rs.size.cell_height = line_height_f;
+            window.handle_input(&self.focus_handle, input_handler, cx);
+        }
+
+        // Calculate terminal size and resize if needed (strictly skipped in preview/animation mode)
+        if self.allow_resize {
+            let available_width = f32::from(bounds.size.width);
+            let available_height = f32::from(bounds.size.height);
+
+            let visible_cols = ((available_width - 0.5) / cell_width_f).floor().max(1.0) as u16;
+            let new_rows = ((available_height - 0.5) / line_height_f).floor().max(1.0) as u16;
+            // PTY 列数必须始终与窗口可视列数 (visible_cols) 保持一致，
+            // 使得 zsh / bash / RPROMPT 等 shell 交互进程能正确感知真实屏幕宽度，
+            // 彻底防止在 NoWrap 模式下 zsh prompt 收到虚假 1000 列信号导致无限向右延伸与错位。
+            let new_cols = visible_cols;
+
+            let desired_size = TerminalSize {
+                cols: new_cols,
+                rows: new_rows,
+                cell_width: cell_width_f,
+                cell_height: line_height_f,
+            };
+            let (n_viewers, resize_size) = shared_resize_target(
+                &self.terminal.terminal_id,
+                self.resize_viewer_id,
+                desired_size,
+            );
+
+            let current_size = self.terminal.resize_state.lock().size;
+            let cols_rows_changed =
+                resize_size.cols != current_size.cols || resize_size.rows != current_size.rows;
+            let cell_size_changed = (cell_width_f - current_size.cell_width).abs() > 0.001
+                || (line_height_f - current_size.cell_height).abs() > 0.001;
+
+            let is_valid_layout = available_width >= 50.0 && available_height >= 50.0;
+            if is_valid_layout && cols_rows_changed && self.terminal.is_resize_owner_local() {
+                let target = if n_viewers <= 1 {
+                    desired_size
+                } else {
+                    resize_size
+                };
+                self.terminal.resize(target);
+            } else if cell_size_changed {
+                let mut rs = self.terminal.resize_state.lock();
+                rs.size.cell_width = cell_width_f;
+                rs.size.cell_height = line_height_f;
+            }
         }
 
         let active_color_scheme = self.color_scheme.as_deref().unwrap_or(&tvs.color_scheme);
@@ -556,7 +604,11 @@ impl Element for TerminalElement {
             font_size,
         );
 
-        let options = TerminalPaintOptions::full(cursor_visible);
+        let options = if self.is_preview {
+            TerminalPaintOptions::thumbnail()
+        } else {
+            TerminalPaintOptions::full(cursor_visible)
+        };
 
         self.terminal.with_content(|term| {
             let grid = term.grid();
@@ -593,7 +645,7 @@ impl Element for TerminalElement {
             painter.paint(window, cx);
 
             // Paint IME composition (marked text) if active
-            if let Some(marked) = self.terminal.marked_text() {
+            if !self.is_preview && let Some(marked) = self.terminal.marked_text() {
                 let cursor_point = term.grid().cursor.point;
                 let cursor_visual_line = cursor_point.line.0 + display_offset;
                 if cursor_visual_line >= 0 && cursor_visual_line < screen_lines as i32 {

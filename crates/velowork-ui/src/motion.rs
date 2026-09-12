@@ -75,6 +75,11 @@ pub fn ease_tab_expand(t: f32) -> f32 {
     cubic_bezier(t, 0.2, 0.0, 0.0, 1.0)
 }
 
+/// Dock pill entry curve matching HTML prototype `cubic-bezier(0.2, 0, 0, 1)`.
+pub fn ease_dock_pill(t: f32) -> f32 {
+    cubic_bezier(t, 0.2, 0.0, 0.0, 1.0)
+}
+
 /// Ant Design 6.6.3 Modal Open easing `motionEaseInOutCirc`: `cubic-bezier(0.78, 0.14, 0.15, 0.86)`.
 pub fn motion_ease_in_out_circ(t: f32) -> f32 {
     cubic_bezier(t, 0.78, 0.14, 0.15, 0.86)

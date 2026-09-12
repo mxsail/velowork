@@ -539,12 +539,42 @@ impl ProjectColumn {
                             .text_ellipsis()
                             .child(terminal_name)
                     )
-                    .child(
-                        AppIcon::ChevronUp
-                            .size(ICON_MICRO)
-                            .flex_shrink_0()
-                            .text_color(rgb(t.text_muted))
-                    )
+                    .child({
+                        let backend = self.backend.clone();
+                        let workspace = workspace.clone();
+                        let project_id = project_id.clone();
+                        let terminal_id = terminal_id.clone();
+                        let layout_path = layout_path.clone();
+                        let close_tip = i18n!(cx, "button.close");
+                        div()
+                            .id(ElementId::Name(format!("min-pill-close-{}", terminal_id).into()))
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .rounded(px(3.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|d| d.bg(rgb(t.bg_selection)))
+                            .tooltip(move |_, cx| {
+                                cx.new(|_| Tooltip::new(close_tip.clone())).into()
+                            })
+                            .child(
+                                AppIcon::Close
+                                    .size(px(10.0))
+                                    .flex_shrink_0()
+                                    .text_color(rgb(t.text_muted))
+                            )
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
+                            .on_click(move |_, _window, cx| {
+                                backend.kill(&terminal_id);
+                                workspace.update(cx, |ws, cx| {
+                                    ws.close_terminal(&project_id, &layout_path, cx);
+                                });
+                                cx.stop_propagation();
+                            })
+                    })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
                     })
@@ -554,18 +584,30 @@ impl ProjectColumn {
                         let workspace = workspace.clone();
                         let focus_manager = focus_manager.clone();
                         let layout_container = self.layout_container.clone();
-                        move |_, _window, cx| {
+                        let window_id = self.window_id;
+                        move |_, window, cx| {
                             let tid_for_lc = terminal_id.clone();
+                            let mut target_path = None;
                             focus_manager.update(cx, |fm, cx| {
                                 workspace.update(cx, |ws, cx| {
                                     ws.restore_terminal_by_id(fm, &project_id, &terminal_id, cx);
                                 });
+                                if let Some(path) = fm
+                                    .focused_terminal_state()
+                                    .filter(|state| state.project_id == project_id)
+                                    .map(|state| state.layout_path.clone())
+                                {
+                                    target_path = Some(path);
+                                }
                                 cx.notify();
                             });
                             if let Some(ref lc) = layout_container {
                                 lc.update(cx, |this, cx| {
                                     this.mark_restoring(&tid_for_lc, cx);
                                 });
+                            }
+                            if let Some(path) = target_path {
+                                Self::schedule_focus_pane(window, window_id, project_id.clone(), path, 10, cx);
                             }
                         }
                     })
@@ -895,10 +937,33 @@ impl ProjectColumn {
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
                     })
-                    .on_click(move |_, _window, cx| {
-                        workspace.update(cx, |ws, cx| {
-                            ws.attach_terminal(&terminal_id_for_click, cx);
-                        });
+                    .on_click({
+                        let project_id = self.project_id.clone();
+                        let focus_manager = self.focus_manager.clone();
+                        let window_id = self.window_id;
+                        let terminal_id = terminal_id_for_click.clone();
+                        move |_, window, cx| {
+                            let mut target_path = None;
+                            workspace.update(cx, |ws, cx| {
+                                ws.attach_terminal(&terminal_id, cx);
+                            });
+                            focus_manager.update(cx, |fm, cx| {
+                                workspace.update(cx, |ws, cx| {
+                                    ws.focus_terminal_by_id(fm, &project_id, &terminal_id, cx);
+                                });
+                                if let Some(path) = fm
+                                    .focused_terminal_state()
+                                    .filter(|state| state.project_id == project_id)
+                                    .map(|state| state.layout_path.clone())
+                                {
+                                    target_path = Some(path);
+                                }
+                                cx.notify();
+                            });
+                            if let Some(path) = target_path {
+                                Self::schedule_focus_pane(window, window_id, project_id.clone(), path, 10, cx);
+                            }
+                        }
                     })
             });
 

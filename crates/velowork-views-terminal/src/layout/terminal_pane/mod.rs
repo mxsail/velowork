@@ -1161,6 +1161,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         self.terminal_id.clone()
     }
 
+    pub fn terminal_arc(&self) -> Option<Arc<Terminal>> {
+        self.terminal.clone()
+    }
+
     pub fn set_detached(&mut self, detached: bool, cx: &mut Context<Self>) {
         if self.detached != detached {
             self.detached = detached;
