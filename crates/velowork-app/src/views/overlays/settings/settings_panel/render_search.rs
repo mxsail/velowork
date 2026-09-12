@@ -1,3 +1,4 @@
+use crate::keybindings::Cancel;
 use crate::settings::settings_entity;
 use crate::theme::theme;
 use crate::ui::tokens::{
@@ -234,6 +235,9 @@ impl SettingsPanel {
             .child(
                 modal_content("search-engine-dialog", cx)
                     .w(dialog_md(cx))
+                    .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                        this.close_search_dialog(Some(window), cx);
+                    }))
                     .child(modal_header(
                         title,
                         Option::<String>::None,
@@ -351,7 +355,7 @@ impl SettingsPanel {
         }
     }
 
-    fn close_search_dialog(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
+    pub(super) fn close_search_dialog(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
         self.search_add_dialog_open = false;
         self.search_edit_id = None;
         if let Some(window) = window
