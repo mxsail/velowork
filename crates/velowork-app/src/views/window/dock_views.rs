@@ -16,7 +16,9 @@ impl WindowView {
             cx.notify();
         });
         let window_id = self.window_id;
-        self.workspace.update(cx, |ws, cx| ws.set_dock_open(window_id, DockPosition::Left, true, cx));
+        self.workspace.update(cx, |ws, cx| {
+            ws.set_dock_open(window_id, DockPosition::Left, true, cx)
+        });
         settings_entity(cx).update(cx, |s, cx| s.set_sidebar_open(true, cx));
         self.sync_status_bar_dock_state(cx);
         self.animate_dock_to(DockPosition::Left, AnimationTarget::Open, cx);
@@ -32,9 +34,14 @@ impl WindowView {
     pub(super) fn hide_left_dock(&mut self, cx: &mut Context<Self>) {
         self.left_dock_ctrl.set_open(false);
         let window_id = self.window_id;
-        self.workspace.update(cx, |ws, cx| ws.set_dock_open(window_id, DockPosition::Left, false, cx));
+        self.workspace.update(cx, |ws, cx| {
+            ws.set_dock_open(window_id, DockPosition::Left, false, cx)
+        });
         settings_entity(cx).update(cx, |s, cx| s.set_sidebar_open(false, cx));
         self.sync_status_bar_dock_state(cx);
+        self.focus_manager.update(cx, |fm, _| {
+            fm.request_focus(velowork_workspace::focus::FocusLayer::Terminal);
+        });
         self.animate_dock_to(DockPosition::Left, AnimationTarget::Close, cx);
     }
 
@@ -45,7 +52,10 @@ impl WindowView {
     /// 4. 降级 2：终极兜底至当前活动终端或欢迎页快速连接输入框
     pub fn restore_modal_closed_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (origin, panel) = self.overlay_manager.update(cx, |om, _| {
-            (om.take_pending_restore_origin(), om.take_pending_restore_panel())
+            (
+                om.take_pending_restore_origin(),
+                om.take_pending_restore_panel(),
+            )
         });
 
         // 1. 优先尝试归还原主控件句柄 (Origin FocusHandle)
@@ -65,7 +75,9 @@ impl WindowView {
         }
 
         // 3. 若仍有父级弹窗在栈中（多层嵌套），聚焦父级弹窗
-        if let Some(parent_modal_handle) = self.overlay_manager.read(cx).active_modal_focus_handle(cx) {
+        if let Some(parent_modal_handle) =
+            self.overlay_manager.read(cx).active_modal_focus_handle(cx)
+        {
             window.focus(&parent_modal_handle, cx);
             if window.focused(cx).is_some() {
                 return;
@@ -110,7 +122,12 @@ impl WindowView {
         // 1. 优先通过 pane_map 查询并聚焦当前活动终端
         if let Some((project_id, _)) = self.focused_terminal_id(cx) {
             let pane_map = crate::views::layout::navigation::get_pane_map(self.window_id);
-            if let Some(handle) = pane_map.panes().iter().find(|p| p.project_id == project_id).and_then(|p| p.focus_handle.as_ref()) {
+            if let Some(handle) = pane_map
+                .panes()
+                .iter()
+                .find(|p| p.project_id == project_id)
+                .and_then(|p| p.focus_handle.as_ref())
+            {
                 window.focus(handle, cx);
                 if window.focused(cx).is_some() {
                     return;
@@ -120,7 +137,11 @@ impl WindowView {
 
         // 2. 尝试 pane_map 中首个可用终端
         let pane_map = crate::views::layout::navigation::get_pane_map(self.window_id);
-        if let Some(handle) = pane_map.panes().first().and_then(|p| p.focus_handle.as_ref()) {
+        if let Some(handle) = pane_map
+            .panes()
+            .first()
+            .and_then(|p| p.focus_handle.as_ref())
+        {
             window.focus(handle, cx);
             if window.focused(cx).is_some() {
                 return;
@@ -148,7 +169,11 @@ impl WindowView {
     }
 
     /// 切换左侧侧边栏：未展开时展开并聚焦，已展开时直接收起并归还焦点给活动终端
-    pub(super) fn toggle_left_dock_with_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_left_dock_with_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let is_open = self.left_dock_ctrl.is_open();
 
         if !is_open {
@@ -175,7 +200,9 @@ impl WindowView {
         }
         let window_id = self.window_id;
 
-        self.workspace.update(cx, |ws, cx| ws.set_dock_open(window_id, DockPosition::Left, open, cx));
+        self.workspace.update(cx, |ws, cx| {
+            ws.set_dock_open(window_id, DockPosition::Left, open, cx)
+        });
         settings_entity(cx).update(cx, |s, cx| s.set_sidebar_open(open, cx));
         self.sync_status_bar_dock_state(cx);
         self.animate_dock_to(DockPosition::Left, target, cx);
@@ -187,11 +214,17 @@ impl WindowView {
     }
 
     /// 切换右侧 Dock：未展开时展开并聚焦，已展开时直接收起并归还焦点给活动终端
-    pub(super) fn toggle_right_dock_with_window(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn toggle_right_dock_with_window(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let is_open = self.right_dock_ctrl.is_open();
 
         if !is_open {
-            let panel_id = self.right_toolbar_active.clone()
+            let panel_id = self
+                .right_toolbar_active
+                .clone()
                 .or_else(|| self.right_toolbar_last_panel.clone())
                 .unwrap_or_else(|| "ai_assistant".to_string());
             self.show_right_dock(&panel_id, window, cx);
@@ -202,7 +235,12 @@ impl WindowView {
     }
 
     /// Show (expand) Right Dock with given panel_id
-    pub(super) fn show_right_dock(&mut self, panel_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn show_right_dock(
+        &mut self,
+        panel_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.right_dock.is_none() || self.right_toolbar_active.as_deref() != Some(panel_id) {
             let panel = self.create_right_panel(panel_id, window, cx);
             self.right_dock = Some(panel);
@@ -217,7 +255,9 @@ impl WindowView {
             });
         }
         let window_id = self.window_id;
-        self.workspace.update(cx, |ws, cx| ws.set_dock_open(window_id, DockPosition::Right, true, cx));
+        self.workspace.update(cx, |ws, cx| {
+            ws.set_dock_open(window_id, DockPosition::Right, true, cx)
+        });
         settings_entity(cx).update(cx, |s, cx| s.set_right_sidebar_open(true, cx));
         self.sync_status_bar_dock_state(cx);
         self.animate_dock_to(DockPosition::Right, AnimationTarget::Open, cx);
@@ -228,9 +268,14 @@ impl WindowView {
         self.right_toolbar_active = None;
         self.right_dock_ctrl.set_open(false);
         let window_id = self.window_id;
-        self.workspace.update(cx, |ws, cx| ws.set_dock_open(window_id, DockPosition::Right, false, cx));
+        self.workspace.update(cx, |ws, cx| {
+            ws.set_dock_open(window_id, DockPosition::Right, false, cx)
+        });
         settings_entity(cx).update(cx, |s, cx| s.set_right_sidebar_open(false, cx));
         self.sync_status_bar_dock_state(cx);
+        self.focus_manager.update(cx, |fm, _| {
+            fm.request_focus(velowork_workspace::focus::FocusLayer::Terminal);
+        });
         self.animate_dock_to(DockPosition::Right, AnimationTarget::Close, cx);
     }
 
@@ -252,7 +297,9 @@ impl WindowView {
         }
         let window_id = self.window_id;
 
-        self.workspace.update(cx, |ws, cx| ws.set_dock_open(window_id, DockPosition::Right, open, cx));
+        self.workspace.update(cx, |ws, cx| {
+            ws.set_dock_open(window_id, DockPosition::Right, open, cx)
+        });
         settings_entity(cx).update(cx, |s, cx| s.set_right_sidebar_open(open, cx));
         self.sync_status_bar_dock_state(cx);
         self.animate_dock_to(DockPosition::Right, target, cx);
@@ -266,7 +313,9 @@ impl WindowView {
         let auto_hide = self.left_dock_ctrl.is_auto_hide();
         let window_id = self.window_id;
 
-        self.workspace.update(cx, |ws, cx| ws.set_dock_open(window_id, DockPosition::Left, open, cx));
+        self.workspace.update(cx, |ws, cx| {
+            ws.set_dock_open(window_id, DockPosition::Left, open, cx)
+        });
         settings_entity(cx).update(cx, |s, cx| {
             s.set_sidebar_auto_hide(auto_hide, cx);
             s.set_sidebar_open(open, cx);
@@ -288,6 +337,16 @@ impl WindowView {
         self.right_toolbar_open
     }
 
+    /// Toggle visibility of the right vertical icon toolbar strip
+    pub(super) fn toggle_right_toolbar(&mut self, cx: &mut Context<Self>) {
+        self.right_toolbar_open = !self.right_toolbar_open;
+        let is_open = self.right_toolbar_open;
+        settings_entity(cx).update(cx, |s, cx| {
+            s.set_right_toolbar_open(is_open, cx);
+        });
+        cx.notify();
+    }
+
     /// Handle clicking a panel icon on the right toolbar strip or activating its shortcut.
     pub(super) fn handle_right_toolbar_click(
         &mut self,
@@ -295,7 +354,8 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.right_toolbar_active.as_deref() == Some(panel_id) && self.right_dock_ctrl.is_open() {
+        if self.right_toolbar_active.as_deref() == Some(panel_id) && self.right_dock_ctrl.is_open()
+        {
             self.hide_right_dock(cx);
             self.focus_active_terminal(window, cx);
         } else {
@@ -317,7 +377,12 @@ impl WindowView {
     }
 
     /// Animate dock container to target
-    pub(super) fn animate_dock_to(&mut self, pos: DockPosition, target: AnimationTarget, cx: &mut Context<Self>) {
+    pub(super) fn animate_dock_to(
+        &mut self,
+        pos: DockPosition,
+        target: AnimationTarget,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(target_value) = target.value() {
             self.animate_dock(pos, target_value, cx);
         }
@@ -349,7 +414,7 @@ impl WindowView {
                     self.bottom_dock_ctrl.set_animation(target);
                     self.bottom_dock_anim_task = None;
                 }
-                DockPosition::Top => {},
+                DockPosition::Top => {}
             }
             cx.notify();
             return;
@@ -398,7 +463,7 @@ impl WindowView {
                         }
                         DockPosition::Right => this.right_dock_ctrl.set_animation(progress),
                         DockPosition::Bottom => this.bottom_dock_ctrl.set_animation(progress),
-                        DockPosition::Top => {},
+                        DockPosition::Top => {}
                     }
                     cx.notify();
                     true
@@ -437,7 +502,7 @@ impl WindowView {
                         this.bottom_dock_ctrl.set_animation(target);
                         this.bottom_dock_anim_task = None;
                     }
-                    DockPosition::Top => {},
+                    DockPosition::Top => {}
                 }
                 cx.notify();
             });
@@ -447,7 +512,7 @@ impl WindowView {
             DockPosition::Left => self.left_dock_anim_task = Some(task),
             DockPosition::Right => self.right_dock_anim_task = Some(task),
             DockPosition::Bottom => self.bottom_dock_anim_task = Some(task),
-            DockPosition::Top => {},
+            DockPosition::Top => {}
         }
     }
 }

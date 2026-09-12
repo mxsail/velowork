@@ -624,7 +624,17 @@ impl PtyManager {
     }
 
     /// Internal: create a terminal with a specific ID
-    fn create_terminal_with_id(&self, terminal_id: &str, cwd: &str, shell: Option<&ShellType>) -> Result<()> {
+    fn create_terminal_with_id(
+        &self,
+        terminal_id: &str,
+        cwd: &str,
+        shell: Option<&ShellType>,
+    ) -> Result<()> {
+        log::debug!(
+            "[pty:spawn] terminal_id={} cwd={}",
+            terminal_id,
+            cwd
+        );
         if let Some(ShellType::Custom { path, args }) = shell
             && path == "serial"
             && let Some((port_arg, baud_arg, session_id)) = parse_serial_args(args)
@@ -1004,9 +1014,11 @@ impl PtyManager {
                 }
             }
 
+            let shell_from_args = parse_local_shell_arg(args);
             effective_shell = local_session_cfg
                 .as_ref()
                 .and_then(|s| s.local_shell.as_deref())
+                .or(shell_from_args.as_deref())
                 .and_then(|s| serde_json::from_str::<ShellType>(s).ok())
                 .or(Some(ShellType::Default));
         }
@@ -1454,9 +1466,28 @@ impl PtyManager {
 
     /// Resize a terminal
     pub fn resize(&self, terminal_id: &str, cols: u16, rows: u16) {
+        let prev_size = self.terminals.lock().get(terminal_id).and_then(|h| h.last_size);
+        log::debug!(
+            "[pty:resize] terminal_id={} cols={} rows={} prev={:?}",
+            terminal_id,
+            cols,
+            rows,
+            prev_size
+        );
         if let Some(handle) = self.terminals.lock().get_mut(terminal_id) {
+            if handle.last_size == Some((cols, rows)) {
+                log::debug!(
+                    "[pty:resize_noop] terminal_id={} already has size {}x{}, skipping SIGWINCH",
+                    terminal_id, cols, rows
+                );
+                return;
+            }
             handle.last_size = Some((cols, rows));
             if let Some(master) = handle.master.as_ref() {
+                log::debug!(
+                    "[pty:sigwinch] terminal_id={} sending SIGWINCH to kernel: cols={} rows={}",
+                    terminal_id, cols, rows
+                );
                 if let Err(e) = master.resize(PtySize {
                     rows,
                     cols,
@@ -1466,6 +1497,10 @@ impl PtyManager {
                     log::error!("[pty] Failed to resize PTY | terminal_id={} | error: {:#}", terminal_id, e);
                 }
             } else if let Some(ssh_resize_tx) = handle.ssh_resize_tx.clone() {
+                log::debug!(
+                    "[pty:ssh_resize] terminal_id={} sending ssh resize: cols={} rows={}",
+                    terminal_id, cols, rows
+                );
                 let _ = ssh_resize_tx.try_send((cols, rows));
             } else if let Some(tokio_resize_tx) = handle.tokio_resize_tx.clone() {
                 let _ = tokio_resize_tx.try_send((cols, rows));
@@ -2329,6 +2364,17 @@ pub fn parse_local_args(args: &[String]) -> Option<String> {
     let mut i = 0;
     while i < args.len() {
         if (args[i] == "--id" || args[i] == "--session-id") && i + 1 < args.len() {
+            return Some(args[i + 1].clone());
+        }
+        i += 1;
+    }
+    None
+}
+
+pub fn parse_local_shell_arg(args: &[String]) -> Option<String> {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--shell" && i + 1 < args.len() {
             return Some(args[i + 1].clone());
         }
         i += 1;
@@ -3825,6 +3871,12 @@ async fn run_ssh_connection(
             .and_then(|h| h.last_size)
             .unwrap_or((80, 24))
     };
+    log::debug!(
+        "[pty:size] ssh request_pty | terminal_id={} cols={} rows={}",
+        terminal_id,
+        initial_cols,
+        initial_rows
+    );
 
     channel.request_pty(
         true,
@@ -3886,6 +3938,39 @@ async fn run_ssh_connection(
         }
     }
 
+    // Re-sync the window size *before* the remote shell exists.
+    //
+    // The size handed to `request_pty` above was read some milliseconds (or
+    // hundreds of them, while authenticating) earlier; meanwhile the UI may
+    // have measured the pane's real geometry. If we let that correction arrive
+    // after the shell started, the shell repaints an already drawn prompt — the
+    // visible "flash". Applying it here means the shell is born at the correct
+    // size and only ever paints once.
+    let mut applied_remote_size = (initial_cols, initial_rows);
+    if let Some((cols, rows)) = {
+        let lock = terminals.lock();
+        lock.get(&terminal_id).and_then(|h| h.last_size)
+    } {
+        if (cols, rows) != (initial_cols, initial_rows) {
+            log::debug!(
+                "[pty:size] ssh sync size before request_shell | terminal_id={} from={}x{} to={}x{}",
+                terminal_id,
+                initial_cols,
+                initial_rows,
+                cols,
+                rows
+            );
+            match channel.window_change(cols as u32, rows as u32, 0, 0).await {
+                Ok(_) => applied_remote_size = (cols, rows),
+                Err(e) => log::warn!(
+                    "[pty:size] ssh pre-shell window_change failed | terminal_id={} | error: {:#}",
+                    terminal_id,
+                    e
+                ),
+            }
+        }
+    }
+
     channel.request_shell(true).await?;
 
     // Execute startup command lines if configured
@@ -3918,8 +4003,21 @@ async fn run_ssh_connection(
         None
     };
 
+    // Only fire if a newer size landed while we were starting the shell — a
+    // correction that arrives *after* the prompt is already on screen costs a
+    // full repaint, so anything already applied above is not repeated.
     if let Some((cols, rows)) = pending_size {
-        let _ = resize_tx.try_send((cols, rows));
+        if (cols, rows) != applied_remote_size {
+            log::debug!(
+                "[pty:size] ssh resize after shell start | terminal_id={} from={}x{} to={}x{}",
+                terminal_id,
+                applied_remote_size.0,
+                applied_remote_size.1,
+                cols,
+                rows
+            );
+            let _ = resize_tx.try_send((cols, rows));
+        }
     }
 
     let event_tx_c = event_tx.clone();
@@ -4282,6 +4380,7 @@ mod tests {
         // Local args
         let local_args = vec!["--id".to_string(), "local-session-123".to_string(), "--shell".to_string(), "bash".to_string()];
         assert_eq!(parse_local_args(&local_args), Some("local-session-123".to_string()));
+        assert_eq!(parse_local_shell_arg(&local_args), Some("bash".to_string()));
 
         let local_session_id_flag = vec!["--session-id".to_string(), "local-sid-456".to_string()];
         assert_eq!(parse_local_args(&local_session_id_flag), Some("local-sid-456".to_string()));

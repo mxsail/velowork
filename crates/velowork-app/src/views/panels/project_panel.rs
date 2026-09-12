@@ -20,6 +20,7 @@ use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::simple_input::{InputChangedEvent, SimpleInputState};
 use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::tooltip::Tooltip;
+use velowork_ui::motion::ease_tab_expand;
 use velowork_ui::{SemanticPalette, v_flex};
 
 use velowork_views_terminal::welcome;
@@ -62,6 +63,8 @@ pub struct ProjectColumn {
     welcome_selected_index: Option<usize>,
     /// Horizontal scroll handle for floating hidden taskbar
     taskbar_scroll_handle: ScrollHandle,
+    /// Bounding box of this project column tracked during render
+    pub(crate) column_bounds: Option<Bounds<Pixels>>,
 }
 
 impl ProjectColumn {
@@ -79,7 +82,9 @@ impl ProjectColumn {
         overlay_registry: Entity<OverlayRegistry>,
         cx: &mut Context<Self>,
     ) -> Self {
-        // Observe settings_entity so ProjectColumn re-renders when global/sidebar settings change
+        // Observe workspace, focus_manager, and settings_entity so ProjectColumn re-renders on state changes
+        cx.observe(&workspace, |_, _, cx| cx.notify()).detach();
+        cx.observe(&focus_manager, |_, _, cx| cx.notify()).detach();
         cx.observe(&settings_entity(cx), |_, _, cx| cx.notify())
             .detach();
 
@@ -130,6 +135,7 @@ impl ProjectColumn {
             quick_connect_input,
             welcome_selected_index: None,
             taskbar_scroll_handle: ScrollHandle::new(),
+            column_bounds: None,
         }
     }
 
@@ -147,6 +153,13 @@ impl ProjectColumn {
     #[allow(dead_code)]
     pub fn window_id(&self) -> WindowId {
         self.window_id
+    }
+
+    /// Return the last tracked bounding box for this project column.
+    /// Used by `spawn_terminals_for_project` to pre-warm the PTY size when
+    /// the pane_map is still empty (e.g., first open from welcome state).
+    pub fn column_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.column_bounds
     }
 
     /// Set the action dispatcher (used for remote projects).
@@ -264,7 +277,13 @@ impl ProjectColumn {
                 let is_remote = shell_type.is_remote() || project.is_remote || self.backend.is_remote();
                 let connection_lost = is_terminal_connection_lost(&terminal_id, cx);
                 let icon_color = if connection_lost { p.status_error } else { p.status_success };
-                let icon = if is_remote { AppIcon::Server } else { AppIcon::Terminal };
+                let icon = match &shell_type {
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "serial" => AppIcon::Serial,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "telnet" => AppIcon::Telnet,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "ssh" => AppIcon::Server,
+                    _ if is_remote => AppIcon::Server,
+                    _ => AppIcon::Terminal,
+                };
 
                 let terminal_name = {
                     let osc_title = self
@@ -480,6 +499,7 @@ impl ProjectColumn {
                     .flex()
                     .items_center()
                     .gap(ui_space_xs(cx))
+                    .overflow_hidden()
                     .text_size(ui_text_sm(cx));
 
                 let card_el = if enable_tab_preview {
@@ -502,7 +522,7 @@ impl ProjectColumn {
                     })
                 };
 
-                card_el
+                let card_el = card_el
                     .child(
                         div()
                             .flex_shrink_0()
@@ -525,20 +545,121 @@ impl ProjectColumn {
                             .text_ellipsis()
                             .child(terminal_name)
                     )
-                    .child(
-                        AppIcon::ChevronUp
-                            .size(ICON_MICRO)
-                            .flex_shrink_0()
-                            .text_color(rgb(t.text_muted))
-                    )
-                    .on_click(move |_, _window, cx| {
-                        focus_manager.update(cx, |fm, cx| {
-                            workspace.update(cx, |ws, cx| {
-                                ws.restore_terminal(fm, &project_id, &layout_path, cx);
-                            });
-                            cx.notify();
-                        });
+                    .child({
+                        let backend = self.backend.clone();
+                        let workspace = workspace.clone();
+                        let project_id = project_id.clone();
+                        let terminal_id = terminal_id.clone();
+                        let layout_path = layout_path.clone();
+                        let close_tip = i18n!(cx, "button.close");
+                        div()
+                            .id(ElementId::Name(format!("min-pill-close-{}", terminal_id).into()))
+                            .w(px(16.0))
+                            .h(px(16.0))
+                            .rounded(px(3.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .hover(|d| d.bg(rgb(t.bg_selection)))
+                            .tooltip(move |_, cx| {
+                                cx.new(|_| Tooltip::new(close_tip.clone())).into()
+                            })
+                            .child(
+                                AppIcon::Close
+                                    .size(px(10.0))
+                                    .flex_shrink_0()
+                                    .text_color(rgb(t.text_muted))
+                            )
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
+                            .on_click(move |_, _window, cx| {
+                                backend.kill(&terminal_id);
+                                workspace.update(cx, |ws, cx| {
+                                    ws.close_terminal(&project_id, &layout_path, cx);
+                                });
+                                cx.stop_propagation();
+                            })
                     })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_click({
+                        let project_id = project_id.clone();
+                        let terminal_id = terminal_id.clone();
+                        let workspace = workspace.clone();
+                        let focus_manager = focus_manager.clone();
+                        let layout_container = self.layout_container.clone();
+                        let window_id = self.window_id;
+                        move |_, window, cx| {
+                            let tid_for_lc = terminal_id.clone();
+                            let mut target_path = None;
+                            focus_manager.update(cx, |fm, cx| {
+                                workspace.update(cx, |ws, cx| {
+                                    ws.restore_terminal_by_id(fm, &project_id, &terminal_id, cx);
+                                });
+                                if let Some(path) = fm
+                                    .focused_terminal_state()
+                                    .filter(|state| state.project_id == project_id)
+                                    .map(|state| state.layout_path.clone())
+                                {
+                                    target_path = Some(path);
+                                }
+                                cx.notify();
+                            });
+                            if let Some(ref lc) = layout_container {
+                                lc.update(cx, |this, cx| {
+                                    this.mark_restoring(&tid_for_lc, cx);
+                                });
+                            }
+                            if let Some(path) = target_path {
+                                Self::schedule_focus_pane(window, window_id, project_id.clone(), path, 10, cx);
+                            }
+                        }
+                    })
+                    .on_mouse_down(MouseButton::Right, {
+                        let project_id = project_id.clone();
+                        let layout_path = layout_path.clone();
+                        let request_broker = self.request_broker.clone();
+                        move |event: &MouseDownEvent, _window, cx| {
+                            request_broker.update(cx, |broker, cx| {
+                                broker.push_overlay_request(
+                                    velowork_workspace::requests::OverlayRequest::Project(
+                                        velowork_workspace::requests::ProjectOverlay {
+                                            project_id: project_id.clone(),
+                                            kind: velowork_workspace::requests::ProjectOverlayKind::TabContextMenu {
+                                                tab_index: 0,
+                                                num_tabs: 1,
+                                                layout_path: layout_path.clone(),
+                                                position: event.position,
+                                            },
+                                        }
+                                    ),
+                                    cx,
+                                );
+                            });
+                            cx.stop_propagation();
+                        }
+                    });
+
+                let ws_version = self.workspace.read(cx).data_version();
+                let enable_animations = velowork_app_core::settings::settings(cx).enable_animations;
+                if enable_animations {
+                    card_el.with_animation(
+                        format!("minimized-capsule-enter-{}-{}", terminal_id, ws_version),
+                        Animation::new(std::time::Duration::from_millis(240))
+                            .with_easing(ease_tab_expand),
+                        |this, delta| {
+                            let t = delta;
+                            this.relative()
+                                .left(px(-12.0 * (1.0 - t)))
+                                .opacity(t)
+                                .max_w(px(160.0 * t))
+                        },
+                    ).into_any_element()
+                } else {
+                    card_el.into_any_element()
+                }
             });
 
         let detached_elements = detached_terminals
@@ -551,7 +672,13 @@ impl ProjectColumn {
                 let is_remote = shell_type.is_remote() || project.is_remote || self.backend.is_remote();
                 let connection_lost = is_terminal_connection_lost(&terminal_id, cx);
                 let icon_color = if connection_lost { p.status_error } else { p.status_success };
-                let icon = if is_remote { AppIcon::Server } else { AppIcon::Terminal };
+                let icon = match &shell_type {
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "serial" => AppIcon::Serial,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "telnet" => AppIcon::Telnet,
+                    velowork_core::shell::ShellType::Custom { path, .. } if path == "ssh" => AppIcon::Server,
+                    _ if is_remote => AppIcon::Server,
+                    _ => AppIcon::Terminal,
+                };
 
                 let terminal_name = {
                     let osc_title = self
@@ -819,10 +946,36 @@ impl ProjectColumn {
                             .flex_shrink_0()
                             .text_color(rgb(t.text_muted))
                     )
-                    .on_click(move |_, _window, cx| {
-                        workspace.update(cx, |ws, cx| {
-                            ws.attach_terminal(&terminal_id_for_click, cx);
-                        });
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                        cx.stop_propagation();
+                    })
+                    .on_click({
+                        let project_id = self.project_id.clone();
+                        let focus_manager = self.focus_manager.clone();
+                        let window_id = self.window_id;
+                        let terminal_id = terminal_id_for_click.clone();
+                        move |_, window, cx| {
+                            let mut target_path = None;
+                            workspace.update(cx, |ws, cx| {
+                                ws.attach_terminal(&terminal_id, cx);
+                            });
+                            focus_manager.update(cx, |fm, cx| {
+                                workspace.update(cx, |ws, cx| {
+                                    ws.focus_terminal_by_id(fm, &project_id, &terminal_id, cx);
+                                });
+                                if let Some(path) = fm
+                                    .focused_terminal_state()
+                                    .filter(|state| state.project_id == project_id)
+                                    .map(|state| state.layout_path.clone())
+                                {
+                                    target_path = Some(path);
+                                }
+                                cx.notify();
+                            });
+                            if let Some(path) = target_path {
+                                Self::schedule_focus_pane(window, window_id, project_id.clone(), path, 10, cx);
+                            }
+                        }
                     })
             });
 
@@ -831,6 +984,7 @@ impl ProjectColumn {
 
         div()
             .id(ElementId::Name(scroll_container_id.into()))
+            .occlude()
             .absolute()
             .bottom(ui_space_sm(cx))
             .left(ui_space_sm(cx))
@@ -917,7 +1071,18 @@ impl ProjectColumn {
                         .filter(|state| state.project_id == pid)
                         .map(|state| state.layout_path.clone())
                         .unwrap_or_default();
-                    ws.add_tab_with_shell(fm, &pid, &path, shell.clone(), cx);
+                    // If the currently focused pane is a Welcome placeholder,
+                    // replace it in-place rather than adding a new Tab sibling.
+                    let focused_is_welcome = ws
+                        .get_terminal_shell(&pid, &path)
+                        .map(|st| st == velowork_core::shell::ShellType::Welcome)
+                        .unwrap_or(false);
+                    if focused_is_welcome {
+                        ws.replace_terminal_shell(&pid, &path, shell.clone(), cx);
+                        ws.set_focused_terminal(fm, pid.clone(), path, cx);
+                    } else {
+                        ws.add_tab_with_shell(fm, &pid, &path, shell.clone(), cx);
+                    }
                 } else {
                     ws.add_terminal_with_shell(fm, &pid, shell.clone(), cx);
                 }
@@ -1202,6 +1367,20 @@ impl Render for ProjectColumn {
 
                 let hidden_taskbar = self.render_hidden_taskbar(&project, t, cx);
 
+                let this_entity = cx.entity().downgrade();
+                let bounds_tracker = canvas(
+                    move |bounds, _window, cx| {
+                        if let Some(entity) = this_entity.upgrade() {
+                            entity.update(cx, |this, _| {
+                                this.column_bounds = Some(bounds);
+                            });
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0();
+
                 div()
                     .id("project-column-main")
                     .relative()
@@ -1213,6 +1392,7 @@ impl Render for ProjectColumn {
                     .child(bg_element)
                     .child(content)
                     .child(hidden_taskbar)
+                    .child(bounds_tracker)
                     .into_any_element()
             }
 

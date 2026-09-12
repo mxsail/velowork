@@ -45,6 +45,11 @@ impl Terminal {
         let mut rs = self.resize_state.lock();
         let elapsed = now.duration_since(rs.last_pty_resize);
 
+        log::debug!(
+            "[term:resize] tid={} new_size={}x{} elapsed={}ms debounce={}ms immediate={}",
+            self.terminal_id, new_size.cols, new_size.rows, elapsed.as_millis(), debounce_ms, elapsed.as_millis() >= debounce_ms as u128
+        );
+
         if elapsed.as_millis() >= debounce_ms as u128 {
             // Enough time has passed — send resize immediately
             rs.pending_pty_resize = None;
@@ -69,12 +74,17 @@ impl Terminal {
                     if let Some((cols, rows)) = rs.pending_pty_resize.take() {
                         rs.last_pty_resize = std::time::Instant::now();
                         drop(rs);
+                        log::debug!(
+                            "[term:resize_trailing_flush] tid={} cols={} rows={}",
+                            terminal_id, cols, rows
+                        );
                         transport.resize(&terminal_id, cols, rows);
                     }
                 });
             }
         }
     }
+
 
     /// Resize only the local alacritty grid, without sending resize to PTY/transport.
     /// Used by remote clients to pre-resize the grid to match server dimensions before snapshot.
@@ -138,5 +148,10 @@ impl Terminal {
     pub fn cell_dimensions(&self) -> (f32, f32) {
         let rs = self.resize_state.lock();
         (rs.size.cell_width, rs.size.cell_height)
+    }
+
+    /// Get current terminal size (cols, rows, cell_width, cell_height)
+    pub fn size(&self) -> TerminalSize {
+        self.resize_state.lock().size
     }
 }

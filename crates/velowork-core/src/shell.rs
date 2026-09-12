@@ -204,10 +204,10 @@ impl ShellType {
         }
     }
 
-    /// Extract the SSH session id (if any) from an `ssh` custom shell's `--id` / `--session-id` flag.
-    pub fn ssh_session_id(&self) -> Option<&str> {
+    /// Extract the session id (if any) from a custom shell (`ssh`, `serial`, `telnet`, `local`).
+    pub fn session_id(&self) -> Option<&str> {
         if let ShellType::Custom { path, args } = self
-            && path == "ssh" {
+            && (path == "ssh" || path == "serial" || path == "telnet" || path == "local") {
             let mut i = 0;
             while i < args.len() {
                 if (args[i] == "--id" || args[i] == "--session-id") && i + 1 < args.len() {
@@ -217,6 +217,12 @@ impl ShellType {
             }
         }
         None
+    }
+
+    /// Extract the SSH session id (if any) from an `ssh` custom shell's `--id` / `--session-id` flag.
+    /// Backward-compatible alias for [`session_id`](Self::session_id).
+    pub fn ssh_session_id(&self) -> Option<&str> {
+        self.session_id()
     }
 }
 
@@ -240,7 +246,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ssh_session_id_extraction() {
+    fn test_session_id_extraction() {
         let ssh_shell = ShellType::Custom {
             path: "ssh".to_string(),
             args: vec![
@@ -251,9 +257,48 @@ mod tests {
                 "user@host".to_string(),
             ],
         };
+        assert_eq!(ssh_shell.session_id(), Some("session-123"));
         assert_eq!(ssh_shell.ssh_session_id(), Some("session-123"));
 
+        let serial_shell = ShellType::Custom {
+            path: "serial".to_string(),
+            args: vec![
+                "--id".to_string(),
+                "serial-456".to_string(),
+                "--port".to_string(),
+                "COM3".to_string(),
+                "--baud".to_string(),
+                "115200".to_string(),
+            ],
+        };
+        assert_eq!(serial_shell.session_id(), Some("serial-456"));
+
+        let telnet_shell = ShellType::Custom {
+            path: "telnet".to_string(),
+            args: vec![
+                "--id".to_string(),
+                "telnet-789".to_string(),
+                "--host".to_string(),
+                "192.168.1.1".to_string(),
+                "--port".to_string(),
+                "23".to_string(),
+            ],
+        };
+        assert_eq!(telnet_shell.session_id(), Some("telnet-789"));
+
+        let local_shell = ShellType::Custom {
+            path: "local".to_string(),
+            args: vec![
+                "--id".to_string(),
+                "local-101".to_string(),
+                "--shell".to_string(),
+                "zsh".to_string(),
+            ],
+        };
+        assert_eq!(local_shell.session_id(), Some("local-101"));
+
         let default_shell = ShellType::Default;
+        assert_eq!(default_shell.session_id(), None);
         assert_eq!(default_shell.ssh_session_id(), None);
     }
 }

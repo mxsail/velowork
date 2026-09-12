@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_channel::Sender;
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -94,9 +94,21 @@ pub async fn run_telnet_session(
     exit_signal: Arc<AtomicBool>,
 ) -> Result<()> {
     let addr = format!("{}:{}", config.host, config.port);
-    let stream = TcpStream::connect(&addr)
-        .await
-        .with_context(|| format!("Failed to connect to Telnet host '{addr}'"))?;
+    let stream = match TcpStream::connect(&addr).await {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("\r\n\x1b[31m[Failed to connect to Telnet host '{addr}': {e}]\x1b[0m\r\n");
+            let _ = event_tx.send(PtyEvent::Data {
+                terminal_id: terminal_id.clone(),
+                data: msg.into_bytes(),
+            }).await;
+            let _ = event_tx.send(PtyEvent::Exit {
+                terminal_id,
+                exit_code: Some(1),
+            }).await;
+            return Err(anyhow::anyhow!("Failed to connect to Telnet host '{addr}': {e}"));
+        }
+    };
 
     run_telnet_session_with_stream(
         terminal_id,
@@ -315,5 +327,41 @@ mod tests {
         assert_eq!(cfg.port, 23);
         assert_eq!(cfg.encoding, "utf-8");
         assert_eq!(cfg.term_type, velowork_core::DEFAULT_TERM_TYPE);
+    }
+
+    #[tokio::test]
+    async fn test_telnet_session_connection_failure() {
+        let (event_tx, event_rx) = async_channel::unbounded();
+        let (_input_tx, input_rx) = tokio::sync::mpsc::channel(1);
+        let (_resize_tx, resize_rx) = tokio::sync::mpsc::channel(1);
+        let exit_signal = Arc::new(AtomicBool::new(false));
+
+        let config = TelnetConfig {
+            host: "127.0.0.1".to_string(),
+            port: 59999,
+            ..Default::default()
+        };
+
+        let res = run_telnet_session("telnet-term-1".to_string(), config, event_tx, input_rx, resize_rx, exit_signal).await;
+        assert!(res.is_err());
+
+        let ev1 = event_rx.recv().await.unwrap();
+        match ev1 {
+            PtyEvent::Data { terminal_id, data } => {
+                assert_eq!(terminal_id, "telnet-term-1");
+                let text = String::from_utf8_lossy(&data);
+                assert!(text.contains("Failed to connect to Telnet host '127.0.0.1:59999'"));
+            }
+            _ => panic!("Expected PtyEvent::Data"),
+        }
+
+        let ev2 = event_rx.recv().await.unwrap();
+        match ev2 {
+            PtyEvent::Exit { terminal_id, exit_code } => {
+                assert_eq!(terminal_id, "telnet-term-1");
+                assert_eq!(exit_code, Some(1));
+            }
+            _ => panic!("Expected PtyEvent::Exit"),
+        }
     }
 }

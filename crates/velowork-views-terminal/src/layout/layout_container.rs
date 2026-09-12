@@ -1,7 +1,6 @@
 //! Recursive layout container that renders terminal/split/tabs nodes
 
 use crate::ActionDispatch;
-use velowork_ui::icon::AppIcon;
 use velowork_core::api::ActionRequest;
 use velowork_i18n::i18n;
 use velowork_terminal::backend::TerminalBackend;
@@ -10,12 +9,14 @@ use velowork_ui::menu::PopupMenu;
 use velowork_ui::overlay_menu::OverlayMenu;
 use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::design::semantic::SemanticPalette;
-use velowork_ui::theme::{bg_opacity, with_alpha};
-use velowork_ui::tokens::SPACE_MD;
+use velowork_ui::theme::{bg_opacity, surface_bg_t, with_alpha};
+use velowork_ui::motion::{ease_out_morph, ease_out_panel};
+use velowork_ui::input::SimpleInputState;
 use velowork_ui::click_detector::ClickDetector;
 use crate::layout::pane_drag::{PaneDrag, DropZone};
 use crate::layout::split_pane::{ActiveDrag, render_split_divider};
 use crate::layout::terminal_pane::TerminalPane;
+use crate::elements::terminal_element::TerminalElement;
 use velowork_terminal::TerminalsRegistry;
 use velowork_workspace::focus::FocusManager;
 use velowork_workspace::request_broker::RequestBroker;
@@ -77,6 +78,20 @@ pub struct LayoutContainer<D: ActionDispatch> {
     /// Index of the tab currently hovered by the mouse, used to reveal its
     /// close button (hidden by default). `None` when no tab is hovered.
     pub(super) hovered_tab: Option<usize>,
+    pub(super) prev_zoomed: Option<bool>,
+    pub(super) zoom_epoch: usize,
+    pub(super) prev_minimized: Option<bool>,
+    pub(super) minimize_epoch: usize,
+    pub(super) restore_epoch: usize,
+    pub(super) restoring_terminal_id: Option<(String, usize, std::time::Instant)>,
+    pub(super) workspace_observed: bool,
+    pub(super) welcome_input: Option<Entity<SimpleInputState>>,
+    pub(super) welcome_selected_index: Option<usize>,
+    pub(super) prev_visible_tab_ids: HashSet<String>,
+    pub(super) has_initialized_tabs: bool,
+    pub(super) tab_anim_seq: usize,
+    pub(super) collapsing_tabs: HashMap<String, (std::time::Instant, usize)>,
+    pub(super) restoring_tabs: HashMap<String, (std::time::Instant, usize)>,
 }
 
 /// Build the single shared terminal-area background.
@@ -93,6 +108,14 @@ pub struct LayoutContainer<D: ActionDispatch> {
 ///
 /// This is the canonical terminal backdrop. It is painted exactly ONCE by the
 /// owning central region (`ProjectColumn`) as the bottom-most layer, beneath
+/// Authoritative tab bar height calculation matching `render_tab_bar`:
+/// `(tab_height - 6.0).max(24.0) + SPACE_SM * 2.0`
+pub fn compute_tab_bar_height(cx: &App) -> Pixels {
+    let item_height = px((velowork_ui::tab::tab_height(cx) - 6.0).max(24.0));
+    item_height + velowork_ui::tokens::SPACE_SM * 2.0
+}
+
+/// Shared backdrop rendering for terminal surfaces. It is called from
 /// both the terminal `LayoutContainer` and the empty / creating placeholder
 /// states, so the backdrop looks identical whether or not a terminal is attached
 /// yet and the global transparency is never applied more than once.
@@ -122,10 +145,7 @@ pub fn render_terminal_shared_background(
         // which would cause double antialiasing (sub-pixel fringing) around corner curves.
         Some(img) => container.child(img),
         None => {
-            // Tab bar height matches `bar_height` in `render_tab_bar`:
-            // `(tab_height - 6.0).max(24.0) + SPACE_SM * 2.0`
-            let item_height = px((velowork_ui::tab::tab_height(cx) - 6.0).max(24.0));
-            let bar_height = item_height + velowork_ui::tokens::SPACE_SM * 2.0;
+            let bar_height = compute_tab_bar_height(cx);
 
             let top_corners = !bottom_only && radius > 0.0;
             let bottom_corners = radius > 0.0;
@@ -212,7 +232,67 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             overlay_registry: None,
             background_cache_observed: false,
             hovered_tab: None,
+            prev_zoomed: None,
+            zoom_epoch: 0,
+            prev_minimized: None,
+            minimize_epoch: 0,
+            restore_epoch: 0,
+            restoring_terminal_id: None,
+            workspace_observed: false,
+            welcome_input: None,
+            welcome_selected_index: None,
+            prev_visible_tab_ids: HashSet::new(),
+            has_initialized_tabs: false,
+            tab_anim_seq: 0,
+            collapsing_tabs: HashMap::new(),
+            restoring_tabs: HashMap::new(),
         }
+    }
+
+    /// Mark a terminal as restored so any collapsing ghost tab is dismissed.
+    pub fn mark_restoring(&mut self, target_terminal_id: &str, cx: &mut Context<Self>) {
+        self.collapsing_tabs.remove(target_terminal_id);
+        self.restoring_tabs.remove(target_terminal_id);
+        self.restore_epoch = self.restore_epoch.wrapping_add(1);
+        self.restoring_terminal_id = Some((
+            target_terminal_id.to_string(),
+            self.restore_epoch,
+            std::time::Instant::now(),
+        ));
+
+        for child_container in self.child_containers.values() {
+            child_container.update(cx, |child, cx| {
+                child.mark_restoring(target_terminal_id, cx);
+            });
+        }
+
+        cx.notify();
+    }
+
+    /// Mark a terminal as actively collapsing so its tab collapse animation runs fresh.
+    pub fn mark_collapsing(&mut self, target_terminal_id: &str, cx: &mut Context<Self>) {
+        self.tab_anim_seq = self.tab_anim_seq.wrapping_add(1);
+        let seq = self.tab_anim_seq;
+        self.restoring_tabs.remove(target_terminal_id);
+        self.collapsing_tabs.insert(target_terminal_id.to_string(), (std::time::Instant::now(), seq));
+
+        for child_container in self.child_containers.values() {
+            child_container.update(cx, |child, cx| {
+                child.mark_collapsing(target_terminal_id, cx);
+            });
+        }
+
+        let entity = cx.entity().downgrade();
+        let tid = target_terminal_id.to_string();
+        cx.spawn(async move |_, cx| {
+            smol::Timer::after(std::time::Duration::from_millis(290)).await;
+            let _ = entity.update(cx, |this, cx| {
+                this.collapsing_tabs.remove(&tid);
+                cx.notify();
+            });
+        }).detach();
+
+        cx.notify();
     }
 
     /// Inject the window-level `OverlayRegistry` so the header "more" dropdown
@@ -567,6 +647,143 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         cx.notify();
     }
 
+    pub(super) fn execute_welcome_action(
+        &mut self,
+        action: crate::welcome::WelcomeAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            crate::welcome::WelcomeAction::StartTerminal => {
+                let pid = self.project_id.clone();
+                let dispatcher = self.action_dispatcher.clone();
+                let workspace = self.workspace.clone();
+                let focus_manager = self.focus_manager.clone();
+
+                if let Some(ref d) = dispatcher {
+                    d.dispatch(
+                        ActionRequest::CreateTerminal {
+                            project_id: pid.clone(),
+                        },
+                        cx,
+                    );
+                } else {
+                    focus_manager.update(cx, |fm, cx| {
+                        workspace.update(cx, |ws, cx| {
+                            ws.add_terminal(fm, &pid, cx);
+                        });
+                    });
+                }
+            }
+            crate::welcome::WelcomeAction::ConnectSession(session) => {
+                let pid = self.project_id.clone();
+                let shell = crate::welcome::session_to_shell_type(&session);
+                let workspace = self.workspace.clone();
+                let focus_manager = self.focus_manager.clone();
+                focus_manager.update(cx, |fm, cx| {
+                    workspace.update(cx, |ws, cx| {
+                        ws.add_terminal_with_shell(fm, &pid, shell, cx);
+                    });
+                });
+            }
+            crate::welcome::WelcomeAction::NewSession => {
+                window.dispatch_action(Box::new(crate::actions::NewSession), cx);
+            }
+            crate::welcome::WelcomeAction::AiAssistant => {
+                window.dispatch_action(Box::new(crate::actions::ShowAiAssistant), cx);
+            }
+            crate::welcome::WelcomeAction::QuickCommands => {
+                window.dispatch_action(Box::new(crate::actions::ShowQuickCommandsPanel), cx);
+            }
+            crate::welcome::WelcomeAction::ImportSessions => {
+                self.request_broker.update(cx, |broker, cx| {
+                    broker.push_overlay_request(
+                        velowork_workspace::requests::OverlayRequest::ImportSessionsDialog,
+                        cx,
+                    );
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn render_welcome_empty_state(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if self.welcome_input.is_none() {
+            let placeholder = i18n!(cx, "welcome.quick_connect_placeholder");
+            self.welcome_input = Some(cx.new(|cx| {
+                SimpleInputState::new(cx).placeholder(placeholder)
+            }));
+        }
+        let quick_connect_input = self.welcome_input.as_ref().unwrap();
+        let shortcuts = crate::welcome::WelcomeShortcuts::from_cx(cx);
+
+        let dashboard = crate::welcome::render_welcome_dashboard(
+            &self.project_id,
+            quick_connect_input,
+            self.welcome_selected_index,
+            shortcuts,
+            window,
+            cx,
+            cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if let Some(ref inp) = this.welcome_input {
+                    if let Some(action) = crate::welcome::handle_welcome_key_down(
+                        &this.project_id,
+                        inp,
+                        &mut this.welcome_selected_index,
+                        event,
+                        cx,
+                    ) {
+                        this.execute_welcome_action(action, window, cx);
+                    }
+                }
+                cx.notify();
+            }),
+            cx.listener(|this, _, window, cx| {
+                if let Some(ref inp) = this.welcome_input {
+                    if let Some(action) = crate::welcome::handle_welcome_quick_connect(
+                        &this.project_id,
+                        inp,
+                        &mut this.welcome_selected_index,
+                        cx,
+                    ) {
+                        this.execute_welcome_action(action, window, cx);
+                    }
+                }
+            }),
+            cx.listener(|this, action: &crate::welcome::WelcomeAction, window, cx| {
+                this.execute_welcome_action(action.clone(), window, cx);
+            }),
+        );
+
+        let enable_animations = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.enable_animations)
+            .unwrap_or(true);
+
+        if enable_animations && self.minimize_epoch > 0 {
+            div()
+                .size_full()
+                .with_animation(
+                    format!("empty-welcome-anim-{}-{}", self.project_id, self.minimize_epoch),
+                    Animation::new(std::time::Duration::from_millis(480))
+                        .with_easing(ease_out_panel),
+                    |this, delta| {
+                        // 280ms debounce delay out of 480ms:
+                        let t = if delta < 0.58 { 0.0 } else { (delta - 0.58) / 0.42 };
+                        this.relative().opacity(t)
+                    },
+                )
+                .child(dashboard)
+                .into_any_element()
+        } else {
+            dashboard.into_any_element()
+        }
+    }
+
     fn render_terminal(
         &mut self,
         terminal_id: Option<String>,
@@ -584,7 +801,8 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .min_h_0()
             .flex()
             .flex_col()
-            .relative();
+            .relative()
+            .overflow_hidden();
 
         // 未处于 tab 组中的独立终端（含拆分面板内的终端），无论是否处于
         // 全屏（zoom）状态都保留其独立顶栏；全屏时顶栏右侧的“全屏展开”
@@ -593,44 +811,224 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             container = container.child(self.render_standalone_tab_bar(window, cx));
         }
 
-        if detached || minimized {
-            let t = theme(cx);
-            let p = SemanticPalette::from_theme(&t);
-            let empty_placeholder = div()
-                .flex_1()
-                .size_full()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .gap(SPACE_MD)
-                .text_color(p.text_muted)
-                .child(
-                    AppIcon::Terminal
-                        .size(px(28.0))
-                        .text_color(p.text_muted),
-                )
-                .child(
-                    div()
-                        .text_size(velowork_ui::tokens::ui_text_md(cx))
-                        .child(i18n!(cx, "terminal.empty_tabs")),
-                );
-            return container.child(empty_placeholder);
+        let enable_animations = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.enable_animations)
+            .unwrap_or(true);
+
+        let was_normal = self.prev_minimized == Some(false);
+        let is_minimize = was_normal && minimized;
+        let was_minimized = self.prev_minimized == Some(true);
+        let is_restore = was_minimized && !minimized;
+        self.prev_minimized = Some(minimized);
+
+        if is_minimize {
+            self.minimize_epoch = self.minimize_epoch.wrapping_add(1);
+        }
+        if is_restore {
+            self.restore_epoch = self.restore_epoch.wrapping_add(1);
         }
 
-        container
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .relative()
-                    .when_some(self.terminal_pane.clone(), |d, pane| {
-                        d.child(AnyView::from(pane).cached(
-                            StyleRefinement::default().size_full(),
-                        ))
-                    })
-                    .child(self.render_drop_zones(terminal_id, cx, &self.active_drag.clone())),
-            )
+        let current_minimize_epoch = self.minimize_epoch;
+        let current_restore_epoch = self.restore_epoch;
+
+        let bounds = *self.container_bounds_ref.borrow();
+        let w = f32::from(bounds.size.width).max(300.0);
+        let h = f32::from(bounds.size.height).max(200.0);
+        let bar_h = f32::from(compute_tab_bar_height(cx));
+        let content_h = if !in_tab_group { (h - bar_h).max(100.0) } else { h };
+        let dock_x = 16.0f32;
+
+        if detached || minimized {
+            let t = theme(cx);
+            let welcome_view = self.render_welcome_empty_state(window, cx);
+
+            let mut placeholder_box = div()
+                .flex_1()
+                .size_full()
+                .min_h_0()
+                .relative()
+                .overflow_hidden()
+                .child(welcome_view);
+
+            if enable_animations && current_minimize_epoch > 0 && minimized {
+                let anim_id = terminal_id.clone().unwrap_or_else(|| format!("term-min-{:?}", self.layout_path));
+                let preview_el = self.terminal_pane.as_ref()
+                    .and_then(|p| p.read(cx).terminal_arc())
+                    .map(|term| TerminalElement::preview(term, cx.focus_handle()));
+
+                let ghost_card = div()
+                    .id(ElementId::Name(format!("terminal-ghost-card-{}-{}", anim_id, current_minimize_epoch).into()))
+                    .bg(surface_bg_t(t.bg_panel, &t))
+                    .shadow_lg()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .size_full()
+                            .relative()
+                            .flex()
+                            .flex_col()
+                            .when_some(preview_el, |d, el| {
+                                d.child(el)
+                            })
+                    );
+
+                let contracting_el = ghost_card.with_animation(
+                    format!("terminal-contract-anim-{}-{}", anim_id, current_minimize_epoch),
+                    Animation::new(std::time::Duration::from_millis(280))
+                        .with_easing(ease_out_panel),
+                    move |this, delta| {
+                        let t = delta;
+                        if t >= 0.98 {
+                            this.absolute()
+                                .left(px(dock_x))
+                                .bottom(px(16.0))
+                                .w(px(w * 0.18))
+                                .h(px(content_h * 0.18))
+                                .opacity(0.0)
+                        } else {
+                            let scale = 1.0 - 0.82 * t;
+                            let cur_w = (w * scale).max(10.0);
+                            let cur_h = (content_h * scale).max(10.0);
+                            let target_x = dock_x;
+                            let target_y = (content_h - cur_h - 16.0).max(0.0);
+                            let cur_x = target_x * t;
+                            let cur_y = target_y * t;
+                            let cur_radius = (6.0 + 6.0 * t).min(12.0);
+                            let fade = if t >= 0.65 {
+                                ((1.0 - t) / 0.35).clamp(0.0, 1.0)
+                            } else {
+                                1.0
+                            };
+                            this.absolute()
+                                .left(px(cur_x))
+                                .top(px(cur_y))
+                                .w(px(cur_w))
+                                .h(px(cur_h))
+                                .rounded(px(cur_radius))
+                                .shadow_lg()
+                                .overflow_hidden()
+                                .opacity(fade)
+                        }
+                    },
+                );
+
+                placeholder_box = placeholder_box.child(contracting_el);
+            }
+
+            return container.child(placeholder_box);
+        }
+
+        let anim_id = terminal_id.clone().unwrap_or_else(|| format!("terminal-{:?}", self.layout_path));
+
+        let inner_surface = div()
+            .id(ElementId::Name(format!("terminal-inner-surface-{}", anim_id).into()))
+            .size_full()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .flex()
+            .flex_col()
+            .when_some(self.terminal_pane.clone(), |d, pane| {
+                d.child(AnyView::from(pane).cached(
+                    StyleRefinement::default().size_full(),
+                ))
+            })
+            .child(self.render_drop_zones(terminal_id.clone(), cx, &self.active_drag.clone()));
+
+        let viewport_box = div()
+            .id(ElementId::Name(format!("terminal-viewport-box-{}", anim_id).into()))
+            .child(inner_surface);
+
+        let content_el: AnyElement = viewport_box
+            .size_full()
+            .flex_1()
+            .min_h_0()
+            .relative()
+            .overflow_hidden()
+            .into_any_element();
+
+        let is_restoring_this = is_restore
+            || self.restoring_terminal_id.as_ref().map(|(tid, ep, start)| {
+                *ep == current_restore_epoch
+                    && terminal_id.as_deref() == Some(tid.as_str())
+                    && start.elapsed() < std::time::Duration::from_millis(320)
+            }).unwrap_or(false);
+
+        let mut content_area = div()
+            .flex_1()
+            .size_full()
+            .min_h_0()
+            .relative()
+            .overflow_hidden()
+            .when(enable_animations && is_restoring_this && current_restore_epoch > 0, |d| {
+                d.opacity(0.0)
+            })
+            .child(content_el);
+
+        if enable_animations && is_restoring_this && current_restore_epoch > 0 {
+            let t = theme(cx);
+            let preview_el = self.terminal_pane.as_ref()
+                .and_then(|p| p.read(cx).terminal_arc())
+                .map(|term| TerminalElement::preview(term, cx.focus_handle()));
+
+            let expand_ghost_card = div()
+                .id(ElementId::Name(format!("terminal-expand-card-{}-{}", anim_id, current_restore_epoch).into()))
+                .bg(surface_bg_t(t.bg_panel, &t))
+                .shadow_lg()
+                .overflow_hidden()
+                .child(
+                    div()
+                        .size_full()
+                        .relative()
+                        .flex()
+                        .flex_col()
+                        .when_some(preview_el, |d, el| {
+                            d.child(el)
+                        })
+                );
+
+            let expanding_el = expand_ghost_card.with_animation(
+                format!("terminal-expand-anim-{}-{}", anim_id, current_restore_epoch),
+                Animation::new(std::time::Duration::from_millis(300))
+                    .with_easing(ease_out_panel),
+                move |this, delta| {
+                    let t = delta;
+                    if t >= 0.98 {
+                        this.absolute()
+                            .inset_0()
+                            .size_full()
+                            .opacity(0.0)
+                    } else {
+                        let scale = 0.18 + 0.82 * t;
+                        let cur_w = (w * scale).max(10.0);
+                        let cur_h = (content_h * scale).max(10.0);
+                        let target_x = dock_x;
+                        let target_y = (content_h - cur_h - 16.0).max(0.0);
+                        let cur_x = target_x * (1.0 - t);
+                        let cur_y = target_y * (1.0 - t);
+                        let cur_radius = (12.0 - 6.0 * t).max(6.0);
+                        let fade = if t < 0.25 {
+                            (t / 0.25).clamp(0.0, 1.0)
+                        } else {
+                            1.0
+                        };
+                        this.absolute()
+                            .left(px(cur_x))
+                            .top(px(cur_y))
+                            .w(px(cur_w))
+                            .h(px(cur_h))
+                            .rounded(px(cur_radius))
+                            .shadow_lg()
+                            .overflow_hidden()
+                            .opacity(fade)
+                    }
+                },
+            );
+            content_area = content_area.child(expanding_el);
+        }
+
+        container.child(content_area)
     }
 
     fn render_drop_zones(
@@ -742,12 +1140,20 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         children: &[LayoutNode],
         _window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let num_children = children.len();
         let project_id = self.project_id.clone();
         let layout_path = self.layout_path.clone();
 
-        if let Some(zoomed_idx) = self.find_zoomed_child_index(children, cx) {
+        let zoomed_child = self.find_zoomed_child_index(children, cx);
+        let is_zoomed = zoomed_child.is_some();
+        if self.prev_zoomed != Some(is_zoomed) {
+            self.prev_zoomed = Some(is_zoomed);
+            self.zoom_epoch = self.zoom_epoch.wrapping_add(1);
+        }
+        let current_zoom_epoch = self.zoom_epoch;
+
+        if let Some(zoomed_idx) = zoomed_child {
             let mut child_path = self.layout_path.clone();
             child_path.push(zoomed_idx);
 
@@ -780,17 +1186,91 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 container.update(cx, |c, _cx| c.set_overlay_registry(reg));
             }
 
-            return div()
-                .id(ElementId::Name(format!("split-container-{}-{:?}", project_id, layout_path).into()))
+            let enable_animations = cx
+                .try_global::<velowork_app_core::settings::GlobalSettings>()
+                .map(|g| g.0.read(cx).settings.enable_animations)
+                .unwrap_or(true);
+
+            let bounds = *self.container_bounds_ref.borrow();
+            let total_w = f32::from(bounds.size.width).max(300.0);
+            let total_h = f32::from(bounds.size.height).max(200.0);
+
+            let total_size: f32 = sizes.iter().sum();
+            let safe_total = if total_size > 0.0 { total_size } else { 1.0 };
+            let sum_before: f32 = sizes.iter().take(zoomed_idx).sum();
+            let child_size = sizes.get(zoomed_idx).copied().unwrap_or(safe_total / children.len().max(1) as f32);
+
+            let (orig_x, orig_y, orig_w, orig_h) = if direction == SplitDirection::Vertical {
+                let x = (sum_before / safe_total) * total_w;
+                let w = (child_size / safe_total) * total_w;
+                (x, 0.0, w, total_h)
+            } else {
+                let y = (sum_before / safe_total) * total_h;
+                let h = (child_size / safe_total) * total_h;
+                (0.0, y, total_w, h)
+            };
+
+            let zoomed_div = div()
                 .size_full()
                 .min_h_0()
                 .min_w_0()
                 .child(AnyView::from(container).cached(
                     StyleRefinement::default().size_full()
                 ));
+
+            let zoomed_el: AnyElement = if enable_animations && current_zoom_epoch > 0 {
+                let t = theme(cx);
+                let t_border = t.border;
+                zoomed_div
+                    .with_animation(
+                        format!("split-zoomed-enter-{:?}-{}", child_path, current_zoom_epoch),
+                        Animation::new(std::time::Duration::from_millis(280))
+                            .with_easing(ease_out_morph),
+                        move |this, delta| {
+                            if delta >= 0.999 {
+                                this.size_full().relative().opacity(1.0)
+                            } else {
+                                let t = ease_out_morph(delta);
+                                let cur_x = px(orig_x * (1.0 - t));
+                                let cur_y = px(orig_y * (1.0 - t));
+                                let cur_w = px(orig_w + (total_w - orig_w) * t);
+                                let cur_h = px(orig_h + (total_h - orig_h) * t);
+                                let cur_radius = px(6.0 * (1.0 - t));
+                                this.absolute()
+                                    .left(cur_x)
+                                    .top(cur_y)
+                                    .w(cur_w)
+                                    .h(cur_h)
+                                    .rounded(cur_radius)
+                                    .border_1()
+                                    .border_color(rgb(t_border).opacity(1.0 - t))
+                                    .shadow_lg()
+                                    .overflow_hidden()
+                                    .opacity(0.4 + 0.6 * t)
+                            }
+                        },
+                    )
+                    .into_any_element()
+            } else {
+                zoomed_div.into_any_element()
+            };
+
+            return div()
+                .id(ElementId::Name(format!("split-container-{}-{:?}", project_id, layout_path).into()))
+                .size_full()
+                .min_h_0()
+                .min_w_0()
+                .relative()
+                .overflow_hidden()
+                .child(zoomed_el)
+                .into_any_element();
         }
 
         let is_horizontal = direction == SplitDirection::Horizontal;
+        let enable_animations = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.enable_animations)
+            .unwrap_or(true);
 
         let valid_paths: std::collections::HashSet<Vec<usize>> = (0..num_children)
             .map(|i| {
@@ -886,17 +1366,32 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             // out fresh each frame (its own root is `size_full`) so it honors the
             // split's flex size. The standalone-terminal `cached` calls keep their
             // wrapper because their parent is `flex_1` and doesn't change size.
-            let child_element = div()
+            let child_div = div()
                 .flex_basis(relative(size_percent / 100.0))
                 .min_w_0()
                 .min_h_0()
-                .child(AnyView::from(container))
-                .into_any_element();
+                .child(AnyView::from(container));
+
+            let child_element = if enable_animations {
+                child_div
+                    .with_animation(
+                        format!("split-child-anim-{:?}-{}", child_path, current_zoom_epoch),
+                        Animation::new(std::time::Duration::from_millis(200))
+                            .with_easing(|t| 1.0 - (1.0 - t).powi(3)),
+                        |this, delta| {
+                            this.relative()
+                                .opacity(delta)
+                        },
+                    )
+                    .into_any_element()
+            } else {
+                child_div.into_any_element()
+            };
 
             elements.push(child_element);
         }
 
-        div()
+        let split_root = div()
             .id(ElementId::Name(format!("split-container-{}-{:?}", project_id, layout_path).into()))
             .child(canvas(
                 {
@@ -913,7 +1408,25 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .size_full()
             .min_h_0()
             .min_w_0()
-            .children(elements)
+            .children(elements);
+
+        if enable_animations && current_zoom_epoch > 0 {
+            split_root
+                .with_animation(
+                    format!("split-grid-restore-{:?}-{}", layout_path, current_zoom_epoch),
+                    Animation::new(std::time::Duration::from_millis(280))
+                        .with_easing(ease_out_morph),
+                    |this, delta| {
+                        let t = ease_out_morph(delta);
+                        this.size_full()
+                            .relative()
+                            .opacity(0.35 + 0.65 * t)
+                    },
+                )
+                .into_any_element()
+        } else {
+            split_root.into_any_element()
+        }
     }
 }
 
@@ -936,6 +1449,14 @@ impl<D: ActionDispatch + Send + Sync> Render for LayoutContainer<D> {
                 .detach();
                 self.background_cache_observed = true;
             }
+        }
+
+        if !self.workspace_observed {
+            cx.observe(&self.workspace, |_, _, cx| {
+                cx.notify();
+            })
+            .detach();
+            self.workspace_observed = true;
         }
 
         let t = theme(cx);
@@ -996,9 +1517,20 @@ impl<D: ActionDispatch + Send + Sync> Render for LayoutContainer<D> {
                 .into_any_element(),
         };
 
+        let container_bounds_ref = self.container_bounds_ref.clone();
         div()
             .size_full()
             .relative()
+            .child(
+                canvas(
+                    move |bounds, _window, _cx| {
+                        *container_bounds_ref.borrow_mut() = bounds;
+                    },
+                    |_bounds, _prepaint, _window, _cx| {},
+                )
+                .absolute()
+                .size_full(),
+            )
             .child(content)
             .into_any_element()
     }

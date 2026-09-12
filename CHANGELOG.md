@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.3] - 2026-09-12
+
+### Fixed / 修复
+- **自动更新检查器 GitHub API 速率限制规避与探针优化**：改用 GitHub Releases 网页重定向探针（`HEAD` 请求），彻底摆脱未鉴权 REST API 60次/小时公网 IP 限流导致的误报错；同时完善多平台构建产物与校验和自动探测机制，并将后台自动检测错误降级为 warning。  
+  *(Bypass GitHub API rate limit by probing Releases web redirect headers instead of consuming REST API quota, add asset probe fallback, and demote background auto-check errors to warning).*
+- **串口/Telnet/本地终端标签名称显示与连接失败无反馈修复**：修复新建串口、Telnet、本地终端双击打开后标签栏无法正确展示配置中会话名称的缺陷；修复打开不存在串口或连接失败时缺少用户反馈的问题，增加端口必填校验与友好浮动通知。  
+  *(Fix session tab names for Serial, Telnet, and Local terminal tabs; add required port validation and floating notification on serial connection failures).*
+- **终端字体字重设置生效与选项标准化**：统一终端设置中字重下拉选项与后端存储的大小写映射，补齐 Light 档位，彻底修复字重默认显示为空及选择后渲染未生效问题。  
+  *(Fix terminal font weight settings by aligning casing between dropdown options and model serialization, adding Light weight option, and ensuring live render updates).*
+- **设置子弹窗 ESC 键穿透关闭问题修复**：修复在设置面板的子弹窗（如添加连接/编辑会话）中按下 ESC 键会连带关闭外层主设置窗口的穿透问题。  
+  *(Fix ESC key event propagation in settings sub-modals accidentally closing the parent settings window).*
+- **终端标签页展开动效与焦点回弹优化**：修复标签页展开与恢复时的排版错乱与尺寸跳变，解决动画完成后终端输入焦点丢失的问题。  
+  *(Fix tab expand/restore layout glitches and restore keyboard focus smoothly after animation completes).*
+- **Prompt 瞬态清屏闪烁根治**：优化清屏与光标重绘逻辑，彻底消除快速交互时的瞬态闪烁。  
+  *(Eliminate transient screen clearing flicker on prompt redraws).*
+
+### Added / 新增
+- **状态栏右侧工具条快捷开关与布局收窄**：将状态栏右下角按钮改造为控制右侧工具条显隐的开关，支持状态持久化记忆与高亮反馈，并将右侧图标栏宽度收窄至 30px 以最大化终端可视区域。  
+  *(Add toggle button in status bar for right sidebar visibility with state persistence and active indicator, and optimize right bar width to 30px).*
+- **全局物理流体微动效覆盖与弹窗源点感知**：弹窗与浮层全量接入物理弹簧与流体过渡，支持源点感知形变；优化 Windows 平台弹窗打开延迟与字体渲染清晰度。  
+  *(Full coverage of fluid motion animation and source-aware modal transitions; optimize modal open latency and text clarity on Windows).*
+
 ## [0.1.0-beta.2] - 2026-09-10
 
 ### Fixed / 修复

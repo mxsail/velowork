@@ -48,12 +48,12 @@ impl Velowork {
                     && let Some(node) = layout.get_at_path(&path)
                     && let velowork_workspace::state::LayoutNode::Terminal { shell_type, .. } = node
                 {
-                    if let Some(ssh_name) = velowork_views_terminal::overlays::detached_terminal::resolve_ssh_connection_name(shell_type, cx) {
-                        resolved_name = Some(ssh_name);
-                        break;
-                    }
                     if let Some(custom_name) = project.terminal_names.get(terminal_id) {
                         resolved_name = Some(custom_name.clone());
+                        break;
+                    }
+                    if let Some(session_name) = velowork_views_terminal::overlays::detached_terminal::resolve_ssh_connection_name(shell_type, cx) {
+                        resolved_name = Some(session_name);
                         break;
                     }
                     if !shell_type.is_remote() {

@@ -15,13 +15,13 @@
 use gpui::*;
 use std::sync::Arc;
 
+use velowork_i18n::i18n;
 use velowork_ui::dock::{
-    AnyPanel, DockPanel, DockPanelDetachEvent, DockPanelDetachWholeEvent, DockPanelEvent, DockPanelHideEvent,
-    PanelCollapseState, PanelMode, PanelProvider,
+    AnyPanel, DockPanel, DockPanelDetachEvent, DockPanelDetachWholeEvent, DockPanelEvent,
+    DockPanelHideEvent, PanelCollapseState, PanelMode, PanelProvider,
 };
 use velowork_ui::icon::AppIcon;
 use velowork_ui::overlay_registry::OverlayRegistry;
-use velowork_i18n::i18n;
 
 use velowork_workspace::dock_controller::{
     ANIMATION_DURATION_MS, AnimationTarget, DockController, FRAME_TIME_MS,
@@ -29,7 +29,7 @@ use velowork_workspace::dock_controller::{
 
 use velowork_workspace::stores::{ConnectionEvent, GlobalConnectionStore, GlobalSessionStore};
 
-use crate::app::detached_overlays::{open_detached_overlay, DetachedOverlayOptions};
+use crate::app::detached_overlays::{DetachedOverlayOptions, open_detached_overlay};
 use crate::terminal::backend::TerminalBackend;
 use crate::views::layout::terminal_pane::commands_panel::CommandsPanel;
 use crate::views::layout::terminal_pane::sftp_panel::BottomPanel;
@@ -54,7 +54,11 @@ pub(super) fn build_bottom_dock(
     backend: Arc<dyn TerminalBackend>,
     overlay_registry: Entity<OverlayRegistry>,
     cx: &mut Context<WindowView>,
-) -> (Entity<DockPanel>, Entity<BottomPanel>, Entity<CommandsPanel>) {
+) -> (
+    Entity<DockPanel>,
+    Entity<BottomPanel>,
+    Entity<CommandsPanel>,
+) {
     // Self-contained commands panel. Terminal-independent: it broadcasts bash to
     // sessions resolved from the shared `TerminalsRegistry` + focused terminal.
     let commands_panel = {
@@ -118,8 +122,12 @@ pub(super) fn build_bottom_dock(
 
     // Hand the overlay registry to the bottom dock + SFTP panel so their menus
     // / dialogs register for centralized click-outside dismissal.
-    bottom_dock.update(cx, |dp, _cx| dp.set_overlay_registry(overlay_registry.clone()));
-    sftp_panel.update(cx, |sp, _cx| sp.set_overlay_registry(overlay_registry.clone()));
+    bottom_dock.update(cx, |dp, _cx| {
+        dp.set_overlay_registry(overlay_registry.clone())
+    });
+    sftp_panel.update(cx, |sp, _cx| {
+        sp.set_overlay_registry(overlay_registry.clone())
+    });
 
     // Re-render the window when the bottom dock state changes & keep height synced.
     cx.subscribe(&bottom_dock, |this, dock, _event: &DockPanelEvent, cx| {
@@ -130,7 +138,11 @@ pub(super) fn build_bottom_dock(
         // status-bar "Files" button can re-add it. Without this, the button's
         // `ensure_sftp_tab` early-returns and nothing reappears.
         if this.sftp_tab_added
-            && !dock.read(cx).tabs.iter().any(|t| t.metadata(cx).id.0 == "sftp")
+            && !dock
+                .read(cx)
+                .tabs
+                .iter()
+                .any(|t| t.metadata(cx).id.0 == "sftp")
         {
             this.sftp_tab_added = false;
         }
@@ -272,11 +284,18 @@ impl WindowView {
 
     /// Hide (collapse) the bottom dock.
     pub(super) fn hide_bottom_dock(&mut self, cx: &mut Context<Self>) {
+        self.focus_manager.update(cx, |fm, _| {
+            fm.request_focus(velowork_workspace::focus::FocusLayer::Terminal);
+        });
         self.animate_bottom_dock_to(AnimationTarget::Close, cx);
     }
 
     /// Animate bottom dock to target if needed
-    pub(super) fn animate_bottom_dock_to(&mut self, target: AnimationTarget, cx: &mut Context<Self>) {
+    pub(super) fn animate_bottom_dock_to(
+        &mut self,
+        target: AnimationTarget,
+        cx: &mut Context<Self>,
+    ) {
         match target {
             AnimationTarget::Open => {
                 self.bottom_dock_ctrl.set_open(true);
@@ -346,9 +365,11 @@ impl WindowView {
 
     /// Toggle the bottom "Commands" panel.
     pub(crate) fn toggle_commands(&mut self, cx: &mut Context<Self>) {
-        let is_currently_open = self.bottom_dock_ctrl.is_open()
-            && self.bottom_dock_ctrl.animation() > 0.01;
-        let commands_active = self.bottom_dock.read(cx)
+        let is_currently_open =
+            self.bottom_dock_ctrl.is_open() && self.bottom_dock_ctrl.animation() > 0.01;
+        let commands_active = self
+            .bottom_dock
+            .read(cx)
             .active_tab()
             .map_or(false, |t| t.metadata(cx).id.0 == "commands");
 
@@ -362,10 +383,19 @@ impl WindowView {
             self.bottom_dock.update(cx, |dock, cx| {
                 // Re-add the commands tab if it was previously closed via its
                 // tab X button, otherwise the dock opens empty and nothing shows.
-                if dock.tabs.iter().position(|t| t.metadata(cx).id.0 == "commands").is_none() {
+                if dock
+                    .tabs
+                    .iter()
+                    .position(|t| t.metadata(cx).id.0 == "commands")
+                    .is_none()
+                {
                     dock.add_tab(AnyPanel::new(commands_panel), cx);
                 }
-                if let Some(idx) = dock.tabs.iter().position(|t| t.metadata(cx).id.0 == "commands") {
+                if let Some(idx) = dock
+                    .tabs
+                    .iter()
+                    .position(|t| t.metadata(cx).id.0 == "commands")
+                {
                     dock.select_tab(idx, cx);
                 }
                 dock.collapse_state = PanelCollapseState::Normal;
@@ -389,10 +419,19 @@ impl WindowView {
             cp.open_with_command(cmd, cx);
         });
         self.bottom_dock.update(cx, |dock, cx| {
-            if dock.tabs.iter().position(|t| t.metadata(cx).id.0 == "commands").is_none() {
+            if dock
+                .tabs
+                .iter()
+                .position(|t| t.metadata(cx).id.0 == "commands")
+                .is_none()
+            {
                 dock.add_tab(velowork_ui::dock::AnyPanel::new(commands_panel), cx);
             }
-            if let Some(idx) = dock.tabs.iter().position(|t| t.metadata(cx).id.0 == "commands") {
+            if let Some(idx) = dock
+                .tabs
+                .iter()
+                .position(|t| t.metadata(cx).id.0 == "commands")
+            {
                 dock.select_tab(idx, cx);
             }
             dock.collapse_state = velowork_ui::dock::PanelCollapseState::Normal;
@@ -409,9 +448,11 @@ impl WindowView {
     /// Toggle the bottom "SFTP" panel.
     pub(crate) fn toggle_sftp(&mut self, cx: &mut Context<Self>) {
         self.ensure_sftp_tab(cx);
-        let is_currently_open = self.bottom_dock_ctrl.is_open()
-            && self.bottom_dock_ctrl.animation() > 0.01;
-        let sftp_active = self.bottom_dock.read(cx)
+        let is_currently_open =
+            self.bottom_dock_ctrl.is_open() && self.bottom_dock_ctrl.animation() > 0.01;
+        let sftp_active = self
+            .bottom_dock
+            .read(cx)
             .active_tab()
             .map_or(false, |t| t.metadata(cx).id.0 == "sftp");
 
@@ -576,7 +617,9 @@ fn spawn_detached_bottom_tab_window(
                         cx,
                     )
                 });
-                sftp.update(cx, |sp, _cx| sp.set_overlay_registry(overlay_registry.clone()));
+                sftp.update(cx, |sp, _cx| {
+                    sp.set_overlay_registry(overlay_registry.clone())
+                });
                 if reattach_id == "sftp" {
                     dock.add_tab(AnyPanel::new(sftp), cx);
                 } else {
@@ -616,7 +659,9 @@ fn spawn_detached_bottom_tab_window(
                     cx,
                 )
             });
-            sftp_detached.update(cx, |sp, _cx| sp.set_overlay_registry(overlay_registry.clone()));
+            sftp_detached.update(cx, |sp, _cx| {
+                sp.set_overlay_registry(overlay_registry.clone())
+            });
 
             let detached_dock = cx.new(|cx| {
                 let mut dp = DockPanel::new("detached_bottom_tab_dock", 400.0, cx);
@@ -727,7 +772,9 @@ fn spawn_detached_bottom_dock_window(
                         cx,
                     )
                 });
-                sftp.update(cx, |sp, _cx| sp.set_overlay_registry(overlay_registry.clone()));
+                sftp.update(cx, |sp, _cx| {
+                    sp.set_overlay_registry(overlay_registry.clone())
+                });
                 for tab_id in &reattach_ids {
                     match tab_id.as_str() {
                         "sftp" => dock.add_tab(AnyPanel::new(sftp.clone()), cx),
@@ -769,7 +816,9 @@ fn spawn_detached_bottom_dock_window(
                     cx,
                 )
             });
-            sftp_detached.update(cx, |sp, _cx| sp.set_overlay_registry(overlay_registry.clone()));
+            sftp_detached.update(cx, |sp, _cx| {
+                sp.set_overlay_registry(overlay_registry.clone())
+            });
 
             let detached_dock = cx.new(|cx| {
                 let mut dp = DockPanel::new("detached_bottom_whole_dock", 400.0, cx);

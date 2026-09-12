@@ -588,6 +588,7 @@ impl WindowView {
             OverlayManagerEvent::TabReconnect { project_id, layout_path, tab_index } => {
                 let terminal_ids = collect_tab_terminal_ids(&self.workspace, project_id, layout_path, cx);
                 if let Some(target_tid) = terminal_ids.get(*tab_index).cloned() {
+                    let old_size = self.terminals.lock().get(&target_tid).map(|t| t.size());
                     self.backend.kill(&target_tid);
                     let cwd = self.workspace.read(cx).project(project_id).map(|p| p.path.clone()).unwrap_or_default();
                     let shell = {
@@ -622,6 +623,7 @@ impl WindowView {
                         }
                     }
 
+                    let size = old_size.unwrap_or_default();
                     match self.backend.create_terminal(&cwd, shell.as_ref()) {
                         Ok(new_tid) => {
                             self.workspace.update(cx, |ws, cx| {
@@ -632,7 +634,6 @@ impl WindowView {
                                     }
                             });
                             let app_settings = crate::settings::settings(cx);
-                            let size = crate::terminal::terminal::TerminalSize::default();
                             let terminal = std::sync::Arc::new(crate::terminal::terminal::Terminal::new_with_scrollback(
                                 new_tid.clone(),
                                 size,
@@ -734,6 +735,16 @@ impl WindowView {
                     dispatcher.dispatch(ActionRequest::CloseTerminals {
                         project_id: project_id.clone(),
                         terminal_ids: inactive_ids,
+                    }, cx);
+                }
+            }
+            OverlayManagerEvent::TabToggleMinimize { project_id, layout_path, tab_index } => {
+                let terminal_ids = collect_tab_terminal_ids(&self.workspace, project_id, layout_path, cx);
+                if let Some(target_tid) = terminal_ids.get(*tab_index).cloned() {
+                    let dispatcher = self.dispatcher_for_project(project_id, cx);
+                    dispatcher.dispatch(ActionRequest::ToggleMinimized {
+                        project_id: project_id.clone(),
+                        terminal_id: target_tid,
                     }, cx);
                 }
             }
@@ -890,30 +901,56 @@ impl WindowView {
                         );
                     }
                     ProjectOverlayKind::TabContextMenu { tab_index, num_tabs, layout_path, position } => {
-                        let is_ssh = {
-                            let terminal_ids = collect_tab_terminal_ids(&self.workspace, &project_id, &layout_path, cx);
-                            if let Some(target_tid) = terminal_ids.get(tab_index) {
-                                let shell = {
-                                    let ws = self.workspace.read(cx);
-                                    if let Some(project) = ws.project(&project_id)
-                                        && let Some(ref layout) = project.layout
-                                        && let Some(path) = layout.find_terminal_path(target_tid) {
-                                            ws.get_terminal_shell(&project_id, &path)
-                                        } else {
-                                            None
-                                        }
-                                };
-                                if let Some(velowork_terminal::shell_config::ShellType::Custom { path, .. }) = shell {
-                                    path == "ssh"
-                                } else {
-                                    false
-                                }
+                        let terminal_ids = collect_tab_terminal_ids(&self.workspace, &project_id, &layout_path, cx);
+                        let target_tid = terminal_ids.get(tab_index);
+                        let is_ssh = if let Some(target_tid) = target_tid {
+                            let shell = {
+                                let ws = self.workspace.read(cx);
+                                if let Some(project) = ws.project(&project_id)
+                                    && let Some(ref layout) = project.layout
+                                    && let Some(path) = layout.find_terminal_path(target_tid) {
+                                        ws.get_terminal_shell(&project_id, &path)
+                                    } else {
+                                        None
+                                    }
+                            };
+                            if let Some(velowork_terminal::shell_config::ShellType::Custom { path, .. }) = shell {
+                                path == "ssh"
                             } else {
                                 false
                             }
+                        } else {
+                            false
                         };
+                        let is_minimized = if let Some(target_tid) = target_tid {
+                            let ws = self.workspace.read(cx);
+                            if let Some(project) = ws.project(&project_id)
+                                && let Some(ref layout) = project.layout
+                                && let Some(path) = layout.find_terminal_path(target_tid)
+                                && let Some(node) = layout.get_at_path(&path) {
+                                    match node {
+                                        LayoutNode::Terminal { minimized, .. } => *minimized,
+                                        _ => false,
+                                    }
+                                } else {
+                                    false
+                                }
+                        } else {
+                            false
+                        };
+                        let minimize_shortcut = crate::keybindings::shortcut_for_action("MinimizeTerminal").map(|s| s.into());
                         self.overlay_manager.update(cx, |om, cx| {
-                            om.show_tab_context_menu(tab_index, num_tabs, project_id, layout_path, position, is_ssh, cx);
+                            om.show_tab_context_menu(
+                                tab_index,
+                                num_tabs,
+                                project_id,
+                                layout_path,
+                                position,
+                                is_ssh,
+                                is_minimized,
+                                minimize_shortcut,
+                                cx,
+                            );
                         });
                     }
                     ProjectOverlayKind::ToggleSftpPanel => {

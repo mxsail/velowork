@@ -84,6 +84,9 @@ pub struct TerminalPane<D: ActionDispatch> {
     log_toolbar_mouse_offset: Option<Point<Pixels>>,
     log_toolbar_bounds: Option<Bounds<Pixels>>,
     pane_bounds: Option<Bounds<Pixels>>,
+    log_toolbar_start_time: Option<std::time::Instant>,
+    log_toolbar_exiting: bool,
+    log_toolbar_exit_start_time: Option<std::time::Instant>,
 
     // History Autocompletion & Multi-line command accumulation
     input_line_buffer: String,
@@ -193,6 +196,9 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             log_toolbar_mouse_offset: None,
             log_toolbar_bounds: None,
             pane_bounds: None,
+            log_toolbar_start_time: None,
+            log_toolbar_exiting: false,
+            log_toolbar_exit_start_time: None,
             input_line_buffer: String::new(),
             command_accumulator: Vec::new(),
             history_popup_items: Vec::new(),
@@ -397,6 +403,9 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             }
         }
     }
+}
+
+impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
     /// Reconnect the terminal process / session.
     pub fn handle_reconnect(&mut self, cx: &mut Context<Self>) {
@@ -736,6 +745,27 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         let t = velowork_ui::theme::theme(cx);
         let p = SemanticPalette::from_theme(&t);
 
+        // Check if morph entry animation is currently running from modal to capsule
+        if let Some(start) = self.log_toolbar_start_time {
+            let elapsed = start.elapsed();
+            if elapsed < Duration::from_millis(280) {
+                // Morph card is still travelling across screen; hide the pane toolbar
+                return div().id("log-toolbar-hidden").into_any_element();
+            }
+        }
+
+        let (anim_opacity, anim_offset_y) = if self.log_toolbar_exiting {
+            if let Some(exit_start) = self.log_toolbar_exit_start_time {
+                let t = (exit_start.elapsed().as_secs_f32() / 0.180).clamp(0.0, 1.0);
+                let ease_t = velowork_ui::motion::ease_in_cubic(t);
+                ((1.0 - ease_t).max(0.0), px(-16.0 * ease_t))
+            } else {
+                (0.0, px(-16.0))
+            }
+        } else {
+            (1.0, px(0.0))
+        };
+
         let terminal = self.terminal.as_ref().unwrap();
         let is_paused = terminal.is_log_recording_paused();
         let elapsed = terminal.get_log_recording_elapsed_secs();
@@ -802,7 +832,9 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             .border_color(if is_paused { p.border_subtle } else { with_alpha(t.error, 0.35) })
             .rounded(RADIUS_LG)
             .shadow_xl()
+            .opacity(anim_opacity)
             .relative()
+            .top(anim_offset_y)
             .child(bounds_tracker.absolute().inset_0())
             // Draggable drag handle / info section
             .child(
@@ -917,14 +949,36 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                     .tooltip(move |_, cx| { let __tip = cancel_tooltip.clone(); cx.new(|_| Tooltip::new(__tip)).into() })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(|this, _, _window, cx| {
-                        if let Some(ref terminal) = this.terminal {
-                            let path = terminal.stop_log_recording();
-                            // Delete the file on cancel
-                            if let Some(p) = path {
-                                let _ = std::fs::remove_file(&p);
-                            }
+                        if this.log_toolbar_exiting {
+                            return;
                         }
+                        this.log_toolbar_exiting = true;
+                        this.log_toolbar_exit_start_time = Some(std::time::Instant::now());
                         cx.notify();
+
+                        let this_weak = cx.entity().downgrade();
+                        cx.spawn(async move |_, cx| {
+                            for _ in 0..18 {
+                                smol::Timer::after(Duration::from_millis(10)).await;
+                                if this_weak.update(cx, |_, cx| cx.notify()).is_err() {
+                                    return;
+                                }
+                            }
+                            let _ = this_weak.update(cx, |this, cx| {
+                                if let Some(ref terminal) = this.terminal {
+                                    let path = terminal.stop_log_recording();
+                                    // Delete the file on cancel
+                                    if let Some(p) = path {
+                                        let _ = std::fs::remove_file(&p);
+                                    }
+                                }
+                                this.log_toolbar_exiting = false;
+                                this.log_toolbar_exit_start_time = None;
+                                this.log_toolbar_start_time = None;
+                                cx.notify();
+                            });
+                        })
+                        .detach();
                     }))
             );
 
@@ -934,6 +988,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                 .top(pos.y)
                 .left(pos.x)
                 .child(toolbar_content)
+                .into_any_element()
         } else {
             div()
                 .absolute()
@@ -943,6 +998,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                 .flex()
                 .justify_center()
                 .child(toolbar_content)
+                .into_any_element()
         }
     }
 
@@ -1103,6 +1159,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
     pub fn terminal_id(&self) -> Option<String> {
         self.terminal_id.clone()
+    }
+
+    pub fn terminal_arc(&self) -> Option<Arc<Terminal>> {
+        self.terminal.clone()
     }
 
     pub fn set_detached(&mut self, detached: bool, cx: &mut Context<Self>) {

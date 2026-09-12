@@ -8,6 +8,7 @@ use crate::layout::layout_container::{
     LayoutContainer, is_renaming, rename_input,
 };
 use crate::layout::pane_drag::{PaneDrag, PaneDragView};
+use crate::elements::terminal_element::TerminalElement;
 use crate::terminal_view_settings;
 use gpui::prelude::*;
 use gpui::*;
@@ -24,7 +25,8 @@ use velowork_ui::overlay_menu::{
 };
 use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::tab::{tab_height, tab_style};
-use velowork_ui::theme::{bg_opacity, theme, with_alpha};
+use velowork_ui::theme::{bg_opacity, surface_bg_t, theme, with_alpha};
+use velowork_ui::motion::ease_out_panel;
 use velowork_ui::tokens::{
     RADIUS_CARD, RADIUS_MD, RADIUS_STD, RADIUS_XS, SPACE_MD,
     SPACE_SM, SPACE_XS, ui_icon_std_ts, ui_text_md, ui_text_sm,
@@ -351,9 +353,13 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         &mut self,
         children: &[LayoutNode],
         active_tab: usize,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        log::debug!(
+            "[tabs:render] project_id={} path={:?} active_tab={} num_children={}",
+            self.project_id, self.layout_path, active_tab, children.len()
+        );
         if let Some(zoomed_idx) = self.find_zoomed_child_index(children, cx) {
             let mut child_path = self.layout_path.clone();
             child_path.push(zoomed_idx);
@@ -412,13 +418,198 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .map(|(i, _)| i)
             .collect();
 
+        let enable_animations = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.enable_animations)
+            .unwrap_or(true);
+
+        let parent_bounds = *self.container_bounds_ref.borrow();
+        let w = f32::from(parent_bounds.size.width).max(300.0);
+        let h = f32::from(parent_bounds.size.height).max(200.0);
+        let bar_h = f32::from(super::layout_container::compute_tab_bar_height(cx));
+        let content_h = (h - bar_h).max(100.0);
+        let dock_x = 16.0f32;
+
+        let bounds_canvas = canvas(
+            {
+                let container_bounds_ref = self.container_bounds_ref.clone();
+                move |bounds, _window, _cx| {
+                    *container_bounds_ref.borrow_mut() = bounds;
+                }
+            },
+            |_bounds, _prepaint, _window, _cx| {},
+        )
+        .absolute()
+        .size_full();
+
+        let make_ghost_collapsing_cards = |this: &Self, cx: &App| -> Vec<AnyElement> {
+            let mut cards = Vec::new();
+            if enable_animations {
+                let t = theme(cx);
+                for (i, child) in children.iter().enumerate() {
+                    if let LayoutNode::Terminal { terminal_id: Some(tid), .. } = child {
+                        if let Some(&(start, seq)) = this.collapsing_tabs.get(tid) {
+                            if start.elapsed() < std::time::Duration::from_millis(280) {
+                                let mut child_path = this.layout_path.clone();
+                                child_path.push(i);
+                                let terminal_pane = this.child_containers.get(&child_path)
+                                    .and_then(|c| c.read(cx).terminal_pane.clone());
+                                let terminal_arc = terminal_pane.as_ref().and_then(|p| p.read(cx).terminal_arc());
+                                let preview_el = terminal_arc.map(|term| TerminalElement::preview(term, cx.focus_handle()));
+
+                                let ghost_card = div()
+                                    .id(ElementId::Name(format!("tabs-ghost-card-{}-{}", tid, seq).into()))
+                                    .bg(surface_bg_t(t.bg_panel, &t))
+                                    .shadow_lg()
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .size_full()
+                                            .relative()
+                                            .flex()
+                                            .flex_col()
+                                            .when_some(preview_el, |d, el| {
+                                                d.child(el)
+                                            })
+                                    );
+
+                                let tid_str = tid.clone();
+                                let contracting_el = ghost_card.with_animation(
+                                    format!("tabs-ghost-contract-{}-{}", tid_str, seq),
+                                    Animation::new(std::time::Duration::from_millis(280))
+                                        .with_easing(ease_out_panel),
+                                    move |this, delta| {
+                                        let t = delta;
+                                        if t >= 0.98 {
+                                            this.absolute()
+                                                .left(px(dock_x))
+                                                .bottom(px(16.0))
+                                                .w(px(w * 0.18))
+                                                .h(px(content_h * 0.18))
+                                                .opacity(0.0)
+                                        } else {
+                                            let scale = 1.0 - 0.82 * t;
+                                            let cur_w = (w * scale).max(10.0);
+                                            let cur_h = (content_h * scale).max(10.0);
+                                            let target_x = dock_x;
+                                            let target_y = (content_h - cur_h - 16.0).max(0.0);
+                                            let cur_x = target_x * t;
+                                            let cur_y = target_y * t;
+                                            let cur_radius = (6.0 + 6.0 * t).min(12.0);
+                                            let fade = if t >= 0.65 {
+                                                ((1.0 - t) / 0.35).clamp(0.0, 1.0)
+                                            } else {
+                                                1.0
+                                            };
+                                            this.absolute()
+                                                .left(px(cur_x))
+                                                .top(px(cur_y))
+                                                .w(px(cur_w))
+                                                .h(px(cur_h))
+                                                .rounded(px(cur_radius))
+                                                .shadow_lg()
+                                                .overflow_hidden()
+                                                .opacity(fade)
+                                        }
+                                    },
+                                );
+                                cards.push(contracting_el.into_any_element());
+                            }
+                        }
+                    }
+                }
+            }
+            cards
+        };
+
+        let make_ghost_expanding_cards = |this: &Self, cx: &App| -> Vec<AnyElement> {
+            let mut cards = Vec::new();
+            if enable_animations {
+                let t = theme(cx);
+                for (i, child) in children.iter().enumerate() {
+                    if let LayoutNode::Terminal { terminal_id: Some(tid), .. } = child {
+                        if let Some(&(start, seq)) = this.restoring_tabs.get(tid) {
+                            if start.elapsed() < std::time::Duration::from_millis(300) {
+                                let mut child_path = this.layout_path.clone();
+                                child_path.push(i);
+                                let terminal_pane = this.child_containers.get(&child_path)
+                                    .and_then(|c| c.read(cx).terminal_pane.clone());
+                                let terminal_arc = terminal_pane.as_ref().and_then(|p| p.read(cx).terminal_arc());
+                                let preview_el = terminal_arc.map(|term| TerminalElement::preview(term, cx.focus_handle()));
+
+                                let ghost_card = div()
+                                    .id(ElementId::Name(format!("tabs-ghost-expand-card-{}-{}", tid, seq).into()))
+                                    .bg(surface_bg_t(t.bg_panel, &t))
+                                    .shadow_lg()
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .size_full()
+                                            .relative()
+                                            .flex()
+                                            .flex_col()
+                                            .when_some(preview_el, |d, el| {
+                                                d.child(el)
+                                            })
+                                    );
+
+                                let tid_str = tid.clone();
+                                let expanding_el = ghost_card.with_animation(
+                                    format!("tabs-ghost-expand-{}-{}", tid_str, seq),
+                                    Animation::new(std::time::Duration::from_millis(300))
+                                        .with_easing(ease_out_panel),
+                                    move |this, delta| {
+                                        let t = delta;
+                                        if t >= 0.98 {
+                                            this.absolute()
+                                                .inset_0()
+                                                .size_full()
+                                                .opacity(0.0)
+                                        } else {
+                                            let scale = 0.18 + 0.82 * t;
+                                            let cur_w = (w * scale).max(10.0);
+                                            let cur_h = (content_h * scale).max(10.0);
+                                            let target_x = dock_x;
+                                            let target_y = (content_h - cur_h - 16.0).max(0.0);
+                                            let cur_x = target_x * (1.0 - t);
+                                            let cur_y = target_y * (1.0 - t);
+                                            let cur_radius = (12.0 - 6.0 * t).max(6.0);
+                                            let fade = if t < 0.25 {
+                                                (t / 0.25).clamp(0.0, 1.0)
+                                            } else {
+                                                1.0
+                                            };
+                                            this.absolute()
+                                                .left(px(cur_x))
+                                                .top(px(cur_y))
+                                                .w(px(cur_w))
+                                                .h(px(cur_h))
+                                                .rounded(px(cur_radius))
+                                                .shadow_lg()
+                                                .overflow_hidden()
+                                                .opacity(fade)
+                                        }
+                                    },
+                                );
+                                cards.push(expanding_el.into_any_element());
+                            }
+                        }
+                    }
+                }
+            }
+            cards
+        };
+
         if visible_indices.is_empty() {
-            let t = theme(cx);
-            let p = SemanticPalette::from_theme(&t);
+            let tab_bar = self.render_tab_bar(children, active_tab, false, cx);
+            let welcome_view = self.render_welcome_empty_state(window, cx);
+            let ghost_cards = make_ghost_collapsing_cards(self, cx);
+            let expanding_cards = make_ghost_expanding_cards(self, cx);
             return v_flex()
                 .size_full()
                 .relative()
-                .child(self.render_tab_bar(children, active_tab, false, cx))
+                .child(bounds_canvas)
+                .child(tab_bar)
                 .child(
                     div()
                         .id("console")
@@ -426,23 +617,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                         .size_full()
                         .overflow_hidden()
                         .relative()
-                        .child(
-                            div()
-                                .flex_1()
-                                .size_full()
-                                .flex()
-                                .flex_col()
-                                .items_center()
-                                .justify_center()
-                                .gap(SPACE_MD)
-                                .text_color(p.text_muted)
-                                .child(AppIcon::Terminal.size(px(28.0)).text_color(p.text_muted))
-                                .child(
-                                    div()
-                                        .text_size(ui_text_md(cx))
-                                        .child(i18n!(cx, "terminal.empty_tabs")),
-                                ),
-                        ),
+                        .child(welcome_view)
+                        .children(ghost_cards)
+                        .children(expanding_cards),
                 );
         }
 
@@ -489,25 +666,15 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             }
         }
 
-        let container_bounds_ref = self.container_bounds_ref.clone();
+        let tab_bar = self.render_tab_bar(children, effective_active_tab, false, cx);
+        let ghost_cards = make_ghost_collapsing_cards(self, cx);
+        let expanding_cards = make_ghost_expanding_cards(self, cx);
 
         v_flex()
             .size_full()
             .relative()
-            .child(
-                canvas(
-                    {
-                        let container_bounds_ref = container_bounds_ref.clone();
-                        move |bounds, _window, _cx| {
-                            *container_bounds_ref.borrow_mut() = bounds;
-                        }
-                    },
-                    |_bounds, _prepaint, _window, _cx| {},
-                )
-                .absolute()
-                .size_full(),
-            )
-            .child(self.render_tab_bar(children, effective_active_tab, false, cx))
+            .child(bounds_canvas)
+            .child(tab_bar)
             .child(
                 div()
                     .id("console")
@@ -541,12 +708,33 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             })
                             .clone();
 
+                        *container.read(cx).container_bounds_ref.borrow_mut() = Bounds {
+                            origin: parent_bounds.origin,
+                            size: Size {
+                                width: px(w),
+                                height: px(content_h),
+                            },
+                        };
+
                         if let Some(reg) = self.overlay_registry.clone() {
                             container.update(cx, |c, _cx| c.set_overlay_registry(reg));
                         }
 
-                        AnyView::from(container).cached(StyleRefinement::default().size_full())
-                    }),
+                        let is_active_restoring = children.get(effective_active_tab).and_then(|child| {
+                            if let LayoutNode::Terminal { terminal_id: Some(tid), .. } = child {
+                                Some(self.restoring_tabs.contains_key(tid))
+                            } else {
+                                None
+                            }
+                        }).unwrap_or(false);
+
+                        div()
+                            .size_full()
+                            .when(is_active_restoring, |d| d.opacity(0.0))
+                            .child(AnyView::from(container).cached(StyleRefinement::default().size_full()))
+                    })
+                    .children(ghost_cards)
+                    .children(expanding_cards),
             )
     }
 
@@ -587,7 +775,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         &self,
         children: &[LayoutNode],
         index: usize,
-        cx: &Context<Self>,
+        cx: &App,
         suffixes: &HashMap<String, usize>,
     ) -> String {
         let child = &children[index];
@@ -650,25 +838,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
     /// not depend on whether the tab is the active one.
     fn render_tab_icon_element(
         &self,
-        is_remote: bool,
-        _shell_short: &str,
-        connection_lost: bool,
+        icon: AppIcon,
+        color: Hsla,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let t = theme(cx);
-        let p = SemanticPalette::from_theme(&t);
-        let color = if connection_lost {
-            p.status_error
-        } else {
-            p.status_success
-        };
-
-        let icon_path = if is_remote {
-            AppIcon::Server
-        } else {
-            AppIcon::Terminal
-        };
-
         div()
             .flex_shrink_0()
             .size(ui_icon_std_ts(cx))
@@ -676,7 +849,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .items_center()
             .justify_center()
             .child(
-                icon_path
+                icon
                     .size(ui_icon_std_ts(cx))
                     .flex_shrink_0()
                     .text_color(color),
@@ -711,11 +884,80 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         // dropdown and the command panel's target host list.
         let suffixes = duplicate_session_suffixes(&self.workspace.read(cx));
 
+        let enable_animations = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.enable_animations)
+            .unwrap_or(true);
+
+        let current_visible_ids: HashSet<String> = children
+            .iter()
+            .filter_map(|child| {
+                if !child.is_all_hidden() {
+                    if let LayoutNode::Terminal { terminal_id: Some(id), .. } = child {
+                        return Some(id.clone());
+                    }
+                }
+                None
+            })
+            .collect();
+
+        if enable_animations {
+            for prev_id in &self.prev_visible_tab_ids {
+                if !current_visible_ids.contains(prev_id) && !self.collapsing_tabs.contains_key(prev_id) {
+                    self.tab_anim_seq = self.tab_anim_seq.wrapping_add(1);
+                    let seq = self.tab_anim_seq;
+                    self.restoring_tabs.remove(prev_id);
+                    self.collapsing_tabs.insert(prev_id.clone(), (std::time::Instant::now(), seq));
+                    let entity = cx.entity().downgrade();
+                    let tid_clone = prev_id.clone();
+                    cx.spawn(async move |_, cx| {
+                        smol::Timer::after(std::time::Duration::from_millis(290)).await;
+                        let _ = entity.update(cx, |this, cx| {
+                            this.collapsing_tabs.remove(&tid_clone);
+                            cx.notify();
+                        });
+                    }).detach();
+                }
+            }
+
+            if self.has_initialized_tabs {
+                for cur_id in &current_visible_ids {
+                    if !self.prev_visible_tab_ids.contains(cur_id) && !self.restoring_tabs.contains_key(cur_id) {
+                        self.tab_anim_seq = self.tab_anim_seq.wrapping_add(1);
+                        let seq = self.tab_anim_seq;
+                        self.collapsing_tabs.remove(cur_id);
+                        self.restoring_tabs.insert(cur_id.clone(), (std::time::Instant::now(), seq));
+                        let entity = cx.entity().downgrade();
+                        let tid_clone = cur_id.clone();
+                        cx.spawn(async move |_, cx| {
+                            smol::Timer::after(std::time::Duration::from_millis(300)).await;
+                            let _ = entity.update(cx, |this, cx| {
+                                this.restoring_tabs.remove(&tid_clone);
+                                cx.notify();
+                            });
+                        }).detach();
+                    }
+                }
+            }
+        }
+        self.prev_visible_tab_ids = current_visible_ids;
+        self.has_initialized_tabs = true;
+
         let this_weak = cx.entity().downgrade();
         let tab_elements: Vec<_> = children
             .iter()
             .enumerate()
-            .filter(|(_, child)| !child.is_all_hidden())
+            .filter(|(_, child)| {
+                if !child.is_all_hidden() {
+                    return true;
+                }
+                if let LayoutNode::Terminal { terminal_id: Some(id), .. } = child {
+                    if let Some((start, _)) = self.collapsing_tabs.get(id) {
+                        return start.elapsed() < std::time::Duration::from_millis(260);
+                    }
+                }
+                false
+            })
             .map(|(i, child)| {
             let is_active = i == active_tab;
             let workspace = workspace.clone();
@@ -746,7 +988,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 .as_ref()
                 .map_or(false, |tid| self.is_terminal_connection_lost(tid, cx));
 
-            let (is_remote_session, shell_short) = match child {
+            let (is_remote_session, _shell_short) = match child {
                 LayoutNode::Terminal { shell_type, .. } => {
                     let remote =
                         shell_type.is_remote() || self.backend.is_remote();
@@ -946,7 +1188,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                 None
                             };
                             (
-                                AppIcon::Server,
+                                AppIcon::Telnet,
                                 Some("Telnet".to_string()),
                                 conn_info,
                                 if connection_lost { p.status_error } else { p.status_info },
@@ -1039,7 +1281,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 })
             };
 
-            tab_element
+            let tab_item = tab_element
                 .overflow_hidden()
                 .when(has_drop_animation, |d| {
                     let glow_alpha = animation_progress * 0.5;
@@ -1086,7 +1328,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                         let project_id_for_tab_close = project_id.clone();
                         let dispatcher_for_tab_close = self.action_dispatcher.clone();
                         let close_tab_label = i18n!(cx, "terminal.close_tab");
-                        let weak = this_weak.clone();
+                        let weak_close = this_weak.clone();
 
                         div()
                             .id(ElementId::Name(format!("tab-close-{}-{:?}", i, layout_path).into()))
@@ -1106,7 +1348,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             })
                             .on_click(move |_, _window, cx| {
                                 cx.stop_propagation();
-                                if let Some(this) = weak.upgrade() {
+                                if let Some(this) = weak_close.upgrade() {
                                     this.update(cx, |this, _| {
                                         this.hovered_tab = None;
                                     });
@@ -1130,9 +1372,8 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             .into_any_element()
                     } else {
                         self.render_tab_icon_element(
-                            is_remote_session,
-                            &shell_short,
-                            connection_lost,
+                            preview_icon,
+                            preview_icon_color,
                             cx,
                         )
                     };
@@ -1361,6 +1602,17 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             if let Some(ref handle) = pane.focus_handle {
                                 handle.focus(window, cx);
                             }
+                        } else {
+                            let window_id = this.window_id;
+                            let pid_clone = pid.clone();
+                            let tpath_clone = terminal_path.clone();
+                            window.on_next_frame(move |window, cx| {
+                                let pane_map = crate::layout::navigation::get_pane_map(window_id);
+                                if let Some(pane) = pane_map.find_pane(&pid_clone, &tpath_clone)
+                                    && let Some(ref handle) = pane.focus_handle {
+                                        handle.focus(window, cx);
+                                    }
+                            });
                         }
 
                         if is_double_click
@@ -1368,7 +1620,65 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                 this.start_tab_rename(tid.clone(), tab_label.clone(), window, cx);
                             }
                     })
-                })
+                });
+
+            let collapsing_info = terminal_id
+                .as_ref()
+                .and_then(|tid| self.collapsing_tabs.get(tid).copied());
+            let restoring_info = terminal_id
+                .as_ref()
+                .and_then(|tid| self.restoring_tabs.get(tid).copied());
+
+            let base_tab_w = match tab_width_mode {
+                TabWidthMode::Compact => 85.0f32,
+                TabWidthMode::Equal => 155.0f32,
+                TabWidthMode::TitleLength => 140.0f32,
+            };
+
+            let is_hidden = child.is_all_hidden();
+            if enable_animations && is_hidden && let Some((_, seq)) = collapsing_info {
+                let tid = terminal_id.clone().unwrap_or_default();
+                div()
+                    .id(ElementId::Name(format!("tab-wrapper-collapse-{}-{}", tid, seq).into()))
+                    .with_animation(
+                        format!("tab-collapse-{}-{}", tid, seq),
+                        Animation::new(std::time::Duration::from_millis(280))
+                            .with_easing(velowork_ui::motion::ease_tab_collapse),
+                        move |this, delta| {
+                            let t = delta;
+                            let cur_w = (base_tab_w * (1.0 - t)).max(0.0);
+                            this.w(px(cur_w))
+                                .max_w(px(cur_w))
+                                .flex_shrink_0()
+                                .opacity((1.0 - t).max(0.0))
+                                .overflow_hidden()
+                        },
+                    )
+                    .child(tab_item.w_full())
+                    .into_any_element()
+            } else if enable_animations && !is_hidden && let Some((_, seq)) = restoring_info {
+                let tid = terminal_id.clone().unwrap_or_default();
+                div()
+                    .id(ElementId::Name(format!("tab-wrapper-expand-{}-{}", tid, seq).into()))
+                    .with_animation(
+                        format!("tab-expand-{}-{}", tid, seq),
+                        Animation::new(std::time::Duration::from_millis(280))
+                            .with_easing(velowork_ui::motion::ease_tab_expand),
+                        move |this, delta| {
+                            let t = delta;
+                            let cur_w = (base_tab_w * t).min(base_tab_w);
+                            this.w(px(cur_w))
+                                .max_w(px(cur_w))
+                                .flex_shrink_0()
+                                .opacity(t.min(1.0))
+                                .overflow_hidden()
+                        },
+                    )
+                    .child(tab_item.w_full())
+                    .into_any_element()
+            } else {
+                tab_item.into_any_element()
+            }
         }).collect();
 
         let project_id_for_new = self.project_id.clone();
@@ -1387,6 +1697,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 if this.empty_area_click_detector.check(())
                     && let Some(ref dispatcher) = dispatcher_for_new
                 {
+                    log::debug!(
+                        "[tabs:add_welcome_tab] project_id={} path={:?}",
+                        project_id_for_new, layout_path_for_new
+                    );
                     dispatcher.add_tab_with_shell(
                         &project_id_for_new,
                         &layout_path_for_new,
@@ -1499,9 +1813,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         // and the command panel's target host list.
         let suffixes = duplicate_session_suffixes(&self.workspace.read(cx));
 
-        // Flat list of (index, label, terminal_id, is_remote, shell_short) for
+        // Flat list of (index, label, terminal_id, icon, shell_short) for
         // the searchable tab-list dropdown.
-        let tab_infos: Vec<(usize, String, Option<String>, bool, String)> = children
+        let tab_infos: Vec<(usize, String, Option<String>, AppIcon, String)> = children
             .iter()
             .enumerate()
             .filter(|(_, child)| !child.is_all_hidden())
@@ -1510,23 +1824,29 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                     LayoutNode::Terminal { terminal_id, .. } => terminal_id.clone(),
                     _ => None,
                 };
-                let (is_remote, shell_short) = match child {
+                let (icon, shell_short) = match child {
                     LayoutNode::Terminal { shell_type, .. } => {
-                        let remote = shell_type.is_remote() || self.backend.is_remote();
-                        let short = if remote {
+                        let icon = match shell_type {
+                            velowork_core::shell::ShellType::Custom { path, .. } if path == "serial" => AppIcon::Serial,
+                            velowork_core::shell::ShellType::Custom { path, .. } if path == "telnet" => AppIcon::Telnet,
+                            velowork_core::shell::ShellType::Custom { path, .. } if path == "ssh" => AppIcon::Server,
+                            _ if shell_type.is_remote() || self.backend.is_remote() => AppIcon::Server,
+                            _ => AppIcon::Terminal,
+                        };
+                        let short = if shell_type.is_remote() || self.backend.is_remote() {
                             String::new()
                         } else {
                             shell_type.local_shell_name()
                         };
-                        (remote, short)
+                        (icon, short)
                     }
-                    _ => (false, "?".to_string()),
+                    _ => (AppIcon::Terminal, "?".to_string()),
                 };
                 (
                     i,
                     self.tab_display_label(children, i, cx, &suffixes),
                     tid,
-                    is_remote,
+                    icon,
                     shell_short,
                 )
             })
@@ -1535,7 +1855,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         let tab_list_btn_bounds = self.tab_list_btn_bounds.clone();
 
         let item_height = px((tab_height(cx) - 6.0).max(24.0));
-        let bar_height = item_height + SPACE_SM * 2.0;
+        let bar_height = super::layout_container::compute_tab_bar_height(cx);
         let image_set = terminal_view_settings(cx)
             .terminal_background_image
             .as_ref()
@@ -1654,6 +1974,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             let layout_path = self.layout_path.clone();
                             let action_dispatcher = self.action_dispatcher.clone();
                             move |_, _window, cx| {
+                                log::debug!(
+                                    "[tabs:add_tab] project_id={} path={:?} standalone={}",
+                                    project_id, layout_path, standalone
+                                );
                                 if let Some(ref dispatcher) = action_dispatcher {
                                     dispatcher.add_tab(&project_id, &layout_path, !standalone, cx);
                                 }
@@ -1691,7 +2015,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
     /// Toggle the searchable tab-list dropdown menu (`OverlayMenu`).
     fn toggle_tab_dropdown(
         &mut self,
-        tab_infos: Vec<(usize, String, Option<String>, bool, String)>,
+        tab_infos: Vec<(usize, String, Option<String>, AppIcon, String)>,
         active_tab: usize,
         standalone: bool,
         window: &mut Window,
@@ -1720,7 +2044,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         let focus_manager = self.focus_manager.clone();
         let this_weak = cx.entity().downgrade();
 
-        for (i, label, tid, is_remote, _shell_short) in tab_infos {
+        for (i, label, tid, icon, _shell_short) in tab_infos {
             let click_project_id = project_id.clone();
             let click_layout_path = layout_path.clone();
             let click_dispatcher = action_dispatcher.clone();
@@ -1732,12 +2056,6 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
 
             let ws = workspace.clone();
             let fm = focus_manager.clone();
-
-            let icon = if is_remote {
-                AppIcon::Server
-            } else {
-                AppIcon::Terminal
-            };
 
             let trailing_actions = if let Some(ref tid) = tid_for_close {
                 let tid_close = tid.clone();

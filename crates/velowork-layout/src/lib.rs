@@ -75,7 +75,7 @@ impl LayoutNode {
     pub fn has_session_tab(&self, session_id: &str) -> bool {
         match self {
             LayoutNode::Terminal { shell_type, .. } => {
-                shell_type.ssh_session_id() == Some(session_id)
+                shell_type.session_id() == Some(session_id)
             }
             LayoutNode::Split { children, .. } | LayoutNode::Tabs { children, .. } => {
                 children.iter().any(|c| c.has_session_tab(session_id))
@@ -1952,6 +1952,43 @@ mod tests {
         let root = hsplit(vec![ssh_terminal, local_terminal]);
         assert!(root.has_session_tab("sess-1"));
         assert!(!root.has_session_tab("sess-2"));
+
+        let serial_terminal = LayoutNode::Terminal {
+            terminal_id: Some("t3".to_string()),
+            minimized: false,
+            detached: false,
+            shell_type: ShellType::Custom {
+                path: "serial".to_string(),
+                args: vec!["--id".to_string(), "serial-1".to_string(), "--port".to_string(), "COM1".to_string()],
+            },
+            zoom_level: 1.0,
+        };
+        let telnet_terminal = LayoutNode::Terminal {
+            terminal_id: Some("t4".to_string()),
+            minimized: false,
+            detached: false,
+            shell_type: ShellType::Custom {
+                path: "telnet".to_string(),
+                args: vec!["--id".to_string(), "telnet-1".to_string()],
+            },
+            zoom_level: 1.0,
+        };
+        let local_session_terminal = LayoutNode::Terminal {
+            terminal_id: Some("t5".to_string()),
+            minimized: false,
+            detached: false,
+            shell_type: ShellType::Custom {
+                path: "local".to_string(),
+                args: vec!["--id".to_string(), "local-1".to_string()],
+            },
+            zoom_level: 1.0,
+        };
+
+        let complex_root = hsplit(vec![serial_terminal, telnet_terminal, local_session_terminal]);
+        assert!(complex_root.has_session_tab("serial-1"));
+        assert!(complex_root.has_session_tab("telnet-1"));
+        assert!(complex_root.has_session_tab("local-1"));
+        assert!(!complex_root.has_session_tab("serial-2"));
     }
 
     #[test]

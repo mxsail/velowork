@@ -26,6 +26,7 @@ pub mod app_state;
 /// own each concern (settings, i18n, workspace, theme, stores, extensions, pty).
 pub mod init;
 pub mod elements;
+pub mod font_cache;
 pub mod keybindings;
 pub mod logging;
 /// 后台自动同步引擎（定时 + 配置变更触发 WebDAV 双向同步）。

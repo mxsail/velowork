@@ -1,4 +1,4 @@
-use crate::keybindings::{ToggleCommandsPanel, ToggleLeftDock, ToggleRightDock, ToggleSftpPanel};
+use crate::keybindings::{ToggleCommandsPanel, ToggleLeftDock, ToggleRightToolbar, ToggleSftpPanel};
 use crate::settings::settings_entity;
 use crate::theme::{ThemeColors, surface_bg, theme};
 use crate::ui::tokens::{
@@ -942,14 +942,22 @@ impl Render for StatusBar {
                 }
             });
 
+        let right_toolbar_open = settings_entity(cx).read(cx).settings.right_toolbar_open;
         let toggle_right_sidebar_btn =
             icon_button("right-sidebar-toggle-btn", AppIcon::SidebarRight, &t, cx)
+                .when(right_toolbar_open, |btn| {
+                    btn.bg(surface_bg(t.bg_selection, cx))
+                })
                 .on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(ToggleRightDock), cx);
+                    window.dispatch_action(Box::new(ToggleRightToolbar), cx);
                 })
                 .tooltip(move |_, cx| {
-                    let tip = i18n!(cx, "status_bar.toggle_right_toolbar");
-                    cx.new(|_| Tooltip::new(tip)).into()
+                    let tip = if right_toolbar_open {
+                        i18n!(cx, "status_bar.hide_right_toolbar")
+                    } else {
+                        i18n!(cx, "status_bar.show_right_toolbar")
+                    };
+                    cx.new(|_| Tooltip::new(tip).direction(TooltipDirection::Top)).into()
                 });
 
         let divider = || div().w(px(1.0)).h(px(10.0)).bg(palette.border_subtle).mx(SPACE_XS);

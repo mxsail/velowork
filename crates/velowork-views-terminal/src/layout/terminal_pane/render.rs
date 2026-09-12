@@ -190,9 +190,23 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
             (is_focused && show_focused_border) || has_bell || has_notification || is_waiting
         };
 
-        let is_log_recording = self.terminal.as_ref().is_some_and(|t| t.is_log_recording());
+        let is_log_recording = self.terminal.as_ref().is_some_and(|t| t.is_log_recording()) || self.log_toolbar_exiting;
         if is_log_recording {
             self.ensure_log_timer(cx);
+            if self.log_toolbar_start_time.is_none() && !self.log_toolbar_exiting {
+                self.log_toolbar_start_time = Some(std::time::Instant::now());
+                let this_entity = cx.entity().downgrade();
+                cx.spawn(async move |_, cx| {
+                    smol::Timer::after(Duration::from_millis(280)).await;
+                    let _ = this_entity.update(cx, |_, cx| cx.notify());
+                    smol::Timer::after(Duration::from_millis(160)).await;
+                    let _ = this_entity.update(cx, |_, cx| cx.notify());
+                })
+                .detach();
+            }
+        } else if !self.log_toolbar_exiting {
+            self.log_toolbar_start_time = None;
+            self.log_toolbar_exit_start_time = None;
         }
 
         let this_entity_bounds = cx.entity().downgrade();
@@ -561,6 +575,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
     ) {
         match action {
             crate::welcome::WelcomeAction::StartTerminal => {
+                log::debug!(
+                    "[terminal_pane:start_terminal] project_id={} path={:?}",
+                    self.project_id, self.layout_path
+                );
                 self.start_terminal_with_shell(velowork_core::shell::ShellType::Default, cx);
             }
             crate::welcome::WelcomeAction::ConnectSession(session) => {

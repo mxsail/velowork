@@ -1,5 +1,6 @@
 //! Data & Storage configuration: Data Root directory, logs, and terminal recordings.
 
+use crate::keybindings::Cancel;
 use crate::theme::theme;
 use crate::ui::tokens::{mono_font_family, ui_text_md, ui_text_sm, ui_text_xs};
 use crate::views::components::{modal_backdrop, modal_content, modal_header};
@@ -408,9 +409,18 @@ impl SettingsPanel {
         let title = i18n!(cx, "settings.data_storage.migration_title");
         let desc = i18n!(cx, "settings.data_storage.migration_desc").replace("{path}", &target_path_str);
 
-        modal_backdrop("data-root-modal-backdrop", &t, cx).child(
-            modal_content("data-root-modal-content", cx)
-                .w(px(520.0))
+        modal_backdrop("data-root-modal-backdrop", &t, cx)
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                this.show_data_root_confirm_modal = false;
+                cx.notify();
+            }))
+            .child(
+                modal_content("data-root-modal-content", cx)
+                    .w(px(520.0))
+                    .on_action(cx.listener(|this, _: &Cancel, _, cx| {
+                        this.show_data_root_confirm_modal = false;
+                        cx.notify();
+                    }))
                 .child(modal_header(
                     title,
                     Option::<String>::None,

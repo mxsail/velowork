@@ -200,6 +200,9 @@ pub struct SessionPanel {
     /// Flattened ids of currently visible nodes in display order (folders + sessions),
     /// updated on every render. Used to compute Shift-range selection and open order.
     visible_order: Vec<String>,
+    /// Screen bounds of currently selected nodes (keyed by node id), captured during paint
+    /// to anchor origin-aware confirmation modal animations when triggered via keyboard (e.g. Delete).
+    selected_node_bounds: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>>>,
     project_selector_bounds: Bounds<Pixels>,
     settings_button_bounds: Bounds<Pixels>,
     add_session_button_bounds: Bounds<Pixels>,
@@ -460,6 +463,7 @@ impl SessionPanel {
             selection_anchor: None,
             focused_index: None,
             visible_order: Vec::new(),
+            selected_node_bounds: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
             project_selector_bounds: Bounds::default(),
             settings_button_bounds: Bounds::default(),
             add_session_button_bounds: Bounds::default(),
@@ -623,6 +627,7 @@ impl SessionPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        self.selected_node_bounds.borrow_mut().clear();
         let tree_data = convert_session_tree_nodes(nodes);
         let mut expanded_keys = std::collections::HashSet::new();
         collect_session_expanded_keys(nodes, &mut expanded_keys);
@@ -1070,8 +1075,20 @@ impl SessionPanel {
             .border_1()
             .border_color(with_alpha(0x00000000, 0.0))
             .when(is_selected, |d| {
+                let fid = folder_id.to_string();
+                let bounds_map = self.selected_node_bounds.clone();
                 d.bg(surface_bg(t.bg_selection, cx))
                     .border_color(rgb(t.border_active))
+                    .child(
+                        canvas(
+                            move |bounds, _, _| {
+                                bounds_map.borrow_mut().insert(fid, bounds);
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
             })
             // Drag source: this folder can be dragged
             .on_drag(
@@ -1255,8 +1272,20 @@ impl SessionPanel {
             .border_1()
             .border_color(with_alpha(0x00000000, 0.0))
             .when(is_selected, |d| {
+                let sid = session.id.clone();
+                let bounds_map = self.selected_node_bounds.clone();
                 d.bg(surface_bg(t.bg_selection, cx))
                     .border_color(rgb(t.border_active))
+                    .child(
+                        canvas(
+                            move |bounds, _, _| {
+                                bounds_map.borrow_mut().insert(sid, bounds);
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_full(),
+                    )
             })
             // Drag source: this session can be dragged
             .on_drag(
@@ -1715,7 +1744,22 @@ impl SessionPanel {
 
         if let Some(om) = &self.overlay_manager {
             let origin_clone = origin.clone();
+            let click_origin = self
+                .selected_node_bounds
+                .borrow()
+                .get(&node_id)
+                .map(|b| b.center())
+                .or_else(|| {
+                    self.selected_node_bounds
+                        .borrow()
+                        .values()
+                        .next()
+                        .map(|b| b.center())
+                });
             om.update(cx, |om, cx| {
+                if let Some(pt) = click_origin {
+                    om.record_click_origin(pt);
+                }
                 om.request_session_delete_confirm_with_origin(
                     node_id,
                     node_label,
@@ -2579,6 +2623,10 @@ impl SessionPanel {
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
+        log::debug!(
+            "[session_panel:connect_ssh] session_id={} name={} protocol={:?}",
+            session.id, session.name, session.protocol
+        );
         let shell = match session.protocol {
             velowork_state::SessionProtocol::Serial => {
                 let port = session.serial_port.as_deref().unwrap_or("");
@@ -2695,7 +2743,18 @@ impl SessionPanel {
                             .filter(|state| state.project_id == project_id)
                             .map(|state| state.layout_path.clone())
                             .unwrap_or_else(Vec::new);
-                        ws.add_tab_with_shell(fm, &project_id, &path, shell.clone(), cx);
+                        // If the currently focused pane is a Welcome placeholder,
+                        // replace it in-place rather than adding a new Tab sibling.
+                        let focused_is_welcome = ws
+                            .get_terminal_shell(&project_id, &path)
+                            .map(|st| st == velowork_terminal::shell_config::ShellType::Welcome)
+                            .unwrap_or(false);
+                        if focused_is_welcome {
+                            ws.replace_terminal_shell(&project_id, &path, shell.clone(), cx);
+                            ws.set_focused_terminal(fm, project_id.clone(), path.clone(), cx);
+                        } else {
+                            ws.add_tab_with_shell(fm, &project_id, &path, shell.clone(), cx);
+                        }
                     } else {
                         ws.add_terminal_with_shell(fm, &project_id, shell.clone(), cx);
                     }
@@ -2788,6 +2847,7 @@ impl SessionPanel {
         let w_ser = this_weak.clone();
         let w_tel = this_weak.clone();
         let w_loc = this_weak.clone();
+        let origin = Some(bounds.center());
 
         let menu_items = vec![
             PopupMenuItem::item(
@@ -2799,7 +2859,7 @@ impl SessionPanel {
                             this.open_add_session_with_protocol(
                                 velowork_state::SessionProtocol::Ssh,
                                 None,
-                                None,
+                                origin,
                                 cx,
                             );
                         });
@@ -2816,7 +2876,7 @@ impl SessionPanel {
                             this.open_add_session_with_protocol(
                                 velowork_state::SessionProtocol::Serial,
                                 None,
-                                None,
+                                origin,
                                 cx,
                             );
                         });
@@ -2835,7 +2895,7 @@ impl SessionPanel {
                             this.open_add_session_with_protocol(
                                 velowork_state::SessionProtocol::Telnet,
                                 None,
-                                None,
+                                origin,
                                 cx,
                             );
                         });
@@ -2854,7 +2914,7 @@ impl SessionPanel {
                             this.open_add_session_with_protocol(
                                 velowork_state::SessionProtocol::Local,
                                 None,
-                                None,
+                                origin,
                                 cx,
                             );
                         });
@@ -3203,6 +3263,7 @@ impl SessionPanel {
         let mut items = Vec::new();
         let this_weak = cx.entity().downgrade();
         let t = theme(cx);
+        let origin = Some(position);
 
         if is_blank {
             let has_session_sel = self.selection_has_session(cx);
@@ -3224,7 +3285,7 @@ impl SessionPanel {
                                         this.open_add_session_with_protocol(
                                             velowork_state::SessionProtocol::Ssh,
                                             None,
-                                            None,
+                                            origin,
                                             cx,
                                         );
                                     });
@@ -3241,7 +3302,7 @@ impl SessionPanel {
                                         this.open_add_session_with_protocol(
                                             velowork_state::SessionProtocol::Serial,
                                             None,
-                                            None,
+                                            origin,
                                             cx,
                                         );
                                     });
@@ -3260,7 +3321,7 @@ impl SessionPanel {
                                         this.open_add_session_with_protocol(
                                             velowork_state::SessionProtocol::Telnet,
                                             None,
-                                            None,
+                                            origin,
                                             cx,
                                         );
                                     });
@@ -3279,7 +3340,7 @@ impl SessionPanel {
                                         this.open_add_session_with_protocol(
                                             velowork_state::SessionProtocol::Local,
                                             None,
-                                            None,
+                                            origin,
                                             cx,
                                         );
                                     });
@@ -3407,7 +3468,7 @@ impl SessionPanel {
                                             this.open_add_session_with_protocol(
                                                 velowork_state::SessionProtocol::Ssh,
                                                 Some(fid),
-                                                None,
+                                                origin,
                                                 cx,
                                             );
                                         });
@@ -3425,7 +3486,7 @@ impl SessionPanel {
                                             this.open_add_session_with_protocol(
                                                 velowork_state::SessionProtocol::Serial,
                                                 Some(fid),
-                                                None,
+                                                origin,
                                                 cx,
                                             );
                                         });
@@ -3445,7 +3506,7 @@ impl SessionPanel {
                                             this.open_add_session_with_protocol(
                                                 velowork_state::SessionProtocol::Telnet,
                                                 Some(fid),
-                                                None,
+                                                origin,
                                                 cx,
                                             );
                                         });
@@ -3465,7 +3526,7 @@ impl SessionPanel {
                                             this.open_add_session_with_protocol(
                                                 velowork_state::SessionProtocol::Local,
                                                 Some(fid),
-                                                None,
+                                                origin,
                                                 cx,
                                             );
                                         });
@@ -3587,7 +3648,7 @@ impl SessionPanel {
                                     if let Some(session) =
                                         Self::find_session_by_id(this.active_tree(store, cx), &nid)
                                     {
-                                        this.open_edit_session_dialog(session.clone(), cx);
+                                        this.open_edit_session_dialog_at(session.clone(), origin, cx);
                                     }
                                 }
                             });
@@ -6811,13 +6872,11 @@ impl SessionPanel {
                 .focused(cx)
                 .or_else(|| Some(self.focus_handle.clone()));
         }
-        model.inputs.name.update(cx, |s, cx| s.focus(window, cx));
         self.session_dialog = Some(SessionDialogState::Session {
             model: Box::new(model),
         });
         let origin = self.dialog_origin.take();
         self.start_dialog_enter_animation(origin, cx);
-        cx.notify();
     }
 
     pub fn refresh_session_dialog_selects(&mut self, cx: &mut App) {
@@ -7531,38 +7590,77 @@ impl SessionPanel {
                 .compute_card_values(win_size, preferred_size);
 
             let card_container = div()
+                .id("session-dialog-card-container")
                 .relative()
                 .left(motion_values.offset.x)
                 .top(motion_values.offset.y)
                 .opacity(motion_values.card_opacity)
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
                 .child(card);
 
-            return velowork_ui::overlay::modal_backdrop(
+            let card_wrapper = div()
+                .id("session-dialog-card-wrapper")
+                .absolute()
+                .inset_0()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(velowork_ui::tokens::SPACE_LG)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.dialog_request_close_with_window(Some(window), cx);
+                    }),
+                )
+                .child(card_container);
+
+            let backdrop = velowork_ui::overlay::modal_backdrop(
                 "session-dialog-backdrop",
                 &crate::theme::theme(cx),
                 cx,
             )
             .opacity(motion_values.backdrop_opacity)
-            .track_focus(&self.focus_handle)
-            .on_key_down(
-                cx.listener(|this: &mut Self, event: &KeyDownEvent, window, cx| {
-                    let key = event.keystroke.key.as_str();
-                    if key == "tab" || key == "\t" {
-                        let is_shift = event.keystroke.modifiers.shift;
-                        if let Some(model) = this.ssh_dialog_mut() {
-                            if model.cycle_focus(is_shift, window, cx) {
-                                this.dialog_notify(cx);
-                                cx.stop_propagation();
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.dialog_request_close_with_window(Some(window), cx);
+                }),
+            );
+
+            return div()
+                .id("session-dialog-overlay-root")
+                .occlude()
+                .absolute()
+                .inset_0()
+                .size_full()
+                .track_focus(&self.focus_handle)
+                .key_context("SessionDialog")
+                .on_key_down(
+                    cx.listener(|this: &mut Self, event: &KeyDownEvent, window, cx| {
+                        let key = event.keystroke.key.as_str();
+                        if key == "tab" || key == "\t" {
+                            let is_shift = event.keystroke.modifiers.shift;
+                            if let Some(model) = this.ssh_dialog_mut() {
+                                if model.cycle_focus(is_shift, window, cx) {
+                                    this.dialog_notify(cx);
+                                    cx.stop_propagation();
+                                }
                             }
                         }
-                    }
-                }),
-            )
-            .on_action(cx.listener(|this, _: &Cancel, window, cx| {
-                this.dialog_request_close_with_window(Some(window), cx);
-            }))
-            .child(card_container)
-            .into_any_element();
+                    }),
+                )
+                .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                    cx.stop_propagation();
+                    this.dialog_request_close_with_window(Some(window), cx);
+                }))
+                .child(backdrop)
+                .child(card_wrapper)
+                .into_any_element();
         }
 
         if self.focus_dialog_inputs.get() {

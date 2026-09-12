@@ -34,7 +34,7 @@ use velowork_workspace::stores::{GlobalServiceStore, GlobalSessionStore, GlobalT
 use velowork_workspace::state::{WindowId, Workspace};
 
 use crate::keybindings::Cancel;
-use crate::views::components::{modal_backdrop, modal_content, modal_header};
+use crate::views::components::{modal_content, modal_header};
 
 use velowork_ui::focus_group::{FocusGroup, FocusGroupExt};
 
@@ -892,65 +892,58 @@ impl Render for ProjectImportDialog {
                     .child(Scrollbar::vertical(&self.scroll_handle)),
             );
 
-        modal_backdrop("project-import-backdrop", &t, cx)
+        modal_content("project-import-modal", cx)
+            .relative()
+            .w(card_w)
+            .h(card_h)
+            .overflow_hidden()
+            .p(SPACE_XS)
             .track_focus(&self.focus_handle)
             .key_context("ProjectImportDialog")
             .tab_cycle(&focus_group)
             .on_action(cx.listener(|this, _: &Cancel, _, cx| this.close(cx)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| this.close(cx)),
-            )
+            .focus_scope_on_click(&self.focus_handle)
+            .child(modal_header(
+                i18n!(cx, "import_project.title"),
+                Some(i18n!(cx, "import_project.desc")),
+                &t,
+                cx,
+                cx.listener(|this: &mut Self, _, _, cx| this.close(cx)),
+            ))
+            .child(body_container)
             .child(
-                modal_content("project-import-modal", cx)
-                    .relative()
-                    .w(card_w)
-                    .h(card_h)
-                    .overflow_hidden()
-                    .p(SPACE_XS)
-                    .focus_scope_on_click(&self.focus_handle)
-                    .child(modal_header(
-                        &i18n!(cx, "import_project.title"),
-                        Some(&i18n!(cx, "import_project.desc")),
-                        &t,
-                        cx,
-                        cx.listener(|this: &mut Self, _, _, cx| this.close(cx)),
-                    ))
-                    .child(body_container)
+                // Footer actions
+                h_flex()
+                    .h(px(48.0))
+                    .flex_shrink_0()
+                    .px(SPACE_LG)
+                    .border_t_1()
+                    .border_color(p.border_subtle)
+                    .items_center()
+                    .justify_end()
+                    .gap(SPACE_MD)
                     .child(
-                        // Footer actions
-                        h_flex()
-                            .h(px(48.0))
-                            .flex_shrink_0()
-                            .px(SPACE_LG)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
-                            .items_center()
-                            .justify_end()
-                            .gap(SPACE_MD)
-                            .child(
-                                Button::new("import-cancel-btn", &t)
-                                    .size(ControlSize::Default)
-                                    .label(i18n!(cx, "common.cancel"))
-                                    .focus_handle(&self.cancel_focus)
-                                    .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
-                            )
-                            .child(
-                                Button::new("import-execute-btn", &t)
-                                    .primary()
-                                    .size(ControlSize::Default)
-                                    .label(if self.is_importing {
-                                        i18n!(cx, "import_project.importing")
-                                    } else {
-                                        i18n!(cx, "import_project.import_btn")
-                                    })
-                                    .loading(self.is_importing)
-                                    .disabled(self.parsed_summary.is_none() || self.is_importing)
-                                    .focus_handle(&self.confirm_focus)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.execute_import(window, cx);
-                                    })),
-                            ),
+                        Button::new("import-cancel-btn", &t)
+                            .size(ControlSize::Default)
+                            .label(i18n!(cx, "common.cancel"))
+                            .focus_handle(&self.cancel_focus)
+                            .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
+                    )
+                    .child(
+                        Button::new("import-execute-btn", &t)
+                            .primary()
+                            .size(ControlSize::Default)
+                            .label(if self.is_importing {
+                                i18n!(cx, "import_project.importing")
+                            } else {
+                                i18n!(cx, "import_project.import_btn")
+                            })
+                            .loading(self.is_importing)
+                            .disabled(self.parsed_summary.is_none() || self.is_importing)
+                            .focus_handle(&self.confirm_focus)
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.execute_import(window, cx);
+                            })),
                     ),
             )
     }

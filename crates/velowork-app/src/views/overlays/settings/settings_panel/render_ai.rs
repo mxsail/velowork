@@ -1,3 +1,4 @@
+use crate::keybindings::Cancel;
 use crate::settings::settings_entity;
 use crate::theme::theme;
 use crate::ui::tokens::{ui_text_md, ui_text_sm, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL, RADIUS_LG, dialog_md};
@@ -423,6 +424,9 @@ impl SettingsPanel {
                 modal_content("ai-model-dialog", cx)
                     .w(dialog_md(cx))
                     .max_h(px(620.0))
+                    .on_action(cx.listener(|this, _: &Cancel, window, cx| {
+                        this.close_add_model_dialog(Some(window), cx);
+                    }))
                     .child(modal_header(
                         title,
                         Option::<String>::None,
@@ -636,7 +640,7 @@ impl SettingsPanel {
         }
     }
 
-    fn close_add_model_dialog(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
+    pub(super) fn close_add_model_dialog(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
         self.ai_add_model_dialog_open = false;
         self.ai_edit_model_id = None;
         if let Some(window) = window

@@ -276,40 +276,23 @@ impl DetachedTerminalView {
 }
 
 pub fn resolve_ssh_connection_name(shell_type: &velowork_terminal::shell_config::ShellType, cx: &App) -> Option<String> {
-    let velowork_terminal::shell_config::ShellType::Custom { path, args } = shell_type else {
-        return None;
-    };
-    if path != "ssh" {
-        return None;
-    }
-
-    let mut session_id = None;
-    let mut host_arg = None;
-    let mut i = 0;
-    while i < args.len() {
-        if (args[i] == "--id" || args[i] == "--session-id") && i + 1 < args.len() {
-            session_id = Some(args[i + 1].clone());
-            i += 2;
-        } else if (args[i] == "-p" || args[i] == "-i") && i + 1 < args.len() {
-            i += 2;
-        } else if !args[i].starts_with('-') {
-            host_arg = Some(args[i].clone());
-            i += 1;
-        } else {
-            i += 1;
+    if let Some(store) = cx.try_global::<velowork_workspace::stores::GlobalSessionStore>() {
+        let store_guard = store.0.read(cx);
+        if let Some(name) = crate::layout::session_labels::session_name(shell_type, &store_guard) {
+            return Some(name);
         }
     }
 
-    if let Some(sid) = session_id {
-        if let Some(store) = cx.try_global::<velowork_workspace::stores::GlobalSessionStore>() {
-            if let Some(session) = store.0.read(cx).find_session(&sid) {
-                if !session.name.is_empty() {
-                    return Some(session.name.clone());
+    if let velowork_terminal::shell_config::ShellType::Custom { path, args } = shell_type {
+        if path == "ssh" {
+            for arg in args {
+                if !arg.starts_with('-') {
+                    return Some(arg.clone());
                 }
             }
         }
     }
-    host_arg
+    None
 }
 
 impl Render for DetachedTerminalView {

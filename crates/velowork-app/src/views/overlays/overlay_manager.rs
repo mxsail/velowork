@@ -236,6 +236,8 @@ pub enum OverlayManagerEvent {
     TabCloseInactive { project_id: String, layout_path: Vec<usize> },
     /// Tab context menu: open session settings
     TabSessionSettings { project_id: String, layout_path: Vec<usize>, tab_index: usize },
+    /// Tab context menu: toggle minimize terminal
+    TabToggleMinimize { project_id: String, layout_path: Vec<usize>, tab_index: usize },
 
     /// Profile manager: switch to a different profile (triggers relaunch)
     SwitchProfile(String),
@@ -294,6 +296,12 @@ pub struct OverlayManager {
     tunnel_context_menu: OverlaySlot<PopupMenu>,
     service_context_menu: OverlaySlot<PopupMenu>,
     pub(crate) confirm_dialog: Option<Entity<ConfirmDialog>>,
+
+    /// Latest user click origin with timestamp for global origin-aware modal animation.
+    last_click_origin: Option<(Point<Pixels>, std::time::Instant)>,
+
+    /// Most recent terminal context (terminal_id, project_id, layout_path) for pane targeting.
+    last_terminal_context: Option<(String, String, Vec<usize>)>,
 
     /// Transfer manager popup (anchored above the status-bar transfer button).
     transfer_popup: OverlaySlot<TransferPopup>,
@@ -359,6 +367,8 @@ impl OverlayManager {
             tunnel_context_menu: OverlaySlot::new(),
             service_context_menu: OverlaySlot::new(),
             confirm_dialog: None,
+            last_click_origin: None,
+            last_terminal_context: None,
             transfer_popup: OverlaySlot::new(),
             settings_window_handle: None,
             settings_panel_entity: None,
@@ -408,6 +418,33 @@ impl OverlayManager {
             let am = last.animated.clone();
             am.update(cx, |modal, cx| {
                 modal.request_close(cx);
+            });
+        } else {
+            self.finish_modal_closed(cx);
+        }
+    }
+
+    /// Close the active (topmost) modal with smooth Dynamic Island morph exit towards `target_bounds`.
+    pub fn close_modal_with_morph(&mut self, target_bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+        self.close_modal_with_morph_content(target_bounds, None, cx);
+    }
+
+    /// Close the active (topmost) modal with smooth Dynamic Island morph exit towards `target_bounds`
+    /// and optional destination content for cross-dissolving preview.
+    pub fn close_modal_with_morph_content(
+        &mut self,
+        target_bounds: Bounds<Pixels>,
+        destination_content: Option<AnyView>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(am) = self.active_animated_modal.clone() {
+            am.update(cx, |modal, cx| {
+                modal.start_morph_exit_with_content(target_bounds, destination_content, cx);
+            });
+        } else if let Some(last) = self.modal_stack.last() {
+            let am = last.animated.clone();
+            am.update(cx, |modal, cx| {
+                modal.start_morph_exit_with_content(target_bounds, destination_content, cx);
             });
         } else {
             self.finish_modal_closed(cx);
@@ -516,6 +553,21 @@ impl OverlayManager {
         self.modal_type_id == Some(std::any::TypeId::of::<T>())
     }
 
+    /// Record the latest user click position for origin-aware modal emergence.
+    pub fn record_click_origin(&mut self, origin: Point<Pixels>) {
+        self.last_click_origin = Some((origin, std::time::Instant::now()));
+    }
+
+    /// Consume the recent click position if it occurred within 500ms.
+    pub fn consume_click_origin(&mut self) -> Option<Point<Pixels>> {
+        if let Some((pos, time)) = self.last_click_origin.take() {
+            if time.elapsed() <= std::time::Duration::from_millis(500) {
+                return Some(pos);
+            }
+        }
+        None
+    }
+
     /// Open a modal with explicit origin and panel container FocusHandles for
     /// precise origin-anchored return and fallback.
     pub fn open_modal_with_origin<T: Render + 'static>(
@@ -523,6 +575,18 @@ impl OverlayManager {
         entity: Entity<T>,
         origin: Option<FocusHandle>,
         panel_container: Option<FocusHandle>,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_modal_with_click_origin(entity, origin, panel_container, None, cx);
+    }
+
+    /// Open a modal with explicit origin focus handles and optional explicit click origin coordinate.
+    pub fn open_modal_with_click_origin<T: Render + 'static>(
+        &mut self,
+        entity: Entity<T>,
+        origin: Option<FocusHandle>,
+        panel_container: Option<FocusHandle>,
+        explicit_click_origin: Option<Point<Pixels>>,
         cx: &mut Context<Self>,
     ) {
         let enable_animations = crate::settings::settings_entity(cx)
@@ -533,8 +597,12 @@ impl OverlayManager {
         let is_top_aligned = std::any::TypeId::of::<T>() == std::any::TypeId::of::<CommandPalette>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<ShellSelectorOverlay>();
 
+        // Priority: explicit click origin -> recent recorded click within 500ms -> None (keyboard fallback)
+        let click_origin = explicit_click_origin.or_else(|| self.consume_click_origin());
+
         let animated = cx.new(|cx| {
-            let mut modal = AnimatedModal::new(entity.into(), cx).with_animations(enable_animations, cx);
+            let mut modal = AnimatedModal::new_with_origin(entity.into(), click_origin, cx)
+                .with_animations(enable_animations, cx);
             if is_top_aligned {
                 modal = modal.align_top(px(80.0));
             }
@@ -624,6 +692,17 @@ impl OverlayManager {
             .last()
             .map(|e| e.view.clone())
             .or_else(|| self.active_modal.clone())
+    }
+
+    /// Get all active modals for rendering in stack order (bottom to top).
+    pub fn render_modals(&self) -> Vec<AnyView> {
+        if !self.modal_stack.is_empty() {
+            self.modal_stack.iter().map(|e| e.view.clone()).collect()
+        } else if let Some(m) = self.active_modal.clone() {
+            vec![m]
+        } else {
+            Vec::new()
+        }
     }
 
     // ========================================================================
@@ -1282,6 +1361,7 @@ impl OverlayManager {
     ) {
         self.close_modal(cx);
         self.close_all_context_menus();
+        self.last_terminal_context = Some((terminal_id.clone(), project_id.clone(), layout_path.clone()));
 
         let settings = settings_entity(cx).read(cx).settings.clone();
         let ai_enabled = settings.ai_enabled;
@@ -1456,6 +1536,7 @@ impl OverlayManager {
     // ========================================================================
 
     /// Show tab context menu.
+    #[allow(clippy::too_many_arguments)]
     pub fn show_tab_context_menu(
         &mut self,
         tab_index: usize,
@@ -1464,19 +1545,39 @@ impl OverlayManager {
         layout_path: Vec<usize>,
         position: gpui::Point<gpui::Pixels>,
         is_ssh: bool,
+        is_minimized: bool,
+        minimize_shortcut: Option<SharedString>,
         cx: &mut Context<Self>,
     ) {
         self.close_modal(cx);
         self.close_all_context_menus();
 
         let menu = cx.new(|cx| {
-            TabContextMenu::new(tab_index, num_tabs, project_id, layout_path, position, is_ssh, cx)
+            TabContextMenu::new(
+                tab_index,
+                num_tabs,
+                project_id,
+                layout_path,
+                position,
+                is_ssh,
+                is_minimized,
+                minimize_shortcut,
+                cx,
+            )
         });
 
         cx.subscribe(&menu, |this, _, event: &TabContextMenuEvent, cx| {
             match event {
                 TabContextMenuEvent::Close => {
                     this.hide_tab_context_menu(cx);
+                }
+                TabContextMenuEvent::ToggleMinimize { project_id, layout_path, tab_index } => {
+                    this.hide_tab_context_menu(cx);
+                    cx.emit(OverlayManagerEvent::TabToggleMinimize {
+                        project_id: project_id.clone(),
+                        layout_path: layout_path.clone(),
+                        tab_index: *tab_index,
+                    });
                 }
                 TabContextMenuEvent::DuplicateSession { project_id, layout_path, tab_index } => {
                     this.hide_tab_context_menu(cx);
@@ -2125,6 +2226,50 @@ impl OverlayManager {
         self.transfer_popup.render()
     }
 
+    /// Find the screen bounds of a terminal pane by terminal_id.
+    pub fn find_terminal_pane_bounds(&self, terminal_id: &str, cx: &App) -> Option<Bounds<Pixels>> {
+        let pane_map = velowork_views_terminal::layout::navigation::get_pane_map(self.window_id);
+
+        // 1. Check if we have context from the most recent terminal right-click menu matching this terminal_id:
+        if let Some((ref tid, ref pid, ref path)) = self.last_terminal_context {
+            if tid == terminal_id {
+                if let Some(pane) = pane_map.find_pane(pid, path) {
+                    return Some(pane.bounds);
+                }
+            }
+        }
+
+        // 2. Look up the terminal's project and path from workspace layout tree:
+        let ws = self.workspace.read(cx);
+        if let Some((project_id, path)) = ws.projects().iter().find_map(|p| {
+            p.layout.as_ref().and_then(|l| l.find_terminal_path(terminal_id).map(|path| (p.id.clone(), path)))
+        }) {
+            if let Some(pane) = pane_map.find_pane(&project_id, &path) {
+                return Some(pane.bounds);
+            }
+        }
+
+        // 3. Fallback to any pane registered for this window:
+        pane_map.all_panes().first().map(|p| p.bounds)
+    }
+
+    /// Compute the target bounds of the floating recording capsule in window coordinates.
+    pub fn compute_capsule_target_bounds(&self, terminal_id: &str, cx: &App) -> Bounds<Pixels> {
+        let toolbar_w = px(304.0);
+        let toolbar_h = px(42.0);
+        if let Some(pane_bounds) = self.find_terminal_pane_bounds(terminal_id, cx) {
+            let capsule_x = pane_bounds.origin.x + (pane_bounds.size.width - toolbar_w) / 2.0;
+            // The floating toolbar is rendered at .top(SPACE_XS) inside terminal-pane-main.
+            // SPACE_XS is 4px from the top edge of the terminal pane.
+            let capsule_y = pane_bounds.origin.y + velowork_ui::tokens::SPACE_XS;
+            Bounds::new(Point::new(capsule_x, capsule_y), Size::new(toolbar_w, toolbar_h))
+        } else {
+            let fallback_x = px(400.0);
+            let fallback_y = px(48.0);
+            Bounds::new(Point::new(fallback_x, fallback_y), Size::new(toolbar_w, toolbar_h))
+        }
+    }
+
     /// Show log record dialog.
     pub fn show_log_record_dialog(&mut self, terminal_id: String, cx: &mut Context<Self>) {
         let dialog = cx.new(|cx| {
@@ -2136,13 +2281,15 @@ impl OverlayManager {
                     this.close_modal(cx);
                 }
                 LogRecordDialogEvent::StartRecording { terminal_id, filename, append_mode, auto_save_interval } => {
+                    let target_bounds = this.compute_capsule_target_bounds(&terminal_id, cx);
                     cx.emit(OverlayManagerEvent::TerminalLogStart {
                         terminal_id: terminal_id.clone(),
                         filename: filename.clone(),
                         append_mode: *append_mode,
                         auto_save_interval: *auto_save_interval,
                     });
-                    this.close_modal(cx);
+                    let preview = cx.new(|_| crate::views::overlays::dialogs::log_record_dialog::LogToolbarPreview);
+                    this.close_modal_with_morph_content(target_bounds, Some(preview.into()), cx);
                 }
             }
         })

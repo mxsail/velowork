@@ -170,7 +170,7 @@ pub fn start_update_checker(update_info: UpdateInfo, cx: &mut App) {
                     cx.update(|cx| cx.refresh_windows());
                 }
                 Err(e) => {
-                    log::error!("[updater] Update check failed | error: {:#}", e);
+                    log::warn!("[updater] Background update check failed | error: {:#}", e);
                     update_info.set_status(UpdateStatus::Failed {
                         error: e.to_string(),
                     });

@@ -317,6 +317,19 @@ pub async fn run_serial_session(
     let charset = config.charset.as_deref().unwrap_or(velowork_core::charset::DEFAULT_CHARSET);
     let auto_reconnect = config.auto_reconnect;
 
+    if config.port.trim().is_empty() {
+        let msg = "\r\n\x1b[31m[Failed to open serial port: No port specified. Please configure a serial port in session settings]\x1b[0m\r\n";
+        let _ = event_tx.send(PtyEvent::Data {
+            terminal_id: terminal_id.clone(),
+            data: msg.as_bytes().to_vec(),
+        }).await;
+        let _ = event_tx.send(PtyEvent::Exit {
+            terminal_id,
+            exit_code: Some(1),
+        }).await;
+        return Err(anyhow::anyhow!("No serial port specified"));
+    }
+
     'reconnect_loop: loop {
         if exit_signal.load(Ordering::Relaxed) {
             break 'reconnect_loop;
@@ -333,6 +346,15 @@ pub async fn run_serial_session(
             Ok(s) => s,
             Err(e) => {
                 if !auto_reconnect {
+                    let msg = format!("\r\n\x1b[31m[Failed to open serial port '{}': {}]\x1b[0m\r\n", config.port, e);
+                    let _ = event_tx.send(PtyEvent::Data {
+                        terminal_id: terminal_id.clone(),
+                        data: msg.into_bytes(),
+                    }).await;
+                    let _ = event_tx.send(PtyEvent::Exit {
+                        terminal_id,
+                        exit_code: Some(1),
+                    }).await;
                     return Err(anyhow::anyhow!("Failed to open serial port '{}': {:#}", config.port, e));
                 }
                 let msg = format!("\x1b[33m[Failed to open serial port '{}': {}. Retrying in 1s...]\x1b[0m\r\n", config.port, e);
@@ -477,5 +499,74 @@ mod tests {
         assert!(!s2.starts_with('['));
         assert_eq!(s2, "line\n");
         assert!(at_line_start);
+    }
+
+    #[tokio::test]
+    async fn test_serial_session_empty_port_error() {
+        let (event_tx, event_rx) = async_channel::unbounded();
+        let (_input_tx, input_rx) = tokio::sync::mpsc::channel(1);
+        let exit_signal = Arc::new(AtomicBool::new(false));
+
+        let config = SerialConfig {
+            port: "".to_string(),
+            ..Default::default()
+        };
+
+        let res = run_serial_session("term-1".to_string(), config, event_tx, input_rx, exit_signal).await;
+        assert!(res.is_err());
+
+        let ev1 = event_rx.recv().await.unwrap();
+        match ev1 {
+            PtyEvent::Data { terminal_id, data } => {
+                assert_eq!(terminal_id, "term-1");
+                let text = String::from_utf8_lossy(&data);
+                assert!(text.contains("No port specified"));
+            }
+            _ => panic!("Expected PtyEvent::Data"),
+        }
+
+        let ev2 = event_rx.recv().await.unwrap();
+        match ev2 {
+            PtyEvent::Exit { terminal_id, exit_code } => {
+                assert_eq!(terminal_id, "term-1");
+                assert_eq!(exit_code, Some(1));
+            }
+            _ => panic!("Expected PtyEvent::Exit"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_serial_session_nonexistent_port_error() {
+        let (event_tx, event_rx) = async_channel::unbounded();
+        let (_input_tx, input_rx) = tokio::sync::mpsc::channel(1);
+        let exit_signal = Arc::new(AtomicBool::new(false));
+
+        let config = SerialConfig {
+            port: "COM_VELOWORK_NONEXISTENT_99999".to_string(),
+            auto_reconnect: false,
+            ..Default::default()
+        };
+
+        let res = run_serial_session("term-2".to_string(), config, event_tx, input_rx, exit_signal).await;
+        assert!(res.is_err());
+
+        let ev1 = event_rx.recv().await.unwrap();
+        match ev1 {
+            PtyEvent::Data { terminal_id, data } => {
+                assert_eq!(terminal_id, "term-2");
+                let text = String::from_utf8_lossy(&data);
+                assert!(text.contains("Failed to open serial port 'COM_VELOWORK_NONEXISTENT_99999'"));
+            }
+            _ => panic!("Expected PtyEvent::Data"),
+        }
+
+        let ev2 = event_rx.recv().await.unwrap();
+        match ev2 {
+            PtyEvent::Exit { terminal_id, exit_code } => {
+                assert_eq!(terminal_id, "term-2");
+                assert_eq!(exit_code, Some(1));
+            }
+            _ => panic!("Expected PtyEvent::Exit"),
+        }
     }
 }

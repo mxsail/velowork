@@ -271,7 +271,8 @@
       "ui_size": "UI Font Size",
       "ui_family": "UI Font Family",
       "ui_scale": "UI Scale",
-      "weight": "Terminal Font Weight"
+      "weight": "Terminal Font Weight",
+      "text_antialiasing": "Text Antialiasing"
     },
     "path": "Path",
     "start_on_boot": "Start on System Boot",
@@ -495,6 +496,12 @@
     "state": {
       "on": "On",
       "off": "Off"
+    },
+    "text_antialiasing": {
+      "label": "Text Antialiasing",
+      "platform_default": "Platform Default",
+      "subpixel": "ClearType Subpixel",
+      "grayscale": "Grayscale"
     },
     "titlebar_style": {
       "label": "Titlebar Style",
@@ -790,6 +797,8 @@
     "fullscreen": "Fullscreen",
     "minimize": "Minimize",
     "restore": "Restore",
+    "minimize_tab": "Minimize Tab",
+    "restore_tab": "Restore Tab",
     "search": "Search",
     "add_tab": "New Tab",
     "export_buffer": "Export Buffer to File",
@@ -1175,7 +1184,9 @@
     "memory": "Memory",
     "time": "Time",
     "focused": "Focused:",
-    "toggle_right_toolbar": "Toggle Right Dock",
+    "toggle_right_toolbar": "Toggle Right Toolbar",
+    "hide_right_toolbar": "Hide Right Toolbar",
+    "show_right_toolbar": "Show Right Toolbar",
     "toggle_left_toolbar": "Toggle Left Dock",
     "encoding": "Character Encoding"
   },

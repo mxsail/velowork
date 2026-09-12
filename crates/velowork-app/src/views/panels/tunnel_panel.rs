@@ -136,6 +136,7 @@ pub struct TunnelsPanel {
     inline_tunnel_sub: Option<Subscription>,
     overlay_registry: Option<Entity<OverlayRegistry>>,
     context_menu: Option<Entity<PopupMenu>>,
+    selected_node_bounds: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>>>,
 }
 
 impl TunnelsPanel {
@@ -220,6 +221,7 @@ impl TunnelsPanel {
             inline_tunnel_sub: None,
             overlay_registry: None,
             context_menu: None,
+            selected_node_bounds: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
         };
 
         cx.observe(&panel.overlay_manager, |_this: &mut Self, _om, cx| {
@@ -593,7 +595,15 @@ impl TunnelsPanel {
                             let ids_clone = ids.clone();
                             let origin = this.focus_handle.clone();
                             let panel = this.focus_handle.clone();
+                            let click_origin = ids.iter().find_map(|id| {
+                                this.selected_node_bounds.borrow().get(id).map(|b| b.center())
+                            }).or_else(|| {
+                                this.selected_node_bounds.borrow().values().next().map(|b| b.center())
+                            });
                             overlay_manager.update(cx, |om, cx| {
+                                if let Some(pt) = click_origin {
+                                    om.record_click_origin(pt);
+                                }
                                 om.request_tunnel_delete_confirm_with_origin(
                                     ids_clone,
                                     Some(origin),
@@ -1347,7 +1357,20 @@ impl TunnelsPanel {
                         bg: surface_bg(t.bg_selection, cx),
                         fg: None,
                     })
-                    .when(is_selected, |d| d.border_color(rgb(t.border_active)))
+                    .when(is_selected, |d| {
+                        let nid = id.clone();
+                        let bounds_map = self.selected_node_bounds.clone();
+                        d.border_color(rgb(t.border_active)).child(
+                            canvas(
+                                move |bounds, _, _| {
+                                    bounds_map.borrow_mut().insert(nid, bounds);
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
+                    })
                     .on_drag(
                         TunnelDrag {
                             node_id: fid_drag.clone(),
@@ -1538,7 +1561,20 @@ impl TunnelsPanel {
                         bg: surface_bg(t.bg_selection, cx),
                         fg: None,
                     })
-                    .when(is_selected, |d| d.border_color(rgb(t.border_active)))
+                    .when(is_selected, |d| {
+                        let nid = pid.clone();
+                        let bounds_map = self.selected_node_bounds.clone();
+                        d.border_color(rgb(t.border_active)).child(
+                            canvas(
+                                move |bounds, _, _| {
+                                    bounds_map.borrow_mut().insert(nid, bounds);
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
+                    })
                     .on_drag(
                         TunnelDrag {
                             node_id: cid_drag.clone(),
@@ -1783,6 +1819,7 @@ impl Render for TunnelsPanel {
                 }
             });
 
+        self.selected_node_bounds.borrow_mut().clear();
         let tree_children = vec![tree_widget.render(self, window, cx)];
         let is_empty = roots.is_empty();
 
@@ -1933,7 +1970,15 @@ impl Render for TunnelsPanel {
                                 this.selected_tunnel_ids.iter().cloned().collect();
                             let origin = this.focus_handle.clone();
                             let panel = this.focus_handle.clone();
+                            let click_origin = ids.iter().find_map(|id| {
+                                this.selected_node_bounds.borrow().get(id).map(|b| b.center())
+                            }).or_else(|| {
+                                this.selected_node_bounds.borrow().values().next().map(|b| b.center())
+                            });
                             this.overlay_manager.update(cx, |om, cx| {
+                                if let Some(pt) = click_origin {
+                                    om.record_click_origin(pt);
+                                }
                                 om.request_tunnel_delete_confirm_with_origin(
                                     ids,
                                     Some(origin),
