@@ -364,9 +364,9 @@ impl Element for TerminalElement {
         // Resolve the configured terminal base weight. The bold/italic
         // ANSI variants (below) override these, so this only affects regular text.
         let base_weight = match app_settings.font_weight.as_str() {
-            "Light" => FontWeight::LIGHT,
-            "Medium" => FontWeight::MEDIUM,
-            "Bold" => FontWeight::BOLD,
+            "Light" | "light" => FontWeight::LIGHT,
+            "Medium" | "medium" => FontWeight::MEDIUM,
+            "Bold" | "bold" => FontWeight::BOLD,
             _ => FontWeight::NORMAL,
         };
         let base_style = FontStyle::Normal;

@@ -839,13 +839,19 @@ impl SettingsPanel {
         })
         .detach();
 
-        let cur_weight = s.font_weight.clone();
+        let cur_weight = match s.font_weight.as_str() {
+            "Light" | "light" => "Light".to_string(),
+            "Medium" | "medium" => "Medium".to_string(),
+            "Bold" | "bold" => "Bold".to_string(),
+            _ => "Normal".to_string(),
+        };
         let font_weight_select = cx.new(|cx| {
             SelectState::new(cx)
                 .options(vec![
-                    SelectOption::new("normal".to_string(), "Normal"),
-                    SelectOption::new("medium".to_string(), "Medium"),
-                    SelectOption::new("bold".to_string(), "Bold"),
+                    SelectOption::new("Light".to_string(), "Light"),
+                    SelectOption::new("Normal".to_string(), "Normal"),
+                    SelectOption::new("Medium".to_string(), "Medium"),
+                    SelectOption::new("Bold".to_string(), "Bold"),
                 ])
                 .selected(Some(cur_weight))
                 .placement(SelectPlacement::Below)
