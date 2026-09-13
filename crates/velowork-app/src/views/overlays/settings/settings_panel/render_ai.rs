@@ -723,15 +723,9 @@ impl SettingsPanel {
         self.ai_test_result = None;
         cx.notify();
 
-        // Build the test request URL: {base_url}/chat/completions
-        let url = format!(
-            "{}/chat/completions",
-            base_url.trim_end_matches('/')
-        );
-
         cx.spawn(async move |this, cx| {
             let test_result = smol::unblock(move || {
-                velowork_ai::provider::test_llm_connection(&url, &api_key, 15)
+                velowork_ai::provider::test_llm_connection(&base_url, &api_key, &model_id, 15)
             }).await;
 
             this.update(cx, |this, cx| {
