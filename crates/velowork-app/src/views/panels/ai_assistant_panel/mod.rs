@@ -753,8 +753,8 @@ const AI_AGENT_MAX_ROUNDS: usize = 24;
 
 const MAX_MEMORY_MESSAGES: usize = 200;
 
-/// 输入区域默认高度（像素）。
-const AI_INPUT_AREA_DEFAULT_HEIGHT: f32 = 160.0;
+/// 输入区域默认高度（像素）。增加 2 行高度（+48px），确保添加引用内容时无需手动拖拽也能自如多行输入。
+const AI_INPUT_AREA_DEFAULT_HEIGHT: f32 = 208.0;
 /// 输入区域最小高度（像素）。
 const AI_INPUT_AREA_MIN_HEIGHT: f32 = 100.0;
 /// 输入区域最大高度（像素）。
@@ -809,7 +809,10 @@ impl AiAssistantPanel {
         let ai_model_select = cx.new(|cx| {
             let mut s = SelectState::new(cx)
                 .placeholder(i18n!(cx, "ai_assistant.model"))
-                .placement(SelectPlacement::Above);
+                .placement(SelectPlacement::Above)
+                .ghost(true)
+                .size(ControlSize::Compact)
+                .text_size(ui_text_md(cx));
             s.set_overlay_registry(reg.clone());
             s
         });
@@ -823,7 +826,10 @@ impl AiAssistantPanel {
                         .collect(),
                 )
                 .selected(Some(AiPermission::ReadOnly))
-                .placement(SelectPlacement::Above);
+                .placement(SelectPlacement::Above)
+                .ghost(true)
+                .size(ControlSize::Compact)
+                .text_size(ui_text_md(cx));
             s.set_overlay_registry(reg.clone());
             s
         });
@@ -3340,6 +3346,7 @@ impl AiAssistantPanel {
 
         self.ai_model_select.update(cx, |state, cx| {
             state.set_options(options, cx);
+            state.set_text_size(Some(ui_text_md(cx)), cx);
             if state.selected_value() != selected.as_ref() {
                 state.set_selected_value(selected, cx);
             }
@@ -3351,6 +3358,7 @@ impl AiAssistantPanel {
     fn render_perm_dropdown(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let current_perm = self.ai_permission;
         self.ai_perm_select.update(cx, |state, cx| {
+            state.set_text_size(Some(ui_text_md(cx)), cx);
             if state.selected_value() != Some(&current_perm) {
                 state.set_selected_value(Some(current_perm), cx);
             }

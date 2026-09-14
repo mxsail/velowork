@@ -168,6 +168,7 @@ pub struct SelectState<T: Clone + PartialEq + 'static> {
     custom_render_option: Option<CustomRenderOption<T>>,
     size: ControlSize,
     ghost: bool,
+    text_size: Option<Pixels>,
 }
 
 impl<T: Clone + PartialEq + 'static> EventEmitter<SelectEvent<T>> for SelectState<T> {}
@@ -204,6 +205,7 @@ impl<T: Clone + PartialEq + 'static> SelectState<T> {
             custom_render_option: None,
             size: ControlSize::Default,
             ghost: false,
+            text_size: None,
         }
     }
 
@@ -301,6 +303,20 @@ impl<T: Clone + PartialEq + 'static> SelectState<T> {
     pub fn set_ghost(&mut self, ghost: bool, cx: &mut Context<Self>) {
         self.ghost = ghost;
         cx.notify();
+    }
+
+    /// Set custom text font size for trigger.
+    pub fn text_size(mut self, size: impl Into<Pixels>) -> Self {
+        self.text_size = Some(size.into());
+        self
+    }
+
+    /// Update custom text font size dynamically.
+    pub fn set_text_size(&mut self, size: Option<Pixels>, cx: &mut Context<Self>) {
+        if self.text_size != size {
+            self.text_size = size;
+            cx.notify();
+        }
     }
 
     /// 动态设置下拉面板宽度模式
@@ -699,8 +715,19 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
             p.surface_card
         };
 
+        let text_font_size = self.text_size.unwrap_or_else(|| {
+            if self.ghost {
+                ui_text_sm(cx)
+            } else {
+                ui_text_md(cx)
+            }
+        });
         let trigger_h = if self.ghost {
-            px(22.0)
+            if self.text_size.is_some() {
+                control_height_for_size(self.size, cx)
+            } else {
+                px(22.0)
+            }
         } else {
             control_height_for_size(self.size, cx)
         };
@@ -709,13 +736,12 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
         } else {
             SPACE_MD
         };
-        let text_font_size = if self.ghost {
-            ui_text_sm(cx)
-        } else {
-            ui_text_md(cx)
-        };
         let chevron_size = if self.ghost {
-            px(11.0)
+            if self.text_size.is_some() {
+                ui_icon_sm(cx)
+            } else {
+                px(11.0)
+            }
         } else {
             ui_icon_std_ts(cx)
         };
@@ -1432,6 +1458,28 @@ mod tests {
 
         select.read_with(cx, |this, _| {
             assert!(!this.ghost);
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_text_size(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        cx.update(|cx| velowork_i18n::init_locale(velowork_i18n::Locale::default(), cx));
+        let select = cx.new(|cx| {
+            SelectState::<String>::new(cx)
+                .text_size(px(14.0))
+        });
+
+        select.read_with(cx, |this, _| {
+            assert_eq!(this.text_size, Some(px(14.0)));
+        });
+
+        select.update(cx, |this, cx| {
+            this.set_text_size(Some(px(16.0)), cx);
+        });
+
+        select.read_with(cx, |this, _| {
+            assert_eq!(this.text_size, Some(px(16.0)));
         });
     }
 }
