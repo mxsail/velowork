@@ -1658,7 +1658,9 @@ impl Render for WindowView {
                             let right_dock_width = self.right_dock_ctrl.current_width();
                             let configured_width = self.right_dock_ctrl.width();
 
-                            let r_container = if show_right_dock && self.right_dock.is_some() {
+                            let r_container = if let (true, Some(right_dock)) =
+                                (show_right_dock, self.right_dock.clone())
+                            {
                                 if is_right_dock_maximized {
                                     Some(
                                         div()
@@ -1668,7 +1670,7 @@ impl Render for WindowView {
                                             .min_w_0()
                                             .h_full()
                                             .relative()
-                                            .child(self.right_dock.clone().unwrap())
+                                            .child(right_dock)
                                             .into_any_element(),
                                     )
                                 } else {
@@ -1691,13 +1693,13 @@ impl Render for WindowView {
                                                         .absolute()
                                                         .top_0()
                                                         .bottom_0()
-                                                        .left_0()
+                                                        .right_0()
                                                         .w(px(configured_width))
-                                                        .child(self.right_dock.clone().unwrap())
+                                                        .child(right_dock)
                                                 } else {
                                                     div()
                                                         .size_full()
-                                                        .child(self.right_dock.clone().unwrap())
+                                                        .child(right_dock)
                                                 },
                                             )
                                             .into_any_element(),
