@@ -201,4 +201,24 @@ mod tests {
         // Both should produce the same accent surface.
         assert_eq!(a.surface_accent, b.surface_accent);
     }
+
+    #[test]
+    fn test_selection_colors_distinct_from_hover_and_base() {
+        use crate::theme::{LIGHT_THEME, PASTEL_DARK_THEME};
+
+        for theme in [&DARK_THEME, &LIGHT_THEME, &PASTEL_DARK_THEME] {
+            let p = SemanticPalette::from_theme(theme);
+            // Selection background must not equal hover background (avoids invisible selections)
+            assert_ne!(
+                p.editor_selection, p.surface_hover,
+                "editor_selection must be clearly distinct from surface_hover"
+            );
+            assert_ne!(
+                p.editor_selection, p.surface_base,
+                "editor_selection must be clearly distinct from surface_base"
+            );
+            // Selection must be fully opaque in editor_selection
+            assert_eq!(p.editor_selection.a, 1.0);
+        }
+    }
 }
