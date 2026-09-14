@@ -1479,7 +1479,8 @@ impl SimpleInputState {
             }
             "enter" => {
                 if self.multiline {
-                    if self.submit_on_enter && !modifiers.shift {
+                    let is_newline_chord = modifiers.control || modifiers.platform || modifiers.shift;
+                    if self.submit_on_enter && !is_newline_chord {
                         cx.emit(InputEvent::PressEnter);
                         return KeyHandled::Handled;
                     }
@@ -3517,6 +3518,41 @@ mod tests {
             this.handle_key_down(&ev, cx)
         });
         assert_eq!(handled, KeyHandled::Handled);
+    }
+
+    #[gpui::test]
+    fn test_multiline_enter_and_ctrl_enter(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use super::KeyHandled;
+        let input = cx.new(|cx| {
+            SimpleInputState::new(cx)
+                .multiline()
+                .submit_on_enter(true)
+                .default_value("line1")
+        });
+
+        // 1. Ctrl+Enter should insert newline '\n' and NOT emit PressEnter
+        input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("ctrl-enter").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
+            assert_eq!(this.value(), "line1\n");
+        });
+
+        // 2. Plain Enter should emit PressEnter (for direct submit) and NOT insert newline
+        input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("enter").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
+            // Text should remain "line1\n", without another newline
+            assert_eq!(this.value(), "line1\n");
+        });
     }
 }
 

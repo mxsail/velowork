@@ -624,10 +624,12 @@ fn render_list(
 
         list_items.push(
             h_flex()
+                .w_full()
                 .items_start()
                 .gap(px(6.0))
                 .child(
                     div()
+                        .flex_shrink_0()
                         .min_w(if ordered { px(18.0) } else { px(10.0) })
                         .text_color(rgb(t.text_muted))
                         .text_size(ui_text_md(cx))
@@ -638,7 +640,13 @@ fn render_list(
                         })
                         .child(bullet_str),
                 )
-                .child(div().flex_1().child(item_content)),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.0))
+                        .w_full()
+                        .child(item_content),
+                ),
         );
 
         item_offset += item_char_len + 1; // +1 for '\n'
@@ -873,6 +881,7 @@ fn render_code_block(
 
     div()
         .w_full()
+        .min_w(px(0.0))
         .my(px(4.0))
         .rounded(px(6.0))
         .bg(rgb(t.bg_panel))
@@ -923,6 +932,9 @@ fn render_code_block(
         // Code content body
         .child(
             div()
+                .id(ElementId::from(format!("code-body-{}", block_idx)))
+                .w_full()
+                .overflow_x_scroll()
                 .p(px(10.0))
                 .font_family(mono_font_family(cx))
                 .text_size(ui_text_sm(cx))

@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use velowork_ai::{provider, StreamChunk};
 use velowork_i18n::i18n;
-use velowork_markdown::widgets::DocumentView;
+use velowork_markdown::{
+    find_line_boundaries, find_word_boundaries, MarkdownElement, MarkdownSelectionEvent,
+};
 use velowork_ui::capsule_toolbar::{
     capsule_divider, capsule_icon_button, capsule_toolbar_container,
 };
@@ -23,7 +25,7 @@ use velowork_ui::motion::{ease_out_cubic, DURATION_PANEL};
 use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState};
 use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
-use velowork_ui::theme::theme;
+use velowork_ui::theme::{theme, ThemeColors};
 use velowork_ui::tokens::{
     elevation_menu_shadow, ui_text_md, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_MD,
     SPACE_SM, SPACE_XS,
@@ -77,13 +79,29 @@ pub enum InlineAiMode {
     Popover,
 }
 
+/// Active text selection in an inline AI assistant message.
+#[derive(Clone, Debug)]
+pub struct InlineChatSelection {
+    pub msg_index: usize,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+}
+
+/// Active mouse drag for text selection in an inline AI assistant message.
+#[derive(Clone, Debug)]
+pub struct InlineSelectionDrag {
+    pub msg_index: usize,
+    pub anchor: usize,
+    pub plain_text: String,
+}
+
 /// A single turn in the inline popover chat history.
 #[derive(Clone)]
 pub struct InlineAiMessage {
     pub is_user: bool,
     pub text: String,
     pub quote: Option<String>,
-    pub document_view: Option<Entity<DocumentView>>,
     pub extracted_commands: Vec<String>,
     pub is_streaming: bool,
 }
@@ -135,7 +153,8 @@ pub struct TerminalAiInline {
     pub selected_model_id: Option<String>,
     pub toolbar_input: Entity<SimpleInputState>,
     pub followup_input: Entity<SimpleInputState>,
-    pub document_view: Entity<DocumentView>,
+    pub active_selection: Option<InlineChatSelection>,
+    pub selection_dragging: Option<InlineSelectionDrag>,
     pub overlay_registry: Option<Entity<OverlayRegistry>>,
     pub stream_rx: Option<Arc<parking_lot::Mutex<mpsc::Receiver<StreamChunk>>>>,
     pub _stream_task: Option<Task<()>>,
@@ -145,6 +164,9 @@ pub struct TerminalAiInline {
     pub resize_drag: Option<PopoverResizeDrag>,
     pub messages: Vec<InlineAiMessage>,
     pub copied_msg_index: Option<usize>,
+    pub scroll_handle: ScrollHandle,
+    pub focus_handle: FocusHandle,
+    pub animation_frame: u64,
 }
 
 impl TerminalAiInline {
@@ -197,8 +219,6 @@ impl TerminalAiInline {
         })
         .detach();
 
-        let document_view = cx.new(|cx| DocumentView::new("", cx));
-
         Self {
             mode: InlineAiMode::Toolbar,
             terminal_id,
@@ -213,7 +233,8 @@ impl TerminalAiInline {
             selected_model_id,
             toolbar_input,
             followup_input,
-            document_view,
+            active_selection: None,
+            selection_dragging: None,
             overlay_registry,
             stream_rx: None,
             _stream_task: None,
@@ -223,6 +244,120 @@ impl TerminalAiInline {
             resize_drag: None,
             messages: Vec::new(),
             copied_msg_index: None,
+            scroll_handle: ScrollHandle::new(),
+            focus_handle: cx.focus_handle(),
+            animation_frame: 0,
+        }
+    }
+
+    /// Retrieve the currently selected plain text, if any.
+    pub fn get_active_selection_text(&self) -> Option<String> {
+        self.active_selection.as_ref().map(|s| s.text.clone())
+    }
+
+    /// Clear any active selection or in-progress selection drag.
+    pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
+        if self.active_selection.is_some() || self.selection_dragging.is_some() {
+            self.active_selection = None;
+            self.selection_dragging = None;
+            cx.notify();
+        }
+    }
+
+    /// Handle markdown selection events (start, drag update, finish).
+    pub fn handle_selection_event(
+        &mut self,
+        msg_idx: usize,
+        event: MarkdownSelectionEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            MarkdownSelectionEvent::Start {
+                offset,
+                click_count,
+                plain_text,
+            } => {
+                if click_count == 2 {
+                    let (start, end) = find_word_boundaries(&plain_text, offset);
+                    if start < end {
+                        let selected_text: String =
+                            plain_text.chars().skip(start).take(end - start).collect();
+                        self.active_selection = Some(InlineChatSelection {
+                            msg_index: msg_idx,
+                            start,
+                            end,
+                            text: selected_text,
+                        });
+                        self.selection_dragging = None;
+                        cx.notify();
+                        return;
+                    }
+                } else if click_count >= 3 {
+                    let (start, end) = find_line_boundaries(&plain_text, offset);
+                    if start < end {
+                        let selected_text: String =
+                            plain_text.chars().skip(start).take(end - start).collect();
+                        self.active_selection = Some(InlineChatSelection {
+                            msg_index: msg_idx,
+                            start,
+                            end,
+                            text: selected_text,
+                        });
+                        self.selection_dragging = None;
+                        cx.notify();
+                        return;
+                    }
+                }
+
+                self.selection_dragging = Some(InlineSelectionDrag {
+                    msg_index: msg_idx,
+                    anchor: offset,
+                    plain_text,
+                });
+                if self.active_selection.is_some() {
+                    self.active_selection = None;
+                    cx.notify();
+                }
+            }
+            MarkdownSelectionEvent::Update { offset } => {
+                let Some(ref drag) = self.selection_dragging else {
+                    return;
+                };
+                if drag.msg_index != msg_idx {
+                    return;
+                }
+                let anchor = drag.anchor;
+                let start = anchor.min(offset);
+                let end = anchor.max(offset);
+                if start < end {
+                    let selected_text: String =
+                        drag.plain_text.chars().skip(start).take(end - start).collect();
+                    let changed = match &self.active_selection {
+                        Some(current) => {
+                            current.msg_index != msg_idx
+                                || current.start != start
+                                || current.end != end
+                                || current.text != selected_text
+                        }
+                        None => true,
+                    };
+                    if changed {
+                        self.active_selection = Some(InlineChatSelection {
+                            msg_index: msg_idx,
+                            start,
+                            end,
+                            text: selected_text,
+                        });
+                        cx.notify();
+                    }
+                } else if self.active_selection.is_some() {
+                    self.active_selection = None;
+                    cx.notify();
+                }
+            }
+            MarkdownSelectionEvent::End => {
+                self.selection_dragging = None;
+            }
         }
     }
 
@@ -249,6 +384,7 @@ impl TerminalAiInline {
         if !selection_text.trim().is_empty() {
             inline.trigger_explain(cx);
         }
+        inline.scroll_handle.scroll_to_bottom();
         inline
     }
 
@@ -296,7 +432,8 @@ impl TerminalAiInline {
                 .options(options)
                 .selected(selected)
                 .placeholder(i18n!(cx, "ai_assistant.model"))
-                .placement(SelectPlacement::Below);
+                .placement(SelectPlacement::Below)
+                .ghost(true);
             if let Some(r) = reg {
                 s.set_overlay_registry(r);
             }
@@ -360,14 +497,11 @@ impl TerminalAiInline {
             is_user: true,
             text: user_text.clone(),
             quote: quote.clone(),
-            document_view: None,
             extracted_commands: Vec::new(),
             is_streaming: false,
         });
 
         // Push Assistant Message
-        let doc_view = cx.new(|cx| DocumentView::new("", cx));
-        self.document_view = doc_view.clone();
         self.reply_text.clear();
         self.extracted_commands.clear();
         self.is_streaming = true;
@@ -376,10 +510,10 @@ impl TerminalAiInline {
             is_user: false,
             text: String::new(),
             quote: None,
-            document_view: Some(doc_view),
             extracted_commands: Vec::new(),
             is_streaming: true,
         });
+        self.scroll_handle.scroll_to_bottom();
 
         // Prepare multi-turn messages for API
         let mut api_messages = Vec::new();
@@ -420,6 +554,7 @@ impl TerminalAiInline {
 
                 let finished = this
                     .update(cx, |this, cx| {
+                        this.animation_frame = this.animation_frame.wrapping_add(1);
                         let Some(ref rx_lock) = this.stream_rx else {
                             return true;
                         };
@@ -466,14 +601,16 @@ impl TerminalAiInline {
                             this.extracted_commands = cmds.clone();
                             if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
                                 last.extracted_commands = cmds;
-                                if let Some(ref dv) = last.document_view {
-                                    dv.update(cx, |v, cx| v.set_content(&text, cx));
-                                }
                             }
+                            this.scroll_handle.scroll_to_bottom();
+                            cx.notify();
+                        } else if this.is_streaming && this.reply_text.is_empty() {
+                            // 思考等待中：每帧通知重绘以驱动圆点呼吸波浪动效
                             cx.notify();
                         }
 
                         if done {
+                            this.scroll_handle.scroll_to_bottom();
                             let final_reply = this.reply_text.clone();
                             cx.emit(TerminalAiInlineEvent::AppendConversation {
                                 project_id: this.project_id.clone(),
@@ -785,6 +922,12 @@ impl TerminalAiInline {
                     .h(px(22.0))
                     .flex()
                     .items_center()
+                    .on_key_down(cx.listener(|_, event: &KeyDownEvent, _window, cx| {
+                        if event.keystroke.key.as_str() == "escape" {
+                            cx.emit(TerminalAiInlineEvent::Close);
+                            cx.stop_propagation();
+                        }
+                    }))
                     .child(
                         SimpleInput::new(&self.toolbar_input)
                             .compact()
@@ -925,12 +1068,61 @@ impl TerminalAiInline {
             .flex_col()
             .overflow_hidden()
             .opacity(motion_progress)
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+            .key_context("TerminalAiInline")
+            .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
+                    if let Some(text) = this.get_active_selection_text() {
+                        if !text.is_empty() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            if let Some(ref sel) = this.active_selection {
+                                this.copied_msg_index = Some(sel.msg_index);
+                                cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                                    smol::Timer::after(Duration::from_millis(2000)).await;
+                                    let _ = this.update(cx, |this, cx| {
+                                        this.copied_msg_index = None;
+                                        cx.notify();
+                                    });
+                                }).detach();
+                            }
+                            cx.notify();
+                            cx.stop_propagation();
+                            return;
+                        }
+                    }
+                }
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.emit(TerminalAiInlineEvent::Close);
+                    cx.stop_propagation();
+                }
+            }))
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                this.focus_handle.focus(window, cx);
                 cx.stop_propagation();
-            })
-            .on_mouse_down(MouseButton::Right, |_, _, cx| {
+            }))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| {
+                this.focus_handle.focus(window, cx);
+                if let Some(text) = this.get_active_selection_text() {
+                    if !text.is_empty() {
+                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        if let Some(ref sel) = this.active_selection {
+                            this.copied_msg_index = Some(sel.msg_index);
+                            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                                smol::Timer::after(Duration::from_millis(2000)).await;
+                                let _ = this.update(cx, |this, cx| {
+                                    this.copied_msg_index = None;
+                                    cx.notify();
+                                });
+                            }).detach();
+                        }
+                        cx.notify();
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
                 cx.stop_propagation();
-            })
+            }))
             .on_scroll_wheel(|_, _, cx| {
                 cx.stop_propagation();
             })
@@ -1004,10 +1196,14 @@ impl TerminalAiInline {
             .child(
                 div()
                     .id("terminal-ai-popover-body")
+                    .w_full()
+                    .min_w(px(0.0))
                     .flex_1()
                     .min_h(px(80.0))
                     .p(SPACE_SM)
+                    .overflow_x_hidden()
                     .overflow_y_scroll()
+                    .track_scroll(&self.scroll_handle)
                     .child(
                         if self.has_no_model && self.messages.is_empty() {
                             div()
@@ -1060,9 +1256,12 @@ impl TerminalAiInline {
                             div().into_any_element()
                         },
                     )
-                    .child(
+                    .child({
+                        let active_selection = self.active_selection.clone();
+                        let inline_entity = cx.entity().clone();
                         v_flex()
                             .w_full()
+                            .min_w(px(0.0))
                             .gap(SPACE_MD)
                             .children(
                                 self.messages.iter().enumerate().map(|(msg_idx, msg)| {
@@ -1074,6 +1273,7 @@ impl TerminalAiInline {
                                                 card_children.push(
                                                     div()
                                                         .w_full()
+                                                        .min_w(px(0.0))
                                                         .p(SPACE_XS)
                                                         .rounded(RADIUS_SM)
                                                         .bg(p.surface_raised)
@@ -1097,6 +1297,8 @@ impl TerminalAiInline {
                                                         .child(
                                                             div()
                                                                 .id(SharedString::from(format!("user-quote-{}", msg_idx)))
+                                                                .w_full()
+                                                                .min_w(px(0.0))
                                                                 .max_h(px(72.0))
                                                                 .overflow_y_scroll()
                                                                 .text_size(px(11.0))
@@ -1108,6 +1310,8 @@ impl TerminalAiInline {
                                         }
                                         card_children.push(
                                             div()
+                                                .w_full()
+                                                .min_w(px(0.0))
                                                 .text_size(ui_text_md(cx))
                                                 .text_color(p.text_primary)
                                                 .child(msg.text.clone())
@@ -1116,6 +1320,7 @@ impl TerminalAiInline {
 
                                         div()
                                             .w_full()
+                                            .min_w(px(0.0))
                                             .p(SPACE_SM)
                                             .rounded(RADIUS_LG)
                                             .bg(p.surface_card)
@@ -1140,25 +1345,38 @@ impl TerminalAiInline {
 
                                         div()
                                             .w_full()
+                                            .min_w(px(0.0))
                                             .flex()
                                             .flex_col()
                                             .gap(SPACE_XS)
                                             .py(SPACE_XS)
                                             .when(msg.is_streaming && msg.text.is_empty(), |d| {
-                                                let thinking_str = i18n!(cx, "ai_assistant.thinking");
-                                                d.child(
-                                                    h_flex()
-                                                        .items_center()
-                                                        .gap(SPACE_XS)
-                                                        .py(SPACE_XS)
-                                                        .text_size(px(12.0))
-                                                        .text_color(p.text_secondary)
-                                                        .child(AppIcon::LoaderCircle.size(px(14.0)).text_color(p.text_secondary))
-                                                        .child(thinking_str)
-                                                )
+                                                d.child(loading_indicator(&t, cx, self.animation_frame))
                                             })
-                                            .when_some(msg.document_view.clone(), |d, dv| {
-                                                d.child(dv)
+                                            .when(!msg.text.is_empty(), |d| {
+                                                let active_sel = active_selection
+                                                    .as_ref()
+                                                    .filter(|s| s.msg_index == msg_idx);
+                                                let sel_range = active_sel.map(|s| (s.start, s.end));
+                                                let inline_for_sel = inline_entity.clone();
+                                                let md_el = MarkdownElement::new(
+                                                    ElementId::from(format!("inline-md-{}", msg_idx)),
+                                                    &msg.text,
+                                                )
+                                                .selection(sel_range)
+                                                .on_selection_event(move |ev, window, cx| {
+                                                    inline_for_sel.update(cx, |this, cx| {
+                                                        this.focus_handle.focus(window, cx);
+                                                        if let MarkdownSelectionEvent::Start { .. } = &ev {
+                                                            this.followup_input.update(cx, |inp, cx| inp.clear_selection(cx));
+                                                        }
+                                                        this.handle_selection_event(msg_idx, ev, cx);
+                                                    });
+                                                })
+                                                .on_url_click(move |url, _window, cx| {
+                                                    cx.open_url(url);
+                                                });
+                                                d.child(md_el)
                                             })
                                             .children(
                                                 msg.extracted_commands.iter().enumerate().map(|(c_idx, cmd)| {
@@ -1179,6 +1397,8 @@ impl TerminalAiInline {
                                                     );
 
                                                     div()
+                                                        .w_full()
+                                                        .min_w(px(0.0))
                                                         .mt(SPACE_XS)
                                                         .p(SPACE_XS)
                                                         .bg(p.surface_raised)
@@ -1194,11 +1414,14 @@ impl TerminalAiInline {
                                                                 .items_center()
                                                                 .gap(SPACE_XS)
                                                                 .flex_1()
+                                                                .min_w(px(0.0))
                                                                 .overflow_hidden()
                                                                 .child(AppIcon::Terminal.size(px(12.0)).text_color(p.text_muted))
                                                                 .child(
                                                                     div()
                                                                         .flex_1()
+                                                                        .min_w(px(0.0))
+                                                                        .truncate()
                                                                         .text_size(px(11.0))
                                                                         .text_color(p.text_primary)
                                                                         .child(cmd.clone())
@@ -1206,6 +1429,7 @@ impl TerminalAiInline {
                                                         )
                                                         .child(
                                                             div()
+                                                                .flex_shrink_0()
                                                                 .flex()
                                                                 .items_center()
                                                                 .gap(px(4.0))
@@ -1319,7 +1543,7 @@ impl TerminalAiInline {
                                     }
                                 })
                             )
-                    )
+                    })
             )
             // --- Footer: Followup Input ---
             .child(
@@ -1343,6 +1567,34 @@ impl TerminalAiInline {
                             .child(
                                 div()
                                     .w_full()
+                                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                                        if event.keystroke.key.as_str() == "escape" {
+                                            cx.emit(TerminalAiInlineEvent::Close);
+                                            cx.stop_propagation();
+                                            return;
+                                        }
+                                        let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                                        if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
+                                            if let Some(text) = this.get_active_selection_text() {
+                                                if !text.is_empty() {
+                                                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                                    if let Some(ref sel) = this.active_selection {
+                                                        this.copied_msg_index = Some(sel.msg_index);
+                                                        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                                                            smol::Timer::after(Duration::from_millis(2000)).await;
+                                                            let _ = this.update(cx, |this, cx| {
+                                                                this.copied_msg_index = None;
+                                                                cx.notify();
+                                                            });
+                                                        }).detach();
+                                                    }
+                                                    cx.notify();
+                                                    cx.stop_propagation();
+                                                    return;
+                                                }
+                                            }
+                                        }
+                                    }))
                                     .child(SimpleInput::new(&self.followup_input).borderless(true)),
                             )
                             .child(
@@ -1379,4 +1631,33 @@ impl TerminalAiInline {
             .child(self.render_resize_handle(PopoverResizeEdge::BottomLeft, cx))
             .child(self.render_resize_handle(PopoverResizeEdge::BottomRight, cx))
     }
+}
+
+/// 加载状态指示器：三个错相位呼吸跳动的圆点 + 文案，直观表达「等待回复中」（与右侧 AI 助手面板保持一致）。
+fn loading_indicator(t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement {
+    let label = i18n!(cx, "ai_assistant.thinking");
+    let dots = (0..3).map(|i| {
+        // 每个圆点相位错开，形成波浪式呼吸效果。
+        let phase = (frame + i * 10) % 30;
+        let wave = (phase as f32 / 30.0 * std::f32::consts::PI * 2.0).sin();
+        let opacity = 0.35 + 0.65 * ((wave + 1.0) / 2.0);
+        div()
+            .w(px(7.0))
+            .h(px(7.0))
+            .rounded(px(3.5))
+            .bg(rgb(t.accent))
+            .opacity(opacity)
+    });
+    div()
+        .flex()
+        .items_center()
+        .gap(px(10.0))
+        .py(SPACE_SM)
+        .child(h_flex().gap(px(5.0)).items_center().children(dots))
+        .child(
+            div()
+                .text_size(ui_text_md(cx))
+                .text_color(rgb(t.text_muted))
+                .child(label),
+        )
 }

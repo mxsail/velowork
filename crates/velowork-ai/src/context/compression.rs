@@ -141,10 +141,12 @@ pub fn compress_chat_history(
             summary_lines.push("[History Summary of previous turns]:".to_string());
             for m in older {
                 let role = if m.is_user { "User" } else { "Assistant" };
-                let mut snippet = m.text.replace('\n', " ");
-                if snippet.len() > 100 {
-                    snippet = format!("{}...", &snippet[..100]);
-                }
+                let snippet_raw = m.text.replace('\n', " ");
+                let snippet: String = if snippet_raw.chars().count() > 80 {
+                    format!("{}...", snippet_raw.chars().take(80).collect::<String>())
+                } else {
+                    snippet_raw
+                };
                 summary_lines.push(format!("- {}: {}", role, snippet));
             }
 
@@ -195,5 +197,20 @@ mod tests {
         let compressed = compress_chat_history(&msgs, AiCompressionStrategy::Summarize, 10000, 4);
         assert!(compressed.len() <= 5);
         assert!(compressed[0].text.contains("[History Summary"));
+    }
+
+    #[test]
+    fn test_summarize_compression_chinese_char_boundary() {
+        let mut msgs = Vec::new();
+        // 精确复现用户 panic 的包含长中文字符串
+        let chinese_text = "**是的，占用非常高，已经处于非常危险的临界状态！**  你的根目录 `/` 占用率已经达到了 **98%**，剩余可用空间仅剩 **3.7G**。  ### 为什么这很危险？ 当根目录（`/`）被占满（达到 100%）时，系统可能会发生异常崩溃！";
+        msgs.push(SimpleChatMessage::new(false, chinese_text.to_string()));
+        for i in 0..5 {
+            msgs.push(SimpleChatMessage::new(i % 2 == 0, format!("近期消息 {}", i)));
+        }
+        // keep_recent = 4，所以第一条中文消息会进入 older 进行摘要截断，以前在 byte index 100 裸切片会 panic
+        let compressed = compress_chat_history(&msgs, AiCompressionStrategy::Summarize, 10000, 4);
+        assert!(compressed[0].text.contains("[History Summary"));
+        assert!(compressed[0].text.contains("占用非常高"));
     }
 }

@@ -884,7 +884,7 @@
     "inline_ai_continue_in_side_panel": "Continue in Side Panel",
     "inline_ai_no_model_configured": "No AI model configured yet",
     "inline_ai_open_settings": "Open Settings",
-    "inline_ai_follow_up_placeholder": "Follow up (Enter to send, Shift+Enter for newline)...",
+    "inline_ai_follow_up_placeholder": "Ask (Enter to send, Ctrl+Enter for newline)...",
     "inline_ai_thinking": "Thinking",
     "inline_ai_send": "Send",
     "inline_ai_stop": "Stop generating",

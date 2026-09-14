@@ -770,14 +770,21 @@ impl AiAssistantPanel {
         let chat_input = cx.new(|cx| {
             InputState::new(cx)
                 .multiline()
+                .submit_on_enter(true)
                 .wrap(true)
                 .fill_height(true)
-                .placeholder(i18n!(cx, "ai_assistant.title"))
+                .placeholder(i18n!(cx, "terminal.inline_ai_follow_up_placeholder"))
         });
         let chat_input_clone = chat_input.clone();
         cx.subscribe(
             &chat_input_clone,
-            |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
+            |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                if *event == velowork_ui::input::InputEvent::PressEnter {
+                    if this.has_input_content(cx) {
+                        this.on_send_button(cx);
+                    }
+                    return;
+                }
                 let val = this
                     .chat_input
                     .as_ref()
@@ -1463,7 +1470,7 @@ impl AiAssistantPanel {
         cx.notify();
     }
 
-    fn send_ai_message(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn send_ai_message(&mut self, cx: &mut Context<Self>) {
         let input_text = self
             .chat_input
             .as_ref()
@@ -1535,7 +1542,7 @@ impl AiAssistantPanel {
 
     /// 发送按钮的统一入口：根据当前是否正在生成以及输入框是否有内容，
     /// 在「发送新消息 / 终止生成 / 加入待发送队列」三种行为间切换。
-    fn on_send_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_send_button(&mut self, cx: &mut Context<Self>) {
         let is_streaming = self.ai_streaming_index.is_some();
         let has_input = self.has_input_content(cx);
         if is_streaming && !has_input {
@@ -1543,10 +1550,10 @@ impl AiAssistantPanel {
             self.stop_generation(cx);
         } else if is_streaming && has_input {
             // 正在生成且已输入文字：当前消息入队，待生成结束后自动发送。
-            self.enqueue_current_input(window, cx);
+            self.enqueue_current_input(cx);
         } else {
             // 空闲：直接发送。
-            self.send_ai_message(window, cx);
+            self.send_ai_message(cx);
         }
     }
 
@@ -1586,7 +1593,7 @@ impl AiAssistantPanel {
 
     /// 将当前输入框内容（文本 / 引用 / 附件）克隆一份入队，清空输入框，
     /// 待当前生成结束后按序自动发送。
-    fn enqueue_current_input(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn enqueue_current_input(&mut self, cx: &mut Context<Self>) {
         let text = self
             .chat_input
             .as_ref()
@@ -3226,14 +3233,21 @@ impl AiAssistantPanel {
                 let input = cx.new(|cx| {
                     InputState::new(cx)
                         .multiline()
+                        .submit_on_enter(true)
                         .wrap(true)
                         .fill_height(true)
-                        .placeholder(i18n!(cx, "ai_assistant.title"))
+                        .placeholder(i18n!(cx, "terminal.inline_ai_follow_up_placeholder"))
                 });
                 let input_clone = input.clone();
                 cx.subscribe(
                     &input_clone,
-                    |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
+                    |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                        if *event == velowork_ui::input::InputEvent::PressEnter {
+                            if this.has_input_content(cx) {
+                                this.on_send_button(cx);
+                            }
+                            return;
+                        }
                         let val = this
                             .chat_input
                             .as_ref()
@@ -3794,11 +3808,14 @@ impl AiAssistantPanel {
                             .flex_1()
                             .min_h_0()
                             .key_context("AiChatInput")
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if event.keystroke.key.as_str() == "enter"
-                                    && event.keystroke.modifiers.control
-                                {
-                                    this.on_send_button(window, cx);
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                                let is_newline = event.keystroke.modifiers.control
+                                    || event.keystroke.modifiers.platform
+                                    || event.keystroke.modifiers.shift;
+                                if event.keystroke.key.as_str() == "enter" && !is_newline {
+                                    if this.has_input_content(cx) {
+                                        this.on_send_button(cx);
+                                    }
                                     cx.stop_propagation();
                                     return;
                                 }
@@ -3857,8 +3874,8 @@ impl AiAssistantPanel {
                                     }
                                 })
                                 .on_click(cx.listener(
-                                    |this, _, window, cx| {
-                                        this.on_send_button(window, cx);
+                                    |this, _, _window, cx| {
+                                        this.on_send_button(cx);
                                     },
                                 )),
                             ),

@@ -167,6 +167,7 @@ pub struct SelectState<T: Clone + PartialEq + 'static> {
     trigger_bounds: Bounds<Pixels>,
     custom_render_option: Option<CustomRenderOption<T>>,
     size: ControlSize,
+    ghost: bool,
 }
 
 impl<T: Clone + PartialEq + 'static> EventEmitter<SelectEvent<T>> for SelectState<T> {}
@@ -202,6 +203,7 @@ impl<T: Clone + PartialEq + 'static> SelectState<T> {
             trigger_bounds: Bounds::default(),
             custom_render_option: None,
             size: ControlSize::Default,
+            ghost: false,
         }
     }
 
@@ -286,6 +288,18 @@ impl<T: Clone + PartialEq + 'static> SelectState<T> {
     /// Update control size Tier dynamically.
     pub fn set_size(&mut self, size: ControlSize, cx: &mut Context<Self>) {
         self.size = size;
+        cx.notify();
+    }
+
+    /// Set ghost mode (transparent trigger background, compact height, minimal borders).
+    pub fn ghost(mut self, ghost: bool) -> Self {
+        self.ghost = ghost;
+        self
+    }
+
+    /// Update ghost mode dynamically.
+    pub fn set_ghost(&mut self, ghost: bool, cx: &mut Context<Self>) {
+        self.ghost = ghost;
         cx.notify();
     }
 
@@ -661,16 +675,49 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
 
         let p = crate::design::semantic::SemanticPalette::from_context(cx);
         let is_active = self.open || is_focused;
-        let border_color = if is_active {
+        let border_color = if self.ghost {
+            if is_active {
+                p.border_subtle
+            } else {
+                gpui::transparent_black()
+            }
+        } else if is_active {
             p.border_active
         } else {
             p.border_subtle
         };
 
-        let bg_color = if is_active {
+        let bg_color = if self.ghost {
+            if is_active {
+                p.surface_hover
+            } else {
+                gpui::transparent_black()
+            }
+        } else if is_active {
             p.surface_hover
         } else {
             p.surface_card
+        };
+
+        let trigger_h = if self.ghost {
+            px(22.0)
+        } else {
+            control_height_for_size(self.size, cx)
+        };
+        let trigger_px = if self.ghost {
+            px(6.0)
+        } else {
+            SPACE_MD
+        };
+        let text_font_size = if self.ghost {
+            ui_text_sm(cx)
+        } else {
+            ui_text_md(cx)
+        };
+        let chevron_size = if self.ghost {
+            px(11.0)
+        } else {
+            ui_icon_std_ts(cx)
         };
 
         // Store bounds via on_prepaint for OverlayRegistry alignment
@@ -687,7 +734,7 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                 .flex_1()
                 .items_center()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(Input::new(&input).appearance(false).text_size(ui_text_md(cx)))
+                .child(Input::new(&input).appearance(false).text_size(text_font_size))
                 .into_any_element()
         } else if let Some(opt) = selected_opt {
             let icon_el = opt.icon.map(|ic| ic.size(ui_icon_sm(cx)).text_color(rgb(t.text_primary)));
@@ -697,14 +744,14 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                 .gap(SPACE_SM)
                 .truncate()
                 .children(icon_el)
-                .child(div().text_size(ui_text_md(cx)).text_color(rgb(t.text_primary)).child(opt.label))
+                .child(div().text_size(text_font_size).text_color(rgb(t.text_primary)).child(opt.label))
                 .into_any_element()
         } else {
             div()
                 .flex()
                 .items_center()
                 .gap(SPACE_SM)
-                .text_size(ui_text_md(cx))
+                .text_size(text_font_size)
                 .text_color(rgb(t.text_muted))
                 .child(self.placeholder.clone())
                 .into_any_element()
@@ -721,11 +768,11 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                     this.set_selected_value(None, cx);
                 }))
-                .child(AppIcon::Close.size(ui_icon_std_ts(cx)).text_color(rgb(t.text_muted)))
+                .child(AppIcon::Close.size(chevron_size).text_color(rgb(t.text_muted)))
                 .into_any_element()
         } else {
             let chevron_icon = if self.open { AppIcon::ChevronUp } else { AppIcon::ChevronDown };
-            div().child(chevron_icon.size(ui_icon_std_ts(cx)).text_color(rgb(t.text_muted))).into_any_element()
+            div().child(chevron_icon.size(chevron_size).text_color(rgb(t.text_muted))).into_any_element()
         };
 
         let bounds_listener = move |bounds: Bounds<Pixels>, _window: &mut Window, cx: &mut App| {
@@ -742,15 +789,19 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
             .flex()
             .items_center()
             .justify_between()
-            .h(control_height_for_size(self.size, cx))
-            .px(SPACE_MD)
+            .h(trigger_h)
+            .px(trigger_px)
             .bg(bg_color)
             .rounded(RADIUS_MD)
             .border_1()
             .border_color(border_color)
-            .when(is_active && !self.disabled, |d| d.shadow(focus_ring_shadows(&t)))
+            .when(is_active && !self.disabled && !self.ghost, |d| d.shadow(focus_ring_shadows(&t)))
             .when(!self.disabled && !is_active, |d| {
-                d.hover(|s| s.border_color(p.surface_accent.opacity(0.6)).bg(p.surface_hover))
+                if self.ghost {
+                    d.hover(|s| s.bg(p.surface_hover))
+                } else {
+                    d.hover(|s| s.border_color(p.surface_accent.opacity(0.6)).bg(p.surface_hover))
+                }
             })
             .when(self.disabled, |d| d.opacity(0.5).cursor_not_allowed())
             .on_action(cx.listener(|this, _: &Cancel, window, cx| {
@@ -1361,6 +1412,26 @@ mod tests {
             assert_eq!(opt.label.as_ref(), "Dark");
         });
     }
+
+    #[gpui::test]
+    fn test_select_ghost_mode(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        cx.update(|cx| velowork_i18n::init_locale(velowork_i18n::Locale::default(), cx));
+        let select = cx.new(|cx| {
+            SelectState::<String>::new(cx)
+                .ghost(true)
+        });
+
+        select.read_with(cx, |this, _| {
+            assert!(this.ghost);
+        });
+
+        select.update(cx, |this, cx| {
+            this.set_ghost(false, cx);
+        });
+
+        select.read_with(cx, |this, _| {
+            assert!(!this.ghost);
+        });
+    }
 }
-
-
