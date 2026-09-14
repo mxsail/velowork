@@ -295,6 +295,12 @@ impl SettingsState {
         self.save_and_notify(cx);
     }
 
+    /// Enable/disable the terminal AI floating toolbar on text selection
+    pub fn set_terminal_ai_floating_toolbar_enabled(&mut self, value: bool, cx: &mut Context<Self>) {
+        self.settings.terminal_ai_floating_toolbar_enabled = value;
+        self.save_and_notify(cx);
+    }
+
     /// Set AI context auto-compression enabled state
     pub fn set_ai_auto_compress(&mut self, value: bool, cx: &mut Context<Self>) {
         self.settings.ai_auto_compress = value;

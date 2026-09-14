@@ -1,8 +1,8 @@
 //! AST types and utility functions for the markdown renderer.
 
 /// A node in the markdown AST.
-#[derive(Clone)]
-pub(crate) enum Node {
+#[derive(Clone, Debug)]
+pub enum Node {
     Heading { level: u8, children: Vec<Inline> },
     Paragraph { children: Vec<Inline> },
     CodeBlock { language: Option<String>, code: String },
@@ -25,8 +25,8 @@ pub(crate) enum Node {
 }
 
 /// Parsed YAML frontmatter block.
-#[derive(Clone)]
-pub(crate) enum Frontmatter {
+#[derive(Clone, Debug)]
+pub enum Frontmatter {
     /// Well-formed mapping: ordered key/value pairs.
     Parsed(Vec<(String, FmValue)>),
     /// Content that isn't a YAML mapping (invalid, or a bare scalar/sequence).
@@ -36,8 +36,8 @@ pub(crate) enum Frontmatter {
 
 /// A frontmatter value, mirrored from `serde_yaml_ng::Value` but order-preserving
 /// and shaped for display (scalars flattened to strings).
-#[derive(Clone)]
-pub(crate) enum FmValue {
+#[derive(Clone, Debug)]
+pub enum FmValue {
     Scalar(String),
     List(Vec<FmValue>),
     Map(Vec<(String, FmValue)>),
@@ -156,13 +156,14 @@ fn fm_list_to_text(items: &[FmValue], depth: usize, out: &mut String) {
 }
 
 /// Inline content within a block.
-#[derive(Clone)]
-pub(crate) enum Inline {
+#[derive(Clone, Debug)]
+pub enum Inline {
     Text(String),
     Code(String),
     Bold(Vec<Inline>),
     Italic(Vec<Inline>),
-    Link { _url: String, children: Vec<Inline> },
+    Strikethrough(Vec<Inline>),
+    Link { url: String, children: Vec<Inline> },
 }
 
 /// Slice a string by character indices (not byte indices).

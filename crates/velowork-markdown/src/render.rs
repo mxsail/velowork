@@ -350,7 +350,7 @@ impl MarkdownDocument {
             match inline {
                 Inline::Text(t) => char_len(t),
                 Inline::Code(c) => char_len(c),
-                Inline::Bold(children) | Inline::Italic(children) => {
+                Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
                     Self::inlines_text_length(children)
                 }
                 Inline::Link { children, .. } => {
@@ -520,7 +520,7 @@ impl MarkdownDocument {
     }
 
     /// Render a frontmatter block as a bordered metadata card.
-    fn render_frontmatter(fm: &Frontmatter, t: &ThemeColors, cx: &App) -> Div {
+    pub(crate) fn render_frontmatter(fm: &Frontmatter, t: &ThemeColors, cx: &App) -> Div {
         let card = v_flex()
             .gap(px(4.0))
             .w_full()
@@ -649,7 +649,7 @@ impl MarkdownDocument {
     /// highlights for bold / italic / inline code / links and an optional
     /// selection background. Wrapping is handled natively by GPUI's text
     /// layout once the element is placed in a container with a definite width.
-    fn build_inline_styled(
+    pub(crate) fn build_inline_styled(
         inlines: &[Inline],
         base: &TextStyle,
         t: &ThemeColors,
@@ -659,7 +659,7 @@ impl MarkdownDocument {
         let text = Self::render_inlines_as_text(inlines);
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
 
-        // Record a highlight for every styled leaf (bold / italic / code / link).
+        // Record a highlight for every styled leaf (bold / italic / code / link / strikethrough).
         let mut char_offset = 0usize;
         Self::collect_inline_highlights(
             inlines,
@@ -669,29 +669,37 @@ impl MarkdownDocument {
             FontWeight::default(),
             FontStyle::default(),
             false,
+            false,
             &mut highlights,
         );
 
-        // Selection background, applied last so it wins over leaf styling in
-        // the (rare) overlapping range.
-        if let Some((start, end)) = selection {
+        let sel_byte_range = selection.and_then(|(start, end)| {
             let sel_start = Self::char_to_byte(&text, start);
             let sel_end = Self::char_to_byte(&text, end);
             if sel_end > sel_start {
-                highlights.push((
-                    sel_start..sel_end,
-                    HighlightStyle {
-                        background_color: Some(rgba(0x3390ff40).into()),
-                        ..Default::default()
-                    },
-                ));
+                Some(sel_start..sel_end)
+            } else {
+                None
             }
-        }
+        });
+
+        let selection_style = HighlightStyle {
+            background_color: Some(rgba(0x3390ff40).into()),
+            ..Default::default()
+        };
+
+        let highlights = crate::selection::merge_highlights(
+            &text,
+            &highlights,
+            sel_byte_range,
+            selection_style,
+        );
 
         StyledText::new(text).with_default_highlights(base, highlights)
     }
 
     /// Recursively collect highlight ranges for styled inline leaves.
+    #[allow(clippy::too_many_arguments)]
     fn collect_inline_highlights(
         inlines: &[Inline],
         t: &ThemeColors,
@@ -700,6 +708,7 @@ impl MarkdownDocument {
         weight: FontWeight,
         style: FontStyle,
         link: bool,
+        strikethrough: bool,
         out: &mut Vec<(Range<usize>, HighlightStyle)>,
     ) {
         for inline in inlines {
@@ -710,8 +719,9 @@ impl MarkdownDocument {
                     if weight != FontWeight::default()
                         || style != FontStyle::default()
                         || link
+                        || strikethrough
                     {
-                        out.push((byte_start..byte_end, Self::inline_highlight(t, weight, style, link, None)));
+                        out.push((byte_start..byte_end, Self::inline_highlight(t, weight, style, link, strikethrough, None)));
                     }
                     *char_offset += s.chars().count();
                 }
@@ -720,7 +730,7 @@ impl MarkdownDocument {
                     let byte_end = Self::char_to_byte(text, *char_offset + c.chars().count());
                     out.push((
                         byte_start..byte_end,
-                        Self::inline_highlight(t, weight, style, link, Some(t.bg_primary)),
+                        Self::inline_highlight(t, weight, style, link, strikethrough, Some(t.bg_primary)),
                     ));
                     *char_offset += c.chars().count();
                 }
@@ -732,6 +742,7 @@ impl MarkdownDocument {
                     FontWeight::BOLD,
                     style,
                     link,
+                    strikethrough,
                     out,
                 ),
                 Inline::Italic(children) => Self::collect_inline_highlights(
@@ -742,36 +753,54 @@ impl MarkdownDocument {
                     weight,
                     FontStyle::Italic,
                     link,
+                    strikethrough,
                     out,
                 ),
-                Inline::Link { children, .. } => Self::collect_inline_highlights(
+                Inline::Strikethrough(children) => Self::collect_inline_highlights(
                     children,
                     t,
                     text,
                     char_offset,
                     weight,
                     style,
+                    link,
                     true,
                     out,
                 ),
+                Inline::Link { children, .. } => {
+                    Self::collect_inline_highlights(
+                        children,
+                        t,
+                        text,
+                        char_offset,
+                        weight,
+                        style,
+                        true,
+                        strikethrough,
+                        out,
+                    );
+                }
             }
         }
     }
 
     /// Build the base `TextStyle` shared by every run of an inline block.
     fn inline_base(color: u32, size: Pixels, lh: Pixels, italic: bool) -> TextStyle {
-        let mut s = TextStyle::default();
-        s.color = rgb(color).into();
-        s.font_size = AbsoluteLength::from(size);
-        s.line_height = DefiniteLength::from(lh);
-        if italic {
-            s.font_style = FontStyle::Italic;
+        TextStyle {
+            color: rgb(color).into(),
+            font_size: AbsoluteLength::from(size),
+            line_height: DefiniteLength::from(lh),
+            font_style: if italic {
+                FontStyle::Italic
+            } else {
+                FontStyle::Normal
+            },
+            ..Default::default()
         }
-        s
     }
 
     /// Convert a character offset within `text` to its byte offset.
-    fn char_to_byte(text: &str, char_idx: usize) -> usize {
+    pub(crate) fn char_to_byte(text: &str, char_idx: usize) -> usize {
         text.char_indices()
             .nth(char_idx)
             .map(|(b, _)| b)
@@ -784,6 +813,7 @@ impl MarkdownDocument {
         weight: FontWeight,
         style: FontStyle,
         link: bool,
+        strikethrough: bool,
         background: Option<u32>,
     ) -> HighlightStyle {
         HighlightStyle {
@@ -808,12 +838,17 @@ impl MarkdownDocument {
             } else {
                 None
             },
+            strikethrough: if strikethrough {
+                Some(StrikethroughStyle::default())
+            } else {
+                None
+            },
             ..Default::default()
         }
     }
 
     /// Render a table with selection highlighting.
-    fn render_table_with_selection(
+    pub(crate) fn render_table_with_selection(
         headers: &[Vec<Inline>],
         rows: &[Vec<Vec<Inline>>],
         col_widths: &[usize],
@@ -939,7 +974,7 @@ impl MarkdownDocument {
         match inline {
             Inline::Text(text) => out.push_str(text),
             Inline::Code(code) => out.push_str(code),
-            Inline::Bold(children) | Inline::Italic(children) => {
+            Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
                 for child in children {
                     Self::inline_to_text(child, out);
                 }

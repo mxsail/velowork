@@ -316,6 +316,41 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                     });
                 }
             }
+            TerminalContentEvent::ShowAiFloatingToolbar {
+                position,
+                selection_text,
+            } => {
+                if let Some(ref terminal_id) = self.terminal_id {
+                    self.request_broker.update(cx, |broker, cx| {
+                        broker.push_overlay_request(
+                            velowork_workspace::requests::OverlayRequest::Project(
+                                velowork_workspace::requests::ProjectOverlay {
+                                    project_id: self.project_id.clone(),
+                                    kind: velowork_workspace::requests::ProjectOverlayKind::ShowAiFloatingToolbar {
+                                        terminal_id: terminal_id.clone(),
+                                        position: *position,
+                                        selection_text: selection_text.clone(),
+                                    },
+                                },
+                            ),
+                            cx,
+                        );
+                    });
+                }
+            }
+            TerminalContentEvent::DismissAiFloatingToolbar => {
+                self.request_broker.update(cx, |broker, cx| {
+                    broker.push_overlay_request(
+                        velowork_workspace::requests::OverlayRequest::Project(
+                            velowork_workspace::requests::ProjectOverlay {
+                                project_id: self.project_id.clone(),
+                                kind: velowork_workspace::requests::ProjectOverlayKind::DismissAiFloatingToolbar,
+                            },
+                        ),
+                        cx,
+                    );
+                });
+            }
         }
     }
 

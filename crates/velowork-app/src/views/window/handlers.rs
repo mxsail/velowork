@@ -52,6 +52,43 @@ impl WindowView {
         }
     }
 
+    /// Open or toggle inline AI popover for the focused terminal.
+    pub(super) fn handle_terminal_inline_ai(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let settings = crate::settings::settings_entity(cx).read(cx).settings.clone();
+        if !settings.ai_enabled {
+            return;
+        }
+
+        let Some((project_id, terminal_id)) = self.focused_terminal_id(cx) else {
+            return;
+        };
+
+        let mut selection = String::new();
+        {
+            let terminals = self.terminals.lock();
+            if let Some(terminal) = terminals.get(terminal_id.as_str()) {
+                selection = terminal.get_selected_text().unwrap_or_default();
+            }
+        }
+
+        let vp = window.viewport_size();
+        let pos = point(
+            (vp.width - px(460.0)).max(px(20.0)) / 2.0,
+            (vp.height - px(360.0)).max(px(40.0)) / 3.0,
+        );
+
+        self.overlay_manager.update(cx, |om, cx| {
+            om.show_terminal_ai_popover(
+                terminal_id,
+                project_id,
+                pos,
+                selection,
+                cx,
+            );
+        });
+        cx.notify();
+    }
+
     /// Paste a "Send to Terminal" payload into the currently focused terminal.
     ///
     /// Resolves the focused terminal's working directory (OSC 7-reported, else
@@ -421,6 +458,91 @@ impl WindowView {
                     cx.notify();
                 }
             }
+            OverlayManagerEvent::TerminalAiInline(inline_ev) => match inline_ev {
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::InsertToTerminal { terminal_id, command } => {
+                    let terminals = self.terminals.lock();
+                    if let Some(terminal) = terminals.get(terminal_id.as_str()) {
+                        terminal.send_paste(&command);
+                    }
+                }
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::RunInTerminal { terminal_id, command } => {
+                    let terminals = self.terminals.lock();
+                    if let Some(terminal) = terminals.get(terminal_id.as_str()) {
+                        let cmd_with_nl = if command.ends_with('\n') {
+                            command.clone()
+                        } else {
+                            format!("{}\n", command)
+                        };
+                        terminal.send_bytes(cmd_with_nl.as_bytes());
+                    }
+                }
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::ContinueInSidePanel { quote: _, reply: _ } => {
+                    self.pending_ai_open = true;
+                    cx.notify();
+                }
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::AppendConversation { project_id, user_message, quote, assistant_reply } => {
+                    if let Some(ai) = self.find_ai_assistant_panel(cx) {
+                        ai.update(cx, |ai, cx| {
+                            ai.append_external_turn(&project_id, &user_message, quote.as_deref(), &assistant_reply, cx);
+                        });
+                    } else if let Some(db) = velowork_core::storage::database() {
+                        let repo = velowork_workspace::repositories::AiRepository::new(db);
+                        let conv_id = format!("conv_{}", project_id);
+                        let now_iso = chrono::Utc::now().to_rfc3339();
+                        if repo.get_conversation(&conv_id).ok().flatten().is_none() {
+                            let conv_row = velowork_workspace::repositories::AiConversationRow {
+                                id: conv_id.clone(),
+                                profile_id: Some("default".into()),
+                                project_id: Some(project_id.clone()),
+                                title: Some(user_message.clone()),
+                                provider_id: None,
+                                model: None,
+                                status: "active".into(),
+                                context_mode: "session".into(),
+                                created_at: now_iso.clone(),
+                                updated_at: now_iso.clone(),
+                                revision: 1,
+                                device_id: String::new(),
+                            };
+                            let _ = repo.save_conversation(&conv_row);
+                        }
+                        let count = repo.list_messages(&conv_id).map(|m| m.len()).unwrap_or(0);
+                        let u_meta = serde_json::json!({
+                            "quote": quote,
+                        });
+                        let user_row = velowork_workspace::repositories::AiMessageRow {
+                            id: format!("{}_{}", conv_id, count),
+                            conversation_id: conv_id.clone(),
+                            role: "user".into(),
+                            content: user_message.clone(),
+                            token_count: None,
+                            metadata: u_meta.to_string(),
+                            created_at: now_iso.clone(),
+                            revision: 1,
+                            device_id: String::new(),
+                        };
+                        let _ = repo.save_message(&user_row);
+                        let asst_row = velowork_workspace::repositories::AiMessageRow {
+                            id: format!("{}_{}", conv_id, count + 1),
+                            conversation_id: conv_id,
+                            role: "assistant".into(),
+                            content: assistant_reply.clone(),
+                            token_count: None,
+                            metadata: "{}".to_string(),
+                            created_at: now_iso,
+                            revision: 1,
+                            device_id: String::new(),
+                        };
+                        let _ = repo.save_message(&asst_row);
+                    }
+                }
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::OpenSettings => {
+                    self.overlay_manager.update(cx, |om, cx| {
+                        om.open_settings_panel_to(Some(crate::views::overlays::settings::settings_panel::SettingsCategory::AiAssistant), cx);
+                    });
+                }
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::Close => {}
+            },
             OverlayManagerEvent::TerminalFind { terminal_id: _ } => {
                 cx.dispatch_action(&velowork_views_terminal::actions::Search);
             }
@@ -956,6 +1078,22 @@ impl WindowView {
                     ProjectOverlayKind::ToggleSftpPanel => {
                         let _ = project_id;
                         self.toggle_sftp(cx);
+                    }
+                    ProjectOverlayKind::ShowAiFloatingToolbar { terminal_id, position, selection_text } => {
+                        self.overlay_manager.update(cx, |om, cx| {
+                            om.show_terminal_ai_floating_toolbar(
+                                terminal_id,
+                                project_id,
+                                position,
+                                selection_text,
+                                cx,
+                            );
+                        });
+                    }
+                    ProjectOverlayKind::DismissAiFloatingToolbar => {
+                        self.overlay_manager.update(cx, |om, cx| {
+                            om.dismiss_terminal_ai_inline(cx);
+                        });
                     }
                 },
                 OverlayRequest::Folder(FolderOverlay { folder_id, kind }) => match kind {

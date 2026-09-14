@@ -608,10 +608,34 @@ pub struct AiAssistantPanel {
     ai_input_area_height: f32,
     /// 拖拽调整输入区域高度的状态。
     ai_input_resize_dragging: Option<AiInputResizeDrag>,
+    /// 当前 AI 助手消息中的选区状态（消息索引、分段索引、字符起止偏移、提取文本）。
+    ai_active_selection: Option<AiChatSelection>,
+    /// 选区拖拽中的锚点状态。
+    ai_selection_dragging: Option<AiSelectionDrag>,
+}
+
+/// AI 助手聊天气泡中的文本选区状态。
+#[derive(Clone, Debug)]
+pub struct AiChatSelection {
+    pub msg_index: usize,
+    pub seg_index: usize,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+}
+
+/// AI 助手聊天气泡中的文本选区拖拽锚点。
+#[derive(Clone, Debug)]
+pub struct AiSelectionDrag {
+    pub msg_index: usize,
+    pub seg_index: usize,
+    pub anchor: usize,
+    pub plain_text: String,
 }
 
 #[derive(Clone)]
 pub struct ProjectChatSession {
+
     pub messages: Vec<ChatMessage>,
     pub ai_history: Vec<(usize, String)>,
     pub selected_model_id: Option<String>,
@@ -839,7 +863,10 @@ impl AiAssistantPanel {
             ai_scrollbar_hovered: std::cell::Cell::new(false),
             ai_input_area_height: AI_INPUT_AREA_DEFAULT_HEIGHT,
             ai_input_resize_dragging: None,
+            ai_active_selection: None,
+            ai_selection_dragging: None,
         };
+
 
         // 监听 Workspace 实体而非 FocusManager：所有项目切换路径（如
         // `Workspace::set_focused_project`）都会调用 `cx.notify()` 通知
@@ -872,7 +899,7 @@ impl AiAssistantPanel {
                     this.animation_frame = this.animation_frame.wrapping_add(1);
                     // 自动滚动开启但未到底部时，仍需持续重渲染以平滑跟随最新内容
                     // （例如一次性完整到达的含代码块 / 工具调用消息）。
-                    let follow = if this.ai_autoscroll.get() {
+                    let follow = if this.ai_autoscroll.get() && this.animation_active() {
                         let max = this.ai_scroll_handle.max_offset();
                         let cur = this.ai_scroll_handle.offset();
                         (cur.y + max.y).abs() > px(4.0)
@@ -1184,91 +1211,130 @@ impl AiAssistantPanel {
         (1 + elapsed / rate).min(total as u64) as usize
     }
 
-    fn update_message_input_states(&self, msg_idx: usize, cx: &mut Context<Self>) {
-        if msg_idx >= self.messages.len() {
-            return;
-        }
-        let msg = &self.messages[msg_idx];
+    fn update_message_input_states(&self, _msg_idx: usize, _cx: &mut Context<Self>) {}
 
-        if !msg.is_user {
-            // AI message: split into ToolSegments
-            let segments = split_tool_calls(&msg.text);
-            // 仅统计非空文本片段，作为 markdown 视图数量。
-            let text_segment_count = segments
-                .iter()
-                .filter(|s| matches!(s, ToolSegment::Text(t) if !t.trim().is_empty()))
-                .count();
-            // 当前已揭示行数（含代码块 / 工具调用的消息直接完整渲染）。
-            let revealed = self.ai_revealed_lines(msg_idx, msg, self.animation_frame);
+    pub fn get_active_selection_text(&self, _cx: &App) -> Option<String> {
+        self.ai_active_selection.as_ref().map(|s| s.text.clone())
+    }
 
-            let mut views = msg.document_views.borrow_mut();
-            while views.len() < text_segment_count {
-                let view = cx.new(|cx| velowork_markdown::widgets::DocumentView::new("", cx));
+    pub fn get_selection_for_segment(&self, msg_idx: usize, seg_idx: usize) -> Option<&AiChatSelection> {
+        self.ai_active_selection.as_ref().filter(|s| s.msg_index == msg_idx && s.seg_index == seg_idx)
+    }
 
-                cx.subscribe(&view, move |this, _, event, cx| {
-                    match event {
-                        velowork_markdown::widgets::document_view::DocumentViewEvent::SelectionStarted => {
-                            this.clear_selections_except(msg_idx, cx);
-                        }
-                    }
-                }).detach();
+    pub fn get_selection_for_message(&self, msg_idx: usize) -> Option<String> {
+        self.ai_active_selection.as_ref().filter(|s| s.msg_index == msg_idx).map(|s| s.text.clone())
+    }
 
-                views.push(view);
-            }
-            views.truncate(text_segment_count);
-
-            // 逐行显示：每个文本片段只展示已揭示行，避免一次性铺满整段文本。
-            let mut text_seg_idx = 0usize;
-            let mut text_line_offset = 0usize;
-            for seg in &segments {
-                if let ToolSegment::Text(s) = seg {
-                    let seg_lines = s.split('\n').count();
-                    if !s.trim().is_empty() {
-                        let reveal_in_seg =
-                            revealed.saturating_sub(text_line_offset).min(seg_lines);
-                        let revealed_text: String = s
-                            .split('\n')
-                            .take(reveal_in_seg)
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        views[text_seg_idx].update(cx, |v, cx| {
-                            v.set_content(&revealed_text, cx);
+    pub fn handle_ai_selection_event(
+        &mut self,
+        msg_idx: usize,
+        seg_idx: usize,
+        event: velowork_markdown::MarkdownSelectionEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            velowork_markdown::MarkdownSelectionEvent::Start {
+                offset,
+                click_count,
+                plain_text,
+            } => {
+                if click_count == 2 {
+                    let (start, end) = velowork_markdown::find_word_boundaries(&plain_text, offset);
+                    if start < end {
+                        let selected_text: String =
+                            plain_text.chars().skip(start).take(end - start).collect();
+                        self.ai_active_selection = Some(AiChatSelection {
+                            msg_index: msg_idx,
+                            seg_index: seg_idx,
+                            start,
+                            end,
+                            text: selected_text,
                         });
-                        text_seg_idx += 1;
+                        self.ai_selection_dragging = None;
+                        cx.notify();
+                        return;
                     }
-                    text_line_offset += seg_lines;
+                } else if click_count >= 3 {
+                    let (start, end) = velowork_markdown::find_line_boundaries(&plain_text, offset);
+                    if start < end {
+                        let selected_text: String =
+                            plain_text.chars().skip(start).take(end - start).collect();
+                        self.ai_active_selection = Some(AiChatSelection {
+                            msg_index: msg_idx,
+                            seg_index: seg_idx,
+                            start,
+                            end,
+                            text: selected_text,
+                        });
+                        self.ai_selection_dragging = None;
+                        cx.notify();
+                        return;
+                    }
                 }
+
+                self.ai_selection_dragging = Some(AiSelectionDrag {
+                    msg_index: msg_idx,
+                    seg_index: seg_idx,
+                    anchor: offset,
+                    plain_text,
+                });
+                if self.ai_active_selection.is_some() {
+                    self.ai_active_selection = None;
+                    cx.notify();
+                }
+            }
+            velowork_markdown::MarkdownSelectionEvent::Update { offset } => {
+                let Some(ref drag) = self.ai_selection_dragging else {
+                    return;
+                };
+                if drag.msg_index != msg_idx || drag.seg_index != seg_idx {
+                    return;
+                }
+                let anchor = drag.anchor;
+                let start = anchor.min(offset);
+                let end = anchor.max(offset);
+                if start < end {
+                    let selected_text: String =
+                        drag.plain_text.chars().skip(start).take(end - start).collect();
+                    let changed = match &self.ai_active_selection {
+                        Some(current) => {
+                            current.msg_index != msg_idx
+                                || current.seg_index != seg_idx
+                                || current.start != start
+                                || current.end != end
+                                || current.text != selected_text
+                        }
+                        None => true,
+                    };
+                    if changed {
+                        self.ai_active_selection = Some(AiChatSelection {
+                            msg_index: msg_idx,
+                            seg_index: seg_idx,
+                            start,
+                            end,
+                            text: selected_text,
+                        });
+                        cx.notify();
+                    }
+                } else if self.ai_active_selection.is_some() {
+                    self.ai_active_selection = None;
+                    cx.notify();
+                }
+            }
+            velowork_markdown::MarkdownSelectionEvent::End => {
+                self.ai_selection_dragging = None;
             }
         }
     }
 
-    fn clear_selections_except(&self, msg_idx: usize, cx: &mut App) {
-        for (i, msg) in self.messages.iter().enumerate() {
-            if i != msg_idx {
-                let views = msg.document_views.borrow();
-                for v in views.iter() {
-                    v.update(cx, |view, cx| {
-                        view.clear_selection(cx);
-                    });
-                }
-            }
+    pub fn clear_ai_selection(&mut self, cx: &mut Context<Self>) {
+        if self.ai_active_selection.is_some() || self.ai_selection_dragging.is_some() {
+            self.ai_active_selection = None;
+            self.ai_selection_dragging = None;
+            cx.notify();
         }
     }
 
-    fn get_active_selection_text(&self, cx: &App) -> Option<String> {
-        for msg in &self.messages {
-            let views = msg.document_views.borrow();
-            for v in views.iter() {
-                let v_ref = v.read(cx);
-                if let Some(txt) = v_ref.get_selected_markdown() {
-                    if !txt.is_empty() {
-                        return Some(txt);
-                    }
-                }
-            }
-        }
-        None
-    }
 
     /// 打开系统文件选择框，将选中的本地文件 / 图片作为上下文附件加入输入框。
     fn attach_files(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1342,6 +1408,58 @@ impl AiAssistantPanel {
         self.ai_quote = Some(text);
         self.ai_quote_editing = false;
         self.ai_quote_input = None;
+        cx.notify();
+    }
+
+    /// Focus the chat input box.
+    pub fn focus_input(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ref chat_input) = self.chat_input {
+            chat_input.update(cx, |inp, cx| inp.focus(window, cx));
+        }
+    }
+
+    /// Append a completed external conversation turn (from terminal inline AI popover)
+    /// and persist it to the active project session.
+    pub fn append_external_turn(
+        &mut self,
+        _project_id: &str,
+        user_text: &str,
+        quote: Option<&str>,
+        assistant_reply: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.messages.len() == 1 && !self.messages[0].is_user {
+            self.messages.clear();
+        }
+
+        let user_msg = ChatMessage {
+            is_user: true,
+            text: user_text.to_string(),
+            streaming: false,
+            document_views: std::cell::RefCell::new(Vec::new()),
+            tool_call: None,
+            thinking: None,
+            quote: quote.map(|q| q.to_string()),
+            attachments: Vec::new(),
+        };
+
+        let assistant_doc_view =
+            cx.new(|cx| velowork_markdown::widgets::DocumentView::new(assistant_reply, cx));
+        let assistant_msg = ChatMessage {
+            is_user: false,
+            text: assistant_reply.to_string(),
+            streaming: false,
+            document_views: std::cell::RefCell::new(vec![assistant_doc_view]),
+            tool_call: None,
+            thinking: None,
+            quote: None,
+            attachments: Vec::new(),
+        };
+
+        self.messages.push(user_msg);
+        self.messages.push(assistant_msg);
+        self.save_current_sessions_to_disk();
+        self.scroll_to_bottom();
         cx.notify();
     }
 
@@ -3269,7 +3387,17 @@ impl AiAssistantPanel {
             .when(has_rounded_corners, |d| d.rounded_br(radius))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
+                    if let Some(text) = this.get_active_selection_text(cx) {
+                        if !text.is_empty() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            cx.stop_propagation();
+                            return;
+                        }
+                    }
+                }
                 if cmd_or_ctrl && event.keystroke.key.as_str() == "f" {
+
                     this.ai_search_open = true;
                     let input = this.ai_search_input.get_or_insert_with(|| {
                         let input = cx.new(|cx| {
@@ -3399,12 +3527,21 @@ impl AiAssistantPanel {
                             .px(ui_space_md(cx))
                             .py(ui_space_md(cx))
                             .gap(ui_space_sm(cx))
+                            .on_mouse_down(MouseButton::Left, {
+                                let panel_entity = cx.entity().clone();
+                                move |_ev, window, cx| {
+                                    panel_entity.update(cx, |this, cx| {
+                                        window.focus(&this.focus_handle, cx);
+                                    });
+                                }
+                            })
                             .children({
                                 let panel_entity = cx.entity().clone();
-                                // 预提取已复制索引，避免在 render_ai_message 中调用 entity.read()
+                                // 预提取已复制索引与当前选区，避免在 render_ai_message 中调用 entity.read()
                                 // 触发 GPUI 实体借出冲突（entity_map.rs:164）。
                                 let copied_indices: Vec<usize> =
                                     self.ai_copy_done_indices.borrow().clone();
+                                let active_selection = self.ai_active_selection.clone();
                                 let mut msg_elements: Vec<AnyElement> = Vec::new();
                                 let mut flat = 0usize;
                                 let total_msgs = messages.len();
@@ -3484,6 +3621,7 @@ impl AiAssistantPanel {
                                         self.ai_editing_index,
                                         self.ai_edit_input.clone(),
                                         copied,
+                                        &active_selection,
                                         frame,
                                         revealed_lines,
                                         reveal_changed,
@@ -3662,6 +3800,17 @@ impl AiAssistantPanel {
                                 {
                                     this.on_send_button(window, cx);
                                     cx.stop_propagation();
+                                    return;
+                                }
+                                let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
+                                    if let Some(text) = this.get_active_selection_text(cx) {
+                                        if !text.is_empty() {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                            cx.stop_propagation();
+                                            return;
+                                        }
+                                    }
                                 }
                             }))
                             .child(
@@ -4243,12 +4392,13 @@ fn render_ai_message(
     ai_editing_index: Option<usize>,
     ai_edit_input: Option<Entity<InputState>>,
     copied: bool,
+    active_selection: &Option<AiChatSelection>,
     // 当前动画帧，用于加载动画与头像呼吸效果。
     frame: u64,
     // 本条 AI 消息已显示的文本行数（逐行显示动画）。
     revealed_lines: usize,
     // 已显示行数本帧是否增加（决定是否重写 markdown 视图内容）。
-    reveal_changed: bool,
+    _reveal_changed: bool,
 ) -> (AnyElement, usize) {
     let is_user = msg.is_user;
 
@@ -4260,7 +4410,7 @@ fn render_ai_message(
     } else {
         Vec::new()
     };
-    let is_highlighted = matches
+    let _is_highlighted = matches
         .iter()
         .enumerate()
         .any(|(i, _)| current_match == Some(flat_idx + i));
@@ -4330,9 +4480,9 @@ fn render_ai_message(
                 out.push(
                     div()
                         .rounded(px(6.0))
-                        .border_1()
-                        .border_color(with_alpha(t.text_muted, 0.3))
-                        .bg(with_alpha(t.bg_secondary, 0.4))
+                        .border_l_2()
+                        .border_color(rgb(t.accent))
+                        .bg(with_alpha(t.bg_secondary, 0.6))
                         .overflow_hidden()
                         .child(
                             div()
@@ -4341,8 +4491,8 @@ fn render_ai_message(
                                 .items_center()
                                 .justify_between()
                                 .gap(SPACE_SM)
-                                .px(px(10.0))
-                                .py(SPACE_SM)
+                                .px(px(8.0))
+                                .py(SPACE_XS)
                                 .cursor_pointer()
                                 .on_click({
                                     let entity = entity.clone();
@@ -4361,17 +4511,26 @@ fn render_ai_message(
                                     }
                                 })
                                 .child(
-                                    div()
+                                    h_flex()
+                                        .items_center()
+                                        .gap(SPACE_XS)
                                         .flex_1()
                                         .min_w(px(0.0))
-                                        .text_size(ui_text_md(cx))
-                                        .text_color(rgb(t.text_muted))
-                                        .when(!expanded, |d| {
-                                            d.truncate().whitespace_nowrap().child(
-                                                quote_text.lines().collect::<Vec<_>>().join(" "),
-                                            )
-                                        })
-                                        .when(expanded, |d| d.child(quote_text.clone())),
+                                        .child(AppIcon::Terminal.size(px(12.0)).text_color(rgb(t.text_muted)))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w(px(0.0))
+                                                .font_family(mono_font_family(cx))
+                                                .text_size(px(11.0))
+                                                .text_color(rgb(t.text_muted))
+                                                .when(!expanded, |d| {
+                                                    d.truncate().whitespace_nowrap().child(
+                                                        quote_text.lines().collect::<Vec<_>>().join(" "),
+                                                    )
+                                                })
+                                                .when(expanded, |d| d.child(quote_text.clone())),
+                                        ),
                                 )
                                 .child(
                                     div()
@@ -4528,22 +4687,32 @@ fn render_ai_message(
                                     .take(reveal_in_seg)
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                let views = msg.document_views.borrow();
-                                if let Some(doc_view) = views.get(text_seg_idx) {
-                                    // 非流式历史消息或揭示行数变化时更新 markdown 内容
-                                    if !msg.streaming || reveal_changed {
-                                        doc_view.update(cx, |v, cx| {
-                                            v.set_content(&revealed_text, cx);
-                                        });
-                                    }
-                                    children.push(doc_view.clone().into_any_element());
-                                } else {
-                                    let fallback_el = div()
-                                        .text_size(ui_text_md(cx))
-                                        .text_color(rgb(t.text_primary))
-                                        .child(revealed_text.clone());
-                                    children.push(fallback_el.into_any_element());
-                                }
+                                let active_sel = active_selection
+                                    .as_ref()
+                                    .filter(|s| s.msg_index == msg_index && s.seg_index == text_seg_idx);
+                                let sel_range = active_sel.map(|s| (s.start, s.end));
+                                let panel_for_sel = panel_entity.clone();
+                                let md_el = velowork_markdown::MarkdownElement::new(
+                                    ElementId::from(format!("ai-md-{}-{}", msg_index, text_seg_idx)),
+                                    &revealed_text,
+                                )
+                                .selection(sel_range)
+                                .on_selection_event(move |ev, window, cx| {
+                                    panel_for_sel.update(cx, |this, cx| {
+                                        if let velowork_markdown::MarkdownSelectionEvent::Start { .. } = &ev {
+                                            window.focus(&this.focus_handle, cx);
+                                            if let Some(ref chat_input) = this.chat_input {
+                                                chat_input.update(cx, |inp, cx| inp.clear_selection(cx));
+                                            }
+                                        }
+                                        this.handle_ai_selection_event(msg_index, text_seg_idx, ev, cx);
+                                    });
+                                })
+                                .on_url_click(move |url, _window, cx| {
+                                    cx.open_url(url);
+                                });
+                                children.push(md_el.into_any_element());
+
                             }
                             text_line_offset += seg_lines;
                             text_seg_idx += 1;
@@ -4679,22 +4848,19 @@ fn render_ai_message(
 
         let bubble = div()
             .relative()
-            .max_w(relative(1.0))
-            .min_w(px(20.0))
-            .px(SPACE_LG)
-            .py(SPACE_MD)
-            .rounded(RADIUS_LG)
-            .bg(with_alpha(t.bg_secondary, 0.4))
-            .border_1()
-            .border_color(rgb(t.border))
-            .when(is_highlighted, |s| s.border_color(rgb(t.border_active)))
+            .w_full()
+            .py(SPACE_XS)
             .child(v_flex().gap(SPACE_XS).children(children))
             .on_mouse_down(
                 MouseButton::Right,
                 move |event: &MouseDownEvent, window, cx| {
                     let panel = panel_entity_clone.clone();
-                    let selection = panel.read(cx).get_active_selection_text(cx);
+                    let selection = panel
+                        .read(cx)
+                        .get_selection_for_message(msg_index)
+                        .or_else(|| panel.read(cx).get_active_selection_text(cx));
                     let registry = panel.read(cx).overlay_manager.read(cx).overlay_registry();
+
                     let menu = open_ai_context_menu(
                         panel,
                         event.position,
@@ -4806,11 +4972,16 @@ fn render_ai_message(
                     div()
                         .self_end()
                         .w_full()
-                        .max_w(relative(0.8))
-                        .mr(SPACE_MD)
+                        .max_w(relative(0.92))
+                        .mr(SPACE_SM)
+                        .p(SPACE_MD)
+                        .rounded(RADIUS_LG)
+                        .bg(surface_bg(t.bg_hover, cx))
+                        .border_1()
+                        .border_color(rgb(t.border))
                         .flex()
                         .flex_col()
-                        .gap(px(10.0))
+                        .gap(SPACE_SM)
                         .children(out),
                 )
                 .child(
@@ -4860,7 +5031,7 @@ fn render_ai_message(
                 )
                 .child(
                     div()
-                        .max_w(relative(0.8))
+                        .w_full()
                         .flex()
                         .flex_col()
                         .gap(px(10.0))
@@ -5029,7 +5200,7 @@ fn text_bubble(
     current_match: Option<usize>,
     panel_entity: &Entity<AiAssistantPanel>,
 ) -> (AnyElement, usize) {
-    let bg_color = surface_bg(t.bg_hover, cx);
+    let _bg_color = surface_bg(t.bg_hover, cx);
     let text_color = if is_user {
         rgb(0xffffff)
     } else {
@@ -5042,7 +5213,7 @@ fn text_bubble(
         Vec::new()
     };
 
-    let is_highlighted = matches
+    let _is_highlighted = matches
         .iter()
         .enumerate()
         .any(|(i, _)| current_match == Some(flat_idx + i));
@@ -5070,15 +5241,7 @@ fn text_bubble(
     let text_clone = text.to_string();
     let bubble = div()
         .relative()
-        .max_w(relative(1.0))
-        .min_w(px(20.0))
-        .px(SPACE_LG)
-        .py(SPACE_MD)
-        .rounded(RADIUS_LG)
-        .bg(bg_color)
-        .border_1()
-        .border_color(rgb(t.border))
-        .when(is_highlighted, |s| s.border_color(rgb(t.border_active)))
+        .w_full()
         .when(use_custom_markdown_font(cx), |s| {
             s.font_family(markdown_font_family(cx))
         })

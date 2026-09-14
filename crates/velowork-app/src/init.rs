@@ -198,6 +198,8 @@ pub fn init_extensions(cx: &mut App) {
                         bracketed_paste: s.settings.bracketed_paste,
                         osc52_clipboard: s.settings.osc52_clipboard,
                         true_color: s.settings.true_color,
+                        ai_enabled: s.settings.ai_enabled,
+                        terminal_ai_floating_toolbar_enabled: s.settings.terminal_ai_floating_toolbar_enabled,
                     })
                     .ok()
                 }
@@ -253,6 +255,7 @@ pub fn init_extensions(cx: &mut App) {
                             state.settings.command_history_auto_completion = tvs.command_history_auto_completion;
                             state.settings.command_history_ignored_commands = tvs.command_history_ignored_commands;
                             state.settings.command_history_ignore_space = tvs.command_history_ignore_space;
+                            state.settings.terminal_ai_floating_toolbar_enabled = tvs.terminal_ai_floating_toolbar_enabled;
                             state.save_and_notify(cx);
                         });
                 }

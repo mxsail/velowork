@@ -12,7 +12,7 @@ use super::{
     ShowHelp, ShowHistoryPanel, ShowImportSessionDialog, ShowKeybindings, ShowLogConsole,
     ShowProfileManager, ShowProjectManageDialog, ShowQuickCommandsPanel, ShowServicesPanel,
     ShowSettings, ShowThemeSelector, ShowTunnelsPanel, ShowUpdateDialog, SplitHorizontal,
-    SplitVertical, ToggleCommandsPanel, ToggleFullscreen, ToggleLeftDock, ToggleLeftDockAutoHide,
+    SplitVertical, TerminalInlineAi, ToggleCommandsPanel, ToggleFullscreen, ToggleLeftDock, ToggleLeftDockAutoHide,
     TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel, ZoomIn, ZoomOut,
 };
 
@@ -186,6 +186,17 @@ pub fn get_action_descriptions() -> HashMap<&'static str, ActionDescription> {
             scope: ActionScope::Global,
             show_in_palette: true,
             factory: || Box::new(ShowAiAssistant),
+        },
+    );
+    map.insert(
+        "TerminalInlineAi",
+        ActionDescription {
+            name: "Terminal Inline AI",
+            description: "Open inline AI assistant popover in the focused terminal",
+            category: "Terminal",
+            scope: ActionScope::Terminal,
+            show_in_palette: true,
+            factory: || Box::new(TerminalInlineAi),
         },
     );
 

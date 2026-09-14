@@ -250,6 +250,19 @@ impl SettingsPanel {
                                 )
                             )
                     })
+                    // Terminal Interaction section
+                    .child(section_header(&i18n!(cx, "settings.ai_assistant.terminal_interaction"), &t, cx))
+                    .child({
+                        section_container(&t).child(self.render_toggle_with_desc(
+                            "terminal-ai-floating-toolbar",
+                            &i18n!(cx, "settings.ai_assistant.floating_toolbar"),
+                            &i18n!(cx, "settings.ai_assistant.floating_toolbar_desc"),
+                            s.terminal_ai_floating_toolbar_enabled,
+                            false,
+                            |state, val, cx| state.set_terminal_ai_floating_toolbar_enabled(val, cx),
+                            cx,
+                        ))
+                    })
             })
     }
 

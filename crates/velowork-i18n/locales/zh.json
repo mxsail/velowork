@@ -2,6 +2,10 @@
   "app": {
     "name": "Velowork"
   },
+  "button": {
+    "close": "关闭",
+    "refresh": "刷新"
+  },
   "profile_manager": {
     "title": "配置文件",
     "subtitle": "切换、创建或删除配置文件",
@@ -224,7 +228,7 @@
     "terminal_background_image": "终端背景图片",
     "terminal_background_image_placeholder": "本地图片路径，如 /home/user/bg.png",
     "terminal_background_image_picker": "选择图片",
-    "terminal_background_image_processing": "正在优化并生成背景图片缓存...",
+    "terminal_background_image_processing": "正在优化并生成背景图片缓存…",
     "terminal_background_image_ready": "背景图片已就绪",
     "terminal_bg_image_err_not_found": "图片文件不存在，请检查路径是否正确",
     "terminal_bg_image_err_is_directory": "所选路径为目录，请输入具体图片文件",
@@ -474,7 +478,10 @@
       "max_context_tokens": "上下文 Token 上限",
       "max_context_tokens_desc": "触发历史压缩的 Token 上限阈值（如 8192）",
       "max_history_messages": "记忆保留数量",
-      "max_history_messages_desc": "滑动窗口或摘要时保留的最新消息条数"
+      "max_history_messages_desc": "滑动窗口或摘要时保留的最新消息条数",
+      "floating_toolbar": "选区 AI 悬浮微工具条",
+      "floating_toolbar_desc": "在终端中划选文字后自动浮现 AI 快捷胶囊工具条",
+      "terminal_interaction": "终端智能交互"
     },
     "search_engines": {
       "desc": "配置终端右键「在线搜索」可用的搜索引擎，支持配置多个。",
@@ -860,7 +867,28 @@
     "clear_screen": "清屏",
     "clear_all": "全部清除",
     "edit_config": "会话设置",
-    "search_online": "在线搜索"
+    "search_online": "在线搜索",
+    "ai_toolbar_explain": "AI 解释",
+    "ai_toolbar_explain_tip": "解读选中内容或排查报错",
+    "ai_toolbar_gen_command": "生成命令",
+    "ai_toolbar_gen_command_tip": "根据选中内容生成终端命令",
+    "ai_toolbar_send_to_side_panel": "发往侧栏",
+    "ai_toolbar_send_to_side_panel_tip": "转入右侧 AI 面板进行深度探讨",
+    "ai_toolbar_ask_placeholder": "向 AI 提问…",
+    "inline_ai_title": "终端就地助手",
+    "inline_ai_insert_terminal": "填入终端",
+    "inline_ai_insert_terminal_tip": "将命令填入当前终端提示符后，不直接执行",
+    "inline_ai_run_terminal": "直接执行",
+    "inline_ai_run_terminal_tip": "立即向终端发送命令并执行",
+    "inline_ai_copy_command": "复制命令",
+    "inline_ai_continue_in_side_panel": "转至侧栏深度探讨",
+    "inline_ai_no_model_configured": "尚未配置可用的 AI 模型",
+    "inline_ai_open_settings": "前往配置",
+    "inline_ai_follow_up_placeholder": "继续追问 (Enter 发送, Shift+Enter 换行)…",
+    "inline_ai_thinking": "思考过程",
+    "inline_ai_send": "发送",
+    "inline_ai_stop": "停止生成",
+    "inline_ai_close": "关闭"
   },
   "session": {
     "delete_title": "删除会话",

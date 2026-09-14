@@ -2,10 +2,12 @@
 
 use gpui::*;
 use gpui::prelude::*;
+use velowork_i18n::i18n;
+use velowork_ui::icon::AppIcon;
 use velowork_ui::simple_input::{SimpleInput, SimpleInputState};
 use velowork_ui::theme::theme;
 use velowork_ui::tokens::{markdown_font_family, mono_font_family, ui_text_md, ui_text_xl, use_custom_markdown_font};
-use velowork_ui::{h_flex, v_flex};
+use velowork_ui::{h_flex, v_flex, SemanticPalette};
 
 use crate::clipboard::export_selection_to_markdown;
 use crate::document::{Document, DocumentBlock};
@@ -14,10 +16,12 @@ use crate::selection::DocumentSelection;
 
 /// GPUI View wrapping the parsed document tree.
 pub struct DocumentView {
+    raw_content: String,
     document: Document,
     block_states: Vec<Entity<SimpleInputState>>,
     selection: DocumentSelection,
     active_drag_start: Option<DocumentPosition>,
+    copied_code_index: Option<usize>,
 }
 
 /// Selection event emitted by the DocumentView.
@@ -29,47 +33,80 @@ pub enum DocumentViewEvent {
 impl EventEmitter<DocumentViewEvent> for DocumentView {}
 
 impl DocumentView {
+    fn create_block_state(block: &DocumentBlock, cx: &mut Context<Self>) -> Entity<SimpleInputState> {
+        let (wrap, syntax_language) = match block {
+            DocumentBlock::CodeBlock { language, .. } => (false, language.as_deref()),
+            DocumentBlock::Table { .. } => (false, None),
+            _ => (true, None),
+        };
+        let text_value = match block {
+            DocumentBlock::CodeBlock { code, .. } => code.trim_end_matches(['\r', '\n']),
+            _ => block.plain_text(),
+        };
+        cx.new(|cx| {
+            SimpleInputState::new(cx)
+                .multiline()
+                .auto_height(true)
+                .wrap(wrap)
+                .read_only(true)
+                .content_padding(px(0.0))
+                .syntax_language(syntax_language)
+                .default_value(text_value)
+        })
+    }
+
     /// Create a new DocumentView.
     pub fn new(content: &str, cx: &mut Context<Self>) -> Self {
         let doc = Document::parse(content);
         let mut block_states = Vec::new();
         for block in &doc.blocks {
-            let state = cx.new(|cx| {
-                SimpleInputState::new(cx)
-                    .multiline()
-                    .wrap(true)
-                    .read_only(true)
-                    .default_value(block.plain_text())
-            });
-            block_states.push(state);
+            block_states.push(Self::create_block_state(block, cx));
         }
 
         Self {
+            raw_content: content.to_string(),
             document: doc,
             block_states,
             selection: DocumentSelection::default(),
             active_drag_start: None,
+            copied_code_index: None,
         }
+    }
+
+    /// Returns the raw markdown string that this document view is representing.
+    pub fn raw_content(&self) -> &str {
+        &self.raw_content
     }
 
     /// Update the text content of the document.
     pub fn set_content(&mut self, content: &str, cx: &mut Context<Self>) {
+        if self.raw_content == content {
+            return;
+        }
+        self.raw_content = content.to_string();
         let doc = Document::parse(content);
 
         while self.block_states.len() < doc.blocks.len() {
-            let state = cx.new(|cx| {
-                SimpleInputState::new(cx)
-                    .multiline()
-                    .wrap(true)
-                    .read_only(true)
-            });
-            self.block_states.push(state);
+            let i = self.block_states.len();
+            self.block_states.push(Self::create_block_state(&doc.blocks[i], cx));
         }
         self.block_states.truncate(doc.blocks.len());
 
         for (i, block) in doc.blocks.iter().enumerate() {
-            let val = block.plain_text().to_string();
+            let val = match block {
+                DocumentBlock::CodeBlock { code, .. } => code.trim_end_matches(['\r', '\n']).to_string(),
+                _ => block.plain_text().to_string(),
+            };
+            let (wrap, syntax_language) = match block {
+                DocumentBlock::CodeBlock { language, .. } => (false, language.as_deref()),
+                DocumentBlock::Table { .. } => (false, None),
+                _ => (true, None),
+            };
             self.block_states[i].update(cx, |s, cx| {
+                s.set_wrap(wrap);
+                s.set_syntax_language(syntax_language, cx);
+                s.set_auto_height(true);
+                s.set_content_padding(px(0.0));
                 s.set_value(val, cx);
             });
         }
@@ -223,52 +260,119 @@ impl Render for DocumentView {
             let block_element = match block {
                 DocumentBlock::Paragraph { .. } => {
                     SimpleInput::new(state)
+                        .borderless(true)
                         .text_size(ui_text_md(cx))
-                        .line_height(ui_text_md(cx) * 1.618)
+                        .line_height(ui_text_md(cx) * 1.5)
                         .into_any_element()
                 }
                 DocumentBlock::Heading { level, .. } => {
                     let size = match level {
                         1 => ui_text_xl(cx),
-                        2 => ui_text_md(cx),
+                        2 => ui_text_md(cx) * 1.15,
                         _ => ui_text_md(cx),
                     };
                     SimpleInput::new(state)
+                        .borderless(true)
                         .text_size(size)
-                        .line_height(size * 1.3)
                         .into_any_element()
                 }
-                DocumentBlock::CodeBlock { language, .. } => {
-                    let lang = language.as_deref().unwrap_or("text");
-                    v_flex()
+                DocumentBlock::CodeBlock { language, code, depth } => {
+                    let lang = language.as_deref().unwrap_or("");
+                    let is_copied = self.copied_code_index == Some(i);
+                    let copy_label = if is_copied {
+                        i18n!(cx, "ai_assistant.copied")
+                    } else {
+                        i18n!(cx, "common.copy")
+                    };
+                    let copy_icon = if is_copied {
+                        AppIcon::Check
+                    } else {
+                        AppIcon::Copy
+                    };
+                    let code_str = code.trim_end_matches(['\r', '\n']).to_string();
+                    let block_idx = i;
+                    let indent = depth * 16;
+                    let p = SemanticPalette::from_theme(&t);
+
+                    div()
                         .w_full()
-                        .rounded(px(6.0))
-                        .bg(rgb(t.bg_panel))
-                        .border_1()
-                        .border_color(rgb(t.border))
-                        .overflow_hidden()
-                        .child(
-                            h_flex()
-                                .justify_between()
-                                .bg(rgb(t.bg_hover))
-                                .px(px(8.0))
-                                .py(px(4.0))
-                                .border_b_1()
-                                .border_color(rgb(t.border))
-                                .child(
-                                    div()
-                                        .text_size(ui_text_md(cx))
-                                        .text_color(rgb(t.text_muted))
-                                        .child(lang.to_string())
-                                )
-                        )
+                        .when(indent > 0, |d| d.pl(px(indent as f32)))
                         .child(
                             div()
-                                .p(px(8.0))
-                                .font_family(mono_font_family(cx))
+                                .relative()
+                                .w_full()
+                                .rounded(px(6.0))
+                                .bg(rgb(t.bg_panel))
+                                .border_1()
+                                .border_color(rgb(t.border))
+                                .overflow_hidden()
                                 .child(
-                                    SimpleInput::new(state)
-                                        .text_size(ui_text_md(cx))
+                                    div()
+                                        .p(px(8.0))
+                                        .pr(px(68.0))
+                                        .font_family(mono_font_family(cx))
+                                        .child(
+                                            SimpleInput::new(state)
+                                                .borderless(true)
+                                                .text_size(ui_text_md(cx))
+                                                .line_height(ui_text_md(cx) * 1.4)
+                                        )
+                                )
+                                .child(
+                                    h_flex()
+                                        .absolute()
+                                        .top(px(6.0))
+                                        .right(px(6.0))
+                                        .items_center()
+                                        .gap(px(6.0))
+                                        .when(!lang.is_empty() && lang != "text", |d| {
+                                            d.child(
+                                                div()
+                                                    .text_size(px(10.5))
+                                                    .text_color(rgb(t.text_muted))
+                                                    .child(lang.to_string())
+                                            )
+                                        })
+                                        .child(
+                                            div()
+                                                .id(SharedString::from(format!("code-copy-{}", i)))
+                                                .cursor_pointer()
+                                                .flex()
+                                                .items_center()
+                                                .gap(px(4.0))
+                                                .px(px(6.0))
+                                                .py(px(2.0))
+                                                .rounded(px(4.0))
+                                                .bg(p.surface_card.opacity(0.85))
+                                                .border_1()
+                                                .border_color(rgb(t.border))
+                                                .hover(|s| s.bg(rgb(t.bg_primary)))
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    cx.write_to_clipboard(ClipboardItem::new_string(code_str.clone()));
+                                                    this.copied_code_index = Some(block_idx);
+                                                    cx.notify();
+                                                    cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                                                        smol::Timer::after(std::time::Duration::from_secs(2)).await;
+                                                        let _ = this.update(cx, |this, cx| {
+                                                            if this.copied_code_index == Some(block_idx) {
+                                                                this.copied_code_index = None;
+                                                                cx.notify();
+                                                            }
+                                                        });
+                                                    }).detach();
+                                                }))
+                                                .child(
+                                                    copy_icon
+                                                        .size(px(11.0))
+                                                        .text_color(if is_copied { rgb(t.accent) } else { rgb(t.text_muted) })
+                                                )
+                                                .child(
+                                                    div()
+                                                        .text_size(px(10.5))
+                                                        .text_color(if is_copied { rgb(t.accent) } else { rgb(t.text_muted) })
+                                                        .child(copy_label)
+                                                )
+                                        )
                                 )
                         )
                         .into_any_element()
@@ -288,33 +392,46 @@ impl Render for DocumentView {
                                 .flex_1()
                                 .child(
                                     SimpleInput::new(state)
+                                        .borderless(true)
                                         .text_size(ui_text_md(cx))
-                                        .line_height(ui_text_md(cx) * 1.4)
+                                        .line_height(ui_text_md(cx) * 1.5)
                                 )
                         )
                         .into_any_element()
                 }
-                DocumentBlock::ListItem { ordered, depth, .. } => {
-                    let bullet = if *ordered { "1. " } else { "• " };
-                    let indent = depth * 12;
+                DocumentBlock::ListItem { ordered, depth, index, .. } => {
+                    let marker_str = if let Some(idx) = index {
+                        format!("{}.", idx)
+                    } else if *ordered {
+                        "1.".to_string()
+                    } else {
+                        "•".to_string()
+                    };
+                    let indent = depth * 16;
+                    let marker_w = if *ordered || index.is_some() { px(20.0) } else { px(12.0) };
+                    let lh = ui_text_md(cx) * 1.5;
                     h_flex()
                         .w_full()
+                        .items_start()
                         .pl(px(indent as f32))
                         .child(
                             div()
-                                .w(px(16.0))
+                                .min_w(marker_w)
+                                .mr(px(4.0))
                                 .text_align(TextAlign::Right)
                                 .text_size(ui_text_md(cx))
+                                .line_height(lh)
                                 .text_color(rgb(t.text_muted))
-                                .child(bullet.to_string())
+                                .child(marker_str)
                         )
                         .child(
                             div()
                                 .flex_1()
                                 .child(
                                     SimpleInput::new(state)
+                                        .borderless(true)
                                         .text_size(ui_text_md(cx))
-                                        .line_height(ui_text_md(cx) * 1.2)
+                                        .line_height(lh)
                                 )
                         )
                         .into_any_element()
@@ -336,6 +453,7 @@ impl Render for DocumentView {
                         .rounded(px(4.0))
                         .child(
                             SimpleInput::new(state)
+                                .borderless(true)
                                 .text_size(ui_text_md(cx))
                         )
                         .into_any_element()
@@ -351,6 +469,7 @@ impl Render for DocumentView {
                         .font_family(mono_font_family(cx))
                         .child(
                             SimpleInput::new(state)
+                                .borderless(true)
                                 .text_size(ui_text_md(cx))
                         )
                         .into_any_element()

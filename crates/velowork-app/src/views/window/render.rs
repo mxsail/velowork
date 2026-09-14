@@ -5,7 +5,7 @@ use crate::keybindings::{
     ShowAiSettings, ShowCommandPalette, ShowHelp, ShowHistoryPanel, ShowImportSessionDialog,
     ShowKeybindings, ShowLogConsole, ShowProfileManager, ShowProjectManageDialog,
     ShowQuickCommandsPanel, ShowServicesPanel, ShowSettings, ShowThemeSelector, ShowTunnelsPanel,
-    ShowUpdateDialog, ToggleCommandsPanel, ToggleLeftDock, ToggleLeftDockAutoHide,
+    ShowUpdateDialog, TerminalInlineAi, ToggleCommandsPanel, ToggleLeftDock, ToggleLeftDockAutoHide,
     TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel,
 };
 use crate::settings::{open_settings_file, settings_entity};
@@ -811,6 +811,29 @@ impl Render for WindowView {
             }
         }
 
+        if self.pending_ai_open {
+            self.pending_ai_open = false;
+            if self.right_dock.is_none() {
+                self.handle_right_toolbar_click("ai_assistant", window, cx);
+            }
+            if let Some(dock) = self.right_dock.clone() {
+                dock.update(cx, |dp, cx| {
+                    dp.activate_or_add_panel("ai_assistant", window, cx);
+                });
+                if let Some(active) = dock.read(cx).active_tab() {
+                    if let Ok(ai) = active
+                        .view
+                        .clone()
+                        .downcast::<crate::views::panels::ai_assistant_panel::AiAssistantPanel>(
+                    ) {
+                        ai.update(cx, |ai, cx| {
+                            ai.focus_input(window, cx);
+                        });
+                    }
+                }
+            }
+        }
+
         let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
@@ -830,6 +853,7 @@ impl Render for WindowView {
         let has_tunnel_context_menu = om.has_tunnel_context_menu();
         let has_service_context_menu = om.has_service_context_menu();
         let has_transfer_popup = om.has_transfer_popup();
+        let has_terminal_ai_inline = om.has_terminal_ai_inline();
 
         // Get active drag for global mouse handling
         let active_drag = self.active_drag.clone();
@@ -1162,6 +1186,9 @@ impl Render for WindowView {
             .on_action(cx.listener(|this, _: &ShowAiAssistant, window, cx| {
                 this.handle_right_toolbar_click("ai_assistant", window, cx);
             }))
+            .on_action(cx.listener(|this, _: &TerminalInlineAi, window, cx| {
+                this.handle_terminal_inline_ai(window, cx);
+            }))
             // Handle toggle left dock auto-hide action
             .on_action(cx.listener(|this, _: &ToggleLeftDockAutoHide, _window, cx| {
                 this.toggle_sidebar_auto_hide(cx);
@@ -1284,10 +1311,15 @@ impl Render for WindowView {
                     overlay_manager.update(cx, |om, cx| om.toggle_about_dialog_with_window(Some(window), cx));
                 }
             }))
-            // Handle global Cancel (escape) when a modal overlay is open
+            // Handle global Cancel (escape) when a modal overlay or terminal inline AI is open
             .on_action(cx.listener({
                 let overlay_manager = overlay_manager.clone();
                 move |_this, _: &Cancel, _window, cx| {
+                    if overlay_manager.read(cx).has_terminal_ai_inline() {
+                        cx.stop_propagation();
+                        overlay_manager.update(cx, |om, cx| om.dismiss_terminal_ai_inline(cx));
+                        return;
+                    }
                     if overlay_manager.read(cx).has_modal() {
                         cx.stop_propagation();
                         overlay_manager.update(cx, |om, cx| om.close_modal(cx));
@@ -1853,6 +1885,10 @@ impl Render for WindowView {
             // Terminal context menu overlay (positioned popup)
             .when(has_terminal_context_menu, |d| {
                 d.children(self.overlay_manager.read(cx).render_terminal_context_menu())
+            })
+            // Terminal AI inline toolbar / popover overlay
+            .when(has_terminal_ai_inline, |d| {
+                d.children(self.overlay_manager.read(cx).render_terminal_ai_inline())
             })
             // Tab context menu overlay (positioned popup)
             .when(has_tab_context_menu, |d| {

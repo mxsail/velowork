@@ -35,6 +35,7 @@ gpui::actions!(
         JumpToNextPrompt,
         NewSession,
         ShowAiAssistant,
+        TerminalInlineAi,
         ShowQuickCommandsPanel,
         ShowImportSessionDialog,
         DuplicateSession,

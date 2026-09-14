@@ -23,6 +23,8 @@ pub mod behavior;
 pub mod badge;
 pub mod brand_logo;
 pub mod button;
+pub mod capsule_toolbar;
+pub use capsule_toolbar::*;
 pub mod checkbox;
 pub mod chip;
 pub mod click_detector;

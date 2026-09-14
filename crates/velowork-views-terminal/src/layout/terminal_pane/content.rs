@@ -28,6 +28,11 @@ pub enum TerminalContentEvent {
         has_selection: bool,
         link_url: Option<String>,
     },
+    ShowAiFloatingToolbar {
+        position: Point<Pixels>,
+        selection_text: String,
+    },
+    DismissAiFloatingToolbar,
 }
 
 /// Terminal content view handling display and mouse interactions.
@@ -677,6 +682,7 @@ impl TerminalContent {
 
                 if empty_selection {
                     terminal.clear_selection();
+                    cx.emit(TerminalContentEvent::DismissAiFloatingToolbar);
 
                     // Click-to-cursor: on a clean single click (no drag), move cursor
                     if self.click_count == 1
@@ -698,7 +704,17 @@ impl TerminalContent {
 
                     let tvs = crate::terminal_view_settings(cx);
                     if tvs.terminal_copy_on_select {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
+                        cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                    }
+
+                    if tvs.ai_enabled && tvs.terminal_ai_floating_toolbar_enabled {
+                        let trimmed = text.trim();
+                        if trimmed.chars().count() >= 2 {
+                            cx.emit(TerminalContentEvent::ShowAiFloatingToolbar {
+                                position: event.position,
+                                selection_text: text,
+                            });
+                        }
                     }
                 }
 
@@ -854,6 +870,7 @@ impl Render for TerminalContent {
                 }),
             )
             .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+                cx.emit(TerminalContentEvent::DismissAiFloatingToolbar);
                 let delta = event.delta.pixel_delta(px(17.0));
                 let tvs = crate::terminal_view_settings(cx);
                 if tvs.wrap_mode == velowork_workspace::settings::WrapMode::NoWrap

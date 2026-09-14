@@ -8858,7 +8858,9 @@ dependencies = [
  "gpui",
  "pulldown-cmark",
  "serde_yaml_ng",
+ "smol",
  "velowork-core",
+ "velowork-i18n",
  "velowork-ui",
 ]
 
