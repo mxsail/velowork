@@ -58,6 +58,7 @@ pub mod overlay_menu;
 pub mod overlay_registry;
 pub mod path_autocomplete;
 pub mod popover;
+pub mod progress_ring;
 pub mod quick_picker;
 pub mod radio;
 pub mod rename_directory_dialog;
@@ -106,6 +107,7 @@ pub use input::{
 };
 pub use switch::Switch;
 pub use overlay::{AnimatedModal, AnimatedModalEvent, ModalAlignment, ModalAnimationsEnabled, WindowCornerRadius};
+pub use progress_ring::{ProgressRing, format_token_count};
 pub use radio::{RadioGroup, RadioMode, RadioOption};
 pub use search_field::SearchField;
 pub use select::{Select, SelectEvent, SelectGroup, SelectOption, SelectState};

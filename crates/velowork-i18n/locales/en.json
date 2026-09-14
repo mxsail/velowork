@@ -2404,6 +2404,7 @@
     "pending_remove": "Remove from queue",
     "pending_send_now": "Send now",
     "clear_tooltip": "Clear chat history",
-    "token_usage_hint": "Estimated token usage for the current session. Context is automatically compressed when approaching the limit."
+    "token_usage_hint": "Estimated token usage for the current session. Context is automatically compressed when approaching the limit.",
+    "context_used": "context used"
   }
 }

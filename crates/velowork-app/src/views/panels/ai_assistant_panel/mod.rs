@@ -35,7 +35,7 @@ use velowork_ui::tokens::{
     ui_text_xs, use_custom_markdown_font, use_custom_ui_font,
 };
 use velowork_ui::tooltip::Tooltip;
-use velowork_ui::{Button, button_primary, h_flex, v_flex};
+use velowork_ui::{Button, ProgressRing, button_primary, format_token_count, h_flex, v_flex};
 use velowork_workspace::focus::FocusManager;
 use velowork_workspace::settings::AiModelConfig;
 use velowork_workspace::state::Workspace;
@@ -3825,20 +3825,30 @@ impl AiAssistantPanel {
                     .child(div().flex_1())
                     .child({
                         let used_tokens = self.current_session_tokens();
-                        let max_tokens = settings_entity(cx).read(cx).settings.ai_max_context_tokens;
-                        let token_text = format!("{} / {} T", used_tokens, max_tokens);
-                        let tooltip_text = i18n!(cx, "ai_assistant.token_usage_hint");
+                        let max_tokens = settings_entity(cx).read(cx).settings.ai_max_context_tokens.max(1);
+                        let ratio = (used_tokens as f32 / max_tokens as f32).clamp(0.0, 1.0);
+                        let pct = format!("{:.1}%", (used_tokens as f64 / max_tokens as f64) * 100.0);
+                        let used_str = format_token_count(used_tokens);
+                        let max_str = format_token_count(max_tokens);
+                        let tooltip_text = format!(
+                            "{} {}/{} {}",
+                            pct,
+                            used_str,
+                            max_str,
+                            i18n!(cx, "ai_assistant.context_used")
+                        );
                         div()
-                            .id("ai-token-usage-badge")
-                            .px(SPACE_XS)
-                            .py(px(2.0))
+                            .id("ai-token-usage-ring")
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .rounded(RADIUS_STD)
-                            .bg(surface_bg(t.bg_hover, cx))
+                            .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                             .child(
-                                div()
-                                    .text_size(ui_text_xs(cx))
-                                    .text_color(rgb(t.text_muted))
-                                    .child(token_text),
+                                ProgressRing::new(ratio)
+                                    .size(px(16.0))
+                                    .stroke_width(px(2.0)),
                             )
                             .tooltip(move |_, cx| cx.new(|_| Tooltip::new(tooltip_text.clone())).into())
                     }),
@@ -6176,4 +6186,5 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
         }),
     });
 }
+
 
