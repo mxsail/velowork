@@ -333,7 +333,7 @@ fn load_project_session_paged(
     })?;
 
     let (msgs_rows, oldest_rowid, has_more) = repo.list_messages_paged(&conv.id, before_rowid, limit).ok()?;
-    log::info!(
+    log::debug!(
         "[AI DB Paged] Conversation {} for project {}, loaded: {}, has_more: {}, oldest_rowid: {:?}",
         conv.id, pid, msgs_rows.len(), has_more, oldest_rowid
     );
