@@ -23,20 +23,25 @@ use velowork_ui::dropdown::{
 use velowork_ui::icon::AppIcon;
 use velowork_ui::menu::PopupMenu;
 use crate::views::overlays::menus::ai_context_menu::open_ai_context_menu;
+use velowork_ui::confirm_dialog::{ConfirmDialog, ConfirmDialogEvent};
+use velowork_ui::design::appearance::{ControlSize, ControlVariant};
 use velowork_ui::input::{Input, InputState};
+use velowork_ui::overlay_registry::{ClosePolicy, OverlayInfo};
 use velowork_ui::scrollable::{Scrollbar, ScrollbarAxis, ScrollbarShow};
 use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState};
+use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
 use velowork_ui::theme::{ThemeColors, surface_bg, theme, with_alpha};
 use velowork_ui::tokens::{
-    ui_space_lg, ui_space_md, ui_space_sm, ui_space_xs,
-    ICON_MD, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM,
-    SPACE_XL,
-    SPACE_XS, markdown_font_family, mono_font_family, ui_font_family, ui_text_md, ui_text_sm,
+    elevation_menu_shadow, ui_space_lg, ui_space_md, ui_space_sm, ui_space_xs,
+    ICON_MD, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_SM, RADIUS_STD, RADIUS_XS,
+    SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
+    markdown_font_family, mono_font_family, ui_font_family, ui_text_md, ui_text_sm,
     ui_text_xs, use_custom_markdown_font, use_custom_ui_font,
 };
 use velowork_ui::tooltip::Tooltip;
 use velowork_ui::{Button, ProgressRing, button_primary, format_token_count, h_flex, v_flex};
 use velowork_workspace::focus::FocusManager;
+use velowork_workspace::repositories::AiConversationRow;
 use velowork_workspace::settings::AiModelConfig;
 use velowork_workspace::state::Workspace;
 
@@ -208,6 +213,7 @@ impl ProjectChatSession {
 
     pub fn from_saved(saved: SavedProjectChatSession) -> Self {
         ProjectChatSession {
+            active_conversation_id: None,
             messages: saved.messages.into_iter().map(ChatMessage::from_saved).collect(),
             ai_history: saved.ai_history,
             selected_model_id: saved.selected_model_id,
@@ -313,8 +319,30 @@ fn parse_message_row(m_row: velowork_workspace::repositories::AiMessageRow, repo
     }
 }
 
+fn format_relative_time(iso_str: &str, cx: &App) -> String {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(iso_str) {
+        let now = chrono::Utc::now();
+        let duration = now.signed_duration_since(dt.with_timezone(&chrono::Utc));
+        let secs = duration.num_seconds();
+        if secs < 60 {
+            i18n!(cx, "common.just_now")
+        } else if secs < 3600 {
+            format!("{}m", duration.num_minutes())
+        } else if secs < 86400 {
+            format!("{}h", duration.num_hours())
+        } else if secs < 86400 * 7 {
+            format!("{}d", duration.num_days())
+        } else {
+            dt.format("%m-%d").to_string()
+        }
+    } else {
+        String::new()
+    }
+}
+
 fn load_project_session_paged(
     pid: &str,
+    target_conv_id: Option<&str>,
     before_rowid: Option<i64>,
     limit: usize,
 ) -> Option<PagedLoadResult> {
@@ -327,10 +355,14 @@ fn load_project_session_paged(
         repo.list_conversations(Some(pid)).ok()?
     };
 
-    let conv = convs.into_iter().find(|c| {
-        let c_pid = c.project_id.as_deref().unwrap_or("default");
-        c_pid == pid
-    })?;
+    let conv = if let Some(target_id) = target_conv_id {
+        convs.into_iter().find(|c| c.id == target_id)?
+    } else {
+        convs.into_iter().find(|c| {
+            let c_pid = c.project_id.as_deref().unwrap_or("default");
+            c_pid == pid
+        })?
+    };
 
     let (msgs_rows, oldest_rowid, has_more) = repo.list_messages_paged(&conv.id, before_rowid, limit).ok()?;
     log::debug!(
@@ -389,6 +421,7 @@ fn load_single_project_session_from_db(pid: &str) -> Option<ProjectChatSession> 
     }
 
     Some(ProjectChatSession {
+        active_conversation_id: Some(conv.id),
         messages,
         ai_history,
         selected_model_id: conv.model,
@@ -649,6 +682,16 @@ pub struct AiAssistantPanel {
     ai_history: Vec<(usize, String)>,
     /// 当前关联的项目 ID
     current_project_id: Option<String>,
+    /// 当前活跃的会话 ID
+    active_conversation_id: Option<String>,
+    /// 历史会话下拉 Popover 浮层是否展开
+    ai_sessions_popover_open: bool,
+    /// 缓存的当前项目下的历史会话列表
+    ai_conversation_list: Vec<AiConversationRow>,
+    /// 正在内联重命名标题的会话 ID
+    renaming_conversation_id: Option<String>,
+    /// 内联重命名的输入框状态
+    rename_input_state: Option<Entity<SimpleInputState>>,
     /// 按项目隔离的 AI 聊天会话状态 Map
     project_chat_sessions: std::collections::HashMap<String, ProjectChatSession>,
     /// 从终端右键「AI 解读」注入的引用内容。展示在输入框上方，可删除/编辑。
@@ -695,7 +738,7 @@ pub struct AiSelectionDrag {
 
 #[derive(Clone)]
 pub struct ProjectChatSession {
-
+    pub active_conversation_id: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub ai_history: Vec<(usize, String)>,
     pub selected_model_id: Option<String>,
@@ -906,6 +949,11 @@ impl AiAssistantPanel {
             ai_input_area_bounds: None,
             ai_history,
             current_project_id: initial_pid,
+            active_conversation_id: None,
+            ai_sessions_popover_open: false,
+            ai_conversation_list: Vec::new(),
+            renaming_conversation_id: None,
+            rename_input_state: None,
             project_chat_sessions,
             ai_quote: None,
             ai_quote_editing: false,
@@ -978,9 +1026,9 @@ impl AiAssistantPanel {
         // 异步后台首屏分页加载当前项目的历史会话（最新 15 条），绝不阻塞 UI 主线程展开动效
         let load_key = key.clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
-            let lk = load_key.clone();
+            let lk_query = load_key.clone();
             let paged = smol::unblock(move || {
-                load_project_session_paged(&lk, None, 15)
+                load_project_session_paged(&lk_query, None, None, 15)
             }).await;
 
             let _ = this.update(cx, |this, cx| {
@@ -988,6 +1036,7 @@ impl AiAssistantPanel {
                 if cur_key == load_key {
                     this.loading_history = false;
                     if let Some(paged) = paged {
+                        this.active_conversation_id = Some(paged.conv_id.clone());
                         if !paged.messages.is_empty() {
                             let has_user_msg = this.messages.iter().any(|m| m.is_user);
                             if has_user_msg {
@@ -1026,9 +1075,12 @@ impl AiAssistantPanel {
                             });
                         }
                     } else {
+                        let new_id = format!("conv_{}_{}", load_key, chrono::Utc::now().timestamp_millis());
+                        this.active_conversation_id = Some(new_id);
                         this.has_more_history = false;
                         this.oldest_rowid = None;
                     }
+                    this.refresh_conversation_list();
                     this.list_state.reset(this.messages.len());
                     this.list_state.scroll_to_end();
                     this.update_all_message_input_states(cx);
@@ -1070,6 +1122,7 @@ impl AiAssistantPanel {
                 .unwrap_or("default")
                 .to_string();
             let session = ProjectChatSession {
+                active_conversation_id: self.active_conversation_id.clone(),
                 messages: std::mem::take(&mut self.messages),
                 ai_history: std::mem::take(&mut self.ai_history),
                 selected_model_id: self.ai_selected_model_id.clone(),
@@ -1079,8 +1132,11 @@ impl AiAssistantPanel {
             let new_key = active_pid.as_deref().unwrap_or("default").to_string();
             self.current_project_id = active_pid;
             self.ai_history_open = false;
+            self.ai_sessions_popover_open = false;
+            self.cancel_rename_conversation(cx);
 
             if let Some(sess) = self.project_chat_sessions.remove(&new_key) {
+                self.active_conversation_id = sess.active_conversation_id;
                 self.messages = sess.messages;
                 self.ai_history = sess.ai_history;
                 self.ai_selected_model_id = sess.selected_model_id.clone();
@@ -1094,6 +1150,7 @@ impl AiAssistantPanel {
                 self.list_state.scroll_to_end();
                 self.update_all_message_input_states(cx);
                 self.save_current_sessions_to_disk();
+                self.refresh_conversation_list();
                 cx.notify();
             } else {
                 self.messages = vec![ChatMessage {
@@ -1117,9 +1174,9 @@ impl AiAssistantPanel {
 
                 let load_key = new_key.clone();
                 cx.spawn(async move |this: WeakEntity<Self>, cx| {
-                    let lk = load_key.clone();
+                    let lk_query = load_key.clone();
                     let paged = smol::unblock(move || {
-                        load_project_session_paged(&lk, None, 15)
+                        load_project_session_paged(&lk_query, None, None, 15)
                     }).await;
 
                     let _ = this.update(cx, |this, cx| {
@@ -1127,6 +1184,7 @@ impl AiAssistantPanel {
                         if cur_key == load_key {
                             this.loading_history = false;
                             if let Some(paged) = paged {
+                                this.active_conversation_id = Some(paged.conv_id.clone());
                                 if !paged.messages.is_empty() {
                                     let has_user_msg = this.messages.iter().any(|m| m.is_user);
                                     if has_user_msg {
@@ -1164,9 +1222,12 @@ impl AiAssistantPanel {
                                     });
                                 }
                             } else {
+                                let new_id = format!("conv_{}_{}", load_key, chrono::Utc::now().timestamp_millis());
+                                this.active_conversation_id = Some(new_id);
                                 this.has_more_history = false;
                                 this.oldest_rowid = None;
                             }
+                            this.refresh_conversation_list();
                             this.list_state.reset(this.messages.len());
                             this.list_state.scroll_to_end();
                             this.update_all_message_input_states(cx);
@@ -1212,6 +1273,7 @@ impl AiAssistantPanel {
                 let cur_key = this.current_project_id.as_deref().unwrap_or("default");
                 if cur_key == key {
                     if let Some(sess) = cur_session {
+                        this.active_conversation_id = sess.active_conversation_id;
                         if !sess.messages.is_empty() {
                             this.messages = sess.messages;
                             this.ai_history = sess.ai_history;
@@ -1235,7 +1297,9 @@ impl AiAssistantPanel {
                         }];
                         this.ai_history = Vec::new();
                     }
+                    this.refresh_conversation_list();
                     this.ai_history_open = false;
+                    this.ai_sessions_popover_open = false;
                     this.list_state.reset(this.messages.len());
                     this.list_state.scroll_to_end();
                     this.update_all_message_input_states(cx);
@@ -1253,6 +1317,7 @@ impl AiAssistantPanel {
             .to_string();
 
         let current_session = ProjectChatSession {
+            active_conversation_id: self.active_conversation_id.clone(),
             messages: self.messages.clone(),
             ai_history: self.ai_history.clone(),
             selected_model_id: self.ai_selected_model_id.clone(),
@@ -1271,19 +1336,41 @@ impl AiAssistantPanel {
             let now_iso = chrono::Utc::now().to_rfc3339();
 
             for (pid, sess) in all_sessions {
+                let conv_id = sess
+                    .active_conversation_id
+                    .clone()
+                    .unwrap_or_else(|| format!("conv_{}", pid));
+
                 if is_welcome(&sess) {
-                    if let Ok(msgs) = repo.list_messages(&format!("conv_{}", pid)) {
+                    if let Ok(msgs) = repo.list_messages(&conv_id) {
                         if msgs.iter().any(|m| m.role == "user") {
-                            log::info!("[AI Assistant] Skipping SQLite overwrite for project {} as DB has real messages", pid);
+                            log::info!("[AI Assistant] Skipping SQLite overwrite for conversation {} as DB has real messages", conv_id);
                             continue;
                         }
                     }
                 }
 
-                let conv_id = format!("conv_{}", pid);
-                let title = sess.messages.iter().find(|m| m.is_user).map(|m| m.text.clone());
                 let existing = repo.get_conversation(&conv_id).ok().flatten();
-                let created_at = existing.map(|c| c.created_at).unwrap_or_else(|| now_iso.clone());
+                let existing_title = existing.as_ref().and_then(|c| c.title.clone());
+
+                let auto_title = sess
+                    .messages
+                    .iter()
+                    .find(|m| m.is_user)
+                    .map(|m| {
+                        let t = m.text.trim();
+                        if t.chars().count() > 24 {
+                            format!("{}...", t.chars().take(24).collect::<String>())
+                        } else {
+                            t.to_string()
+                        }
+                    });
+
+                let title = existing_title.or(auto_title);
+                let created_at = existing
+                    .as_ref()
+                    .map(|c| c.created_at.clone())
+                    .unwrap_or_else(|| now_iso.clone());
                 let conv_row = velowork_workspace::repositories::AiConversationRow {
                     id: conv_id.clone(),
                     profile_id: Some("default".into()),
@@ -1512,6 +1599,7 @@ impl AiAssistantPanel {
             .as_deref()
             .unwrap_or("default")
             .to_string();
+        let target_conv = self.active_conversation_id.clone();
         let before_rowid = self.oldest_rowid;
 
         self.loading_older = true;
@@ -1519,7 +1607,7 @@ impl AiAssistantPanel {
 
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             let res = smol::unblock(move || {
-                load_project_session_paged(&pid, before_rowid, 10)
+                load_project_session_paged(&pid, target_conv.as_deref(), before_rowid, 10)
             }).await;
 
             let _ = this.update(cx, |this, cx| {
@@ -3433,21 +3521,83 @@ impl AiAssistantPanel {
             })
     }
 
+    fn refresh_conversation_list(&mut self) {
+        let pid = self.current_project_id.as_deref().unwrap_or("default");
+        if let Some(db) = velowork_core::storage::database() {
+            let repo = velowork_workspace::repositories::AiRepository::new(db);
+            let convs = if pid == "default" {
+                repo.list_conversations(None).unwrap_or_default()
+            } else {
+                repo.list_conversations(Some(pid)).unwrap_or_default()
+            };
+            self.ai_conversation_list = convs;
+        }
+    }
+
+    fn toggle_sessions_popover(&mut self, cx: &mut Context<Self>) {
+        if self.ai_sessions_popover_open {
+            self.close_sessions_popover(cx);
+        } else {
+            self.ai_sessions_popover_open = true;
+            self.cancel_rename_conversation(cx);
+            self.refresh_conversation_list();
+            let reg = self.overlay_manager.read(cx).overlay_registry();
+            let weak = cx.entity().downgrade();
+            let close = std::sync::Arc::new(move |_: &mut Window, cx: &mut App| {
+                if let Some(panel) = weak.upgrade() {
+                    panel.update(cx, |this, cx| {
+                        this.close_sessions_popover(cx);
+                    });
+                }
+            });
+            reg.update(cx, |r, _| {
+                r.register(
+                    OverlayInfo {
+                        id: "ai-sessions-popover".into(),
+                        bounds: Bounds::default(),
+                        secondary_bounds: None,
+                        close_policy: ClosePolicy::ClickOutside,
+                        z_index: 2000,
+                    },
+                    close,
+                );
+            });
+            cx.notify();
+        }
+    }
+
+    fn close_sessions_popover(&mut self, cx: &mut Context<Self>) {
+        if self.ai_sessions_popover_open {
+            self.ai_sessions_popover_open = false;
+            self.cancel_rename_conversation(cx);
+            let reg = self.overlay_manager.read(cx).overlay_registry();
+            reg.update(cx, |r, _| {
+                r.unregister(&"ai-sessions-popover".into());
+            });
+            cx.notify();
+        }
+    }
+
     fn new_ai_chat(&mut self, cx: &mut Context<Self>) {
-        self.ai_stream_rx = None;
-        self.ai_streaming_index = None;
-        self._ai_stream_task = None;
-        self.ai_agent_rx = None;
-        self.ai_tool_rx = None;
-        self.ai_agent_registry = None;
-        self._ai_agent_task = None;
-        self._ai_consume_task = None;
-        self.ai_current_request_id = None;
+        let has_user_msg = self.messages.iter().any(|m| m.is_user);
+        if !has_user_msg {
+            self.close_sessions_popover(cx);
+            return;
+        }
+
+        self.stop_generation(cx);
         self.ai_pending_queue.clear();
+        self.save_current_sessions_to_disk();
+
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+        let new_conv_id = format!("conv_{}_{}", pid, chrono::Utc::now().timestamp_millis());
+        self.active_conversation_id = Some(new_conv_id);
+
         self.messages.clear();
         self.list_state.reset(0);
         self.attachments.clear();
         self.ai_history_open = false;
+        self.close_sessions_popover(cx);
         self.ai_history.clear();
         self.push_message(ChatMessage {
             is_user: false,
@@ -3457,13 +3607,616 @@ impl AiAssistantPanel {
             tool_call: None,
             thinking: None,
             attachments: Vec::new(),
-
             quote: None,
         });
         let idx = self.messages.len() - 1;
         self.update_message_input_states(idx, cx);
         self.save_current_sessions_to_disk();
+        self.refresh_conversation_list();
         cx.notify();
+    }
+
+    fn switch_to_conversation(&mut self, target_id: &str, cx: &mut Context<Self>) {
+        if self.active_conversation_id.as_deref() == Some(target_id) {
+            self.close_sessions_popover(cx);
+            return;
+        }
+
+        self.stop_generation(cx);
+        self.ai_pending_queue.clear();
+        self.save_current_sessions_to_disk();
+
+        let target_conv_id = target_id.to_string();
+        self.active_conversation_id = Some(target_conv_id.clone());
+        self.close_sessions_popover(cx);
+        self.loading_history = true;
+        self.messages.clear();
+        self.list_state.reset(0);
+        cx.notify();
+
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+        let cid = target_conv_id.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let paged = smol::unblock(move || {
+                load_project_session_paged(&pid, Some(&cid), None, 50)
+            }).await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.loading_history = false;
+                if let Some(paged) = paged {
+                    this.messages = paged.messages;
+                    this.ai_history = paged.ai_history;
+                    this.has_more_history = paged.has_more;
+                    this.oldest_rowid = paged.oldest_rowid;
+                    if let Some(m_id) = paged.selected_model_id {
+                        this.ai_selected_model_id = Some(m_id.clone());
+                        this.ai_model_select.update(cx, |s, cx| {
+                            s.set_selected_value(Some(m_id), cx);
+                        });
+                    }
+                }
+                this.list_state.reset(this.messages.len());
+                this.list_state.scroll_to_end();
+                this.update_all_message_input_states(cx);
+                this.refresh_conversation_list();
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    fn delete_conversation(&mut self, target_id: &str, cx: &mut Context<Self>) {
+        if let Some(db) = velowork_core::storage::database() {
+            let repo = velowork_workspace::repositories::AiRepository::new(db);
+            let _ = repo.delete_messages(target_id);
+            let _ = repo.delete_conversation(target_id);
+        }
+
+        self.ai_conversation_list.retain(|c| c.id != target_id);
+
+        if self.active_conversation_id.as_deref() == Some(target_id) {
+            if let Some(first_remaining) = self.ai_conversation_list.first() {
+                let next_id = first_remaining.id.clone();
+                self.switch_to_conversation(&next_id, cx);
+            } else {
+                self.messages.clear();
+                self.list_state.reset(0);
+                self.attachments.clear();
+                self.ai_history.clear();
+                let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+                let new_id = format!("conv_{}_{}", pid, chrono::Utc::now().timestamp_millis());
+                self.active_conversation_id = Some(new_id);
+                self.push_message(ChatMessage {
+                    is_user: false,
+                    text: i18n!(cx, "ai_assistant.welcome"),
+                    streaming: false,
+                    document_views: std::cell::RefCell::new(Vec::new()),
+                    tool_call: None,
+                    thinking: None,
+                    attachments: Vec::new(),
+                    quote: None,
+                });
+                let idx = self.messages.len() - 1;
+                self.update_message_input_states(idx, cx);
+                self.save_current_sessions_to_disk();
+                self.refresh_conversation_list();
+            }
+        }
+        cx.notify();
+    }
+
+    fn confirm_clear_all_conversations(&mut self, cx: &mut Context<Self>) {
+        let title = i18n!(cx, "ai_assistant.clear_all_history");
+        let msg = i18n!(cx, "ai_assistant.clear_all_history_confirm");
+
+        let dialog = cx.new(|cx| {
+            ConfirmDialog::new(
+                cx,
+                title,
+                msg,
+                i18n!(cx, "common.confirm"),
+                i18n!(cx, "common.cancel"),
+                true,
+                None,
+                "ai-clear-all-sessions-confirm",
+            )
+        });
+
+        cx.subscribe(&dialog, move |this, _dialog, event, cx| {
+            if matches!(event, ConfirmDialogEvent::Confirmed) {
+                this.clear_all_conversations(cx);
+            }
+            this.overlay_manager.update(cx, |om, cx| om.close_modal(cx));
+        })
+        .detach();
+
+        self.overlay_manager.update(cx, |om, cx| {
+            om.open_modal(dialog, cx);
+        });
+    }
+
+    fn clear_all_conversations(&mut self, cx: &mut Context<Self>) {
+        self.stop_generation(cx);
+        self.ai_pending_queue.clear();
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+
+        if let Some(db) = velowork_core::storage::database() {
+            let repo = velowork_workspace::repositories::AiRepository::new(db);
+            for c in &self.ai_conversation_list {
+                let _ = repo.delete_messages(&c.id);
+                let _ = repo.delete_conversation(&c.id);
+            }
+        }
+
+        self.ai_conversation_list.clear();
+        self.messages.clear();
+        self.list_state.reset(0);
+        self.attachments.clear();
+        self.ai_history.clear();
+        let new_id = format!("conv_{}_{}", pid, chrono::Utc::now().timestamp_millis());
+        self.active_conversation_id = Some(new_id);
+        self.push_message(ChatMessage {
+            is_user: false,
+            text: i18n!(cx, "ai_assistant.welcome"),
+            streaming: false,
+            document_views: std::cell::RefCell::new(Vec::new()),
+            tool_call: None,
+            thinking: None,
+            attachments: Vec::new(),
+            quote: None,
+        });
+        let idx = self.messages.len() - 1;
+        self.update_message_input_states(idx, cx);
+        self.save_current_sessions_to_disk();
+        self.close_sessions_popover(cx);
+    }
+
+    fn start_renaming_conversation(&mut self, conv_id: &str, current_title: &str, cx: &mut Context<Self>) {
+        self.renaming_conversation_id = Some(conv_id.to_string());
+        let val = current_title.to_string();
+        let state = cx.new(|cx| {
+            SimpleInputState::new(cx)
+                .default_value(&val)
+                .submit_on_enter(true)
+        });
+        let state_clone = state.clone();
+        cx.subscribe(
+            &state_clone,
+            |this: &mut Self, _, event: &InputEvent, cx| {
+                match event {
+                    InputEvent::PressEnter => {
+                        this.submit_rename_conversation(cx);
+                    }
+                    InputEvent::Blur => {
+                        this.submit_rename_conversation(cx);
+                    }
+                    _ => {}
+                }
+            },
+        )
+        .detach();
+        self.rename_input_state = Some(state);
+        cx.notify();
+    }
+
+    fn submit_rename_conversation(&mut self, cx: &mut Context<Self>) {
+        if let (Some(conv_id), Some(ref input)) = (self.renaming_conversation_id.take(), self.rename_input_state.take()) {
+            let new_title = input.read(cx).value().trim().to_string();
+            if !new_title.is_empty() {
+                if let Some(db) = velowork_core::storage::database() {
+                    let repo = velowork_workspace::repositories::AiRepository::new(db);
+                    if let Ok(Some(mut conv)) = repo.get_conversation(&conv_id) {
+                        conv.title = Some(new_title.clone());
+                        conv.updated_at = chrono::Utc::now().to_rfc3339();
+                        let _ = repo.save_conversation(&conv);
+                    }
+                }
+                if let Some(item) = self.ai_conversation_list.iter_mut().find(|c| c.id == conv_id) {
+                    item.title = Some(new_title);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn cancel_rename_conversation(&mut self, cx: &mut Context<Self>) {
+        self.renaming_conversation_id = None;
+        self.rename_input_state = None;
+        cx.notify();
+    }
+
+    fn render_sessions_popover(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = SemanticPalette::from_context(cx);
+        let t = theme(cx);
+        let active_id = self.active_conversation_id.clone();
+        let renaming_id = self.renaming_conversation_id.clone();
+        let conv_count = self.ai_conversation_list.len();
+        let panel_weak = cx.entity().downgrade();
+
+        let backdrop = div()
+            .id("ai-sessions-backdrop")
+            .absolute()
+            .inset_0()
+            .on_mouse_down(MouseButton::Left, {
+                let panel_weak = panel_weak.clone();
+                move |_, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(panel) = panel_weak.upgrade() {
+                        panel.update(cx, |this, cx| {
+                            this.close_sessions_popover(cx);
+                        });
+                    }
+                }
+            })
+            .on_mouse_down(MouseButton::Right, {
+                let panel_weak = panel_weak.clone();
+                move |_, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(panel) = panel_weak.upgrade() {
+                        panel.update(cx, |this, cx| {
+                            this.close_sessions_popover(cx);
+                        });
+                    }
+                }
+            });
+
+        let list_items: Vec<AnyElement> = if conv_count == 0 {
+            vec![
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .py(SPACE_SM)
+                    .gap(SPACE_XS)
+                    .child(AppIcon::History.svg().size(ICON_MD).text_color(p.text_muted))
+                    .child(
+                        div()
+                            .text_size(ui_text_xs(cx))
+                            .text_color(p.text_muted)
+                            .child(i18n!(cx, "ai_assistant.no_chat_history")),
+                    )
+                    .into_any_element(),
+            ]
+        } else {
+            self.ai_conversation_list
+                .iter()
+                .map(|conv| {
+                    let is_active = active_id.as_deref() == Some(&conv.id);
+                    let is_renaming = renaming_id.as_deref() == Some(&conv.id);
+                    let conv_id = conv.id.clone();
+                    let default_title = i18n!(cx, "ai_assistant.new_chat_title");
+                    let title = conv.title.as_deref().unwrap_or(&default_title);
+                    let rel_time = format_relative_time(&conv.updated_at, cx);
+                    let title_str = title.to_string();
+
+                    if is_renaming {
+                        h_flex()
+                            .id(SharedString::from(format!("ai-session-renaming-{}", conv_id)))
+                            .w_full()
+                            .px(SPACE_XS)
+                            .py(px(2.0))
+                            .gap(px(2.0))
+                            .items_center()
+                            .when_some(self.rename_input_state.clone(), |d, input_st| {
+                                d.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(
+                                            SimpleInput::new(&input_st)
+                                                .size(ControlSize::Compact),
+                                        ),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .id("session-rename-confirm-btn")
+                                    .cursor_pointer()
+                                    .p(px(2.0))
+                                    .rounded(RADIUS_XS)
+                                    .hover(|s| s.bg(p.surface_hover))
+                                    .child(AppIcon::Check.svg().size(ICON_MICRO).text_color(p.status_success))
+                                    .on_click({
+                                        let panel_weak = panel_weak.clone();
+                                        move |_, _, cx| {
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    this.submit_rename_conversation(cx);
+                                                });
+                                            }
+                                        }
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .id("session-rename-cancel-btn")
+                                    .cursor_pointer()
+                                    .p(px(2.0))
+                                    .rounded(RADIUS_XS)
+                                    .hover(|s| s.bg(p.surface_hover))
+                                    .child(AppIcon::Close.svg().size(ICON_MICRO).text_color(p.text_muted))
+                                    .on_click({
+                                        let panel_weak = panel_weak.clone();
+                                        move |_, _, cx| {
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    this.cancel_rename_conversation(cx);
+                                                });
+                                            }
+                                        }
+                                    }),
+                            )
+                            .into_any_element()
+                    } else {
+                        let group_name = SharedString::from(format!("session-row-{}", conv_id));
+                        let row_id = SharedString::from(format!("ai-session-row-{}", conv_id));
+                        let rename_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.rename_chat").into_boxed_str());
+                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.delete_chat").into_boxed_str());
+
+                        h_flex()
+                            .id(row_id)
+                            .group(group_name.clone())
+                            .w_full()
+                            .px(SPACE_XS)
+                            .py(px(2.0))
+                            .rounded(RADIUS_SM)
+                            .cursor_pointer()
+                            .items_center()
+                            .justify_between()
+                            .bg(if is_active { p.surface_hover } else { gpui::transparent_black() })
+                            .hover(|s| s.bg(p.surface_hover))
+                            .on_click({
+                                let panel_weak = panel_weak.clone();
+                                let cid = conv_id.clone();
+                                move |_, _, cx| {
+                                    if let Some(panel) = panel_weak.upgrade() {
+                                        panel.update(cx, |this, cx| {
+                                            this.switch_to_conversation(&cid, cx);
+                                        });
+                                    }
+                                }
+                            })
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap(SPACE_XS)
+                                    .child(
+                                        div()
+                                            .size(px(6.0))
+                                            .rounded_full()
+                                            .bg(if is_active { p.surface_accent } else { gpui::transparent_black() })
+                                            .flex_shrink_0(),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .truncate()
+                                            .text_size(ui_text_sm(cx))
+                                            .text_color(if is_active { p.text_primary } else { p.text_secondary })
+                                            .font_weight(if is_active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                                            .child(title_str.clone()),
+                                    )
+                                    .when(!rel_time.is_empty(), |d| {
+                                        d.child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .text_size(ui_text_xs(cx))
+                                                .text_color(p.text_muted)
+                                                .child(rel_time),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap(px(2.0))
+                                    .opacity(0.0)
+                                    .group_hover(group_name.clone(), |s| s.opacity(1.0))
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!("session-rename-icon-{}", conv_id)))
+                                            .cursor_pointer()
+                                            .p(px(2.0))
+                                            .rounded(RADIUS_XS)
+                                            .hover(|s| s.bg(p.surface_hover))
+                                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(rename_tip)).into())
+                                            .child(AppIcon::Edit.svg().size(ICON_MICRO).text_color(p.text_muted))
+                                            .on_click({
+                                                let panel_weak = panel_weak.clone();
+                                                let cid = conv_id.clone();
+                                                let t = title_str.clone();
+                                                move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    if let Some(panel) = panel_weak.upgrade() {
+                                                        panel.update(cx, |this, cx| {
+                                                            this.start_renaming_conversation(&cid, &t, cx);
+                                                        });
+                                                    }
+                                                }
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!("session-delete-icon-{}", conv_id)))
+                                            .cursor_pointer()
+                                            .p(px(2.0))
+                                            .rounded(RADIUS_XS)
+                                            .hover(|s| s.bg(p.surface_hover))
+                                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(delete_tip)).into())
+                                            .child(AppIcon::Trash.svg().size(ICON_MICRO).text_color(p.status_error))
+                                            .on_click({
+                                                let panel_weak = panel_weak.clone();
+                                                let cid = conv_id.clone();
+                                                move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    if let Some(panel) = panel_weak.upgrade() {
+                                                        panel.update(cx, |this, cx| {
+                                                            this.delete_conversation(&cid, cx);
+                                                        });
+                                                    }
+                                                }
+                                            }),
+                                    ),
+                            )
+                            .into_any_element()
+                    }
+                })
+                .collect()
+        };
+
+        let reg = self.overlay_manager.read(cx).overlay_registry();
+        let card = div()
+            .id("ai-sessions-popover-card")
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(
+                canvas(
+                    move |bounds: Bounds<Pixels>, _window: &mut Window, cx: &mut App| {
+                        reg.update(cx, |r, _| {
+                            r.set_bounds(&"ai-sessions-popover".into(), bounds);
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .absolute()
+            .top(px(velowork_ui::tab_height(cx) + 4.0))
+            .left(px(8.0))
+            .right(px(8.0))
+            .max_h(px(380.0))
+            .flex()
+            .flex_col()
+            .bg(p.surface_raised)
+            .border_1()
+            .border_color(p.border_subtle)
+            .rounded(RADIUS_MD)
+            .shadow(elevation_menu_shadow())
+            // Header
+            .child(
+                h_flex()
+                    .h(px(34.0))
+                    .px(SPACE_SM)
+                    .border_b_1()
+                    .border_color(p.border_subtle)
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .child(
+                                AppIcon::History
+                                    .svg()
+                                    .size(ICON_SM)
+                                    .text_color(p.text_secondary),
+                            )
+                            .child(
+                                div()
+                                    .text_size(ui_text_sm(cx))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(p.text_primary)
+                                    .child(format!(
+                                        "{} ({})",
+                                        i18n!(cx, "ai_assistant.chat_history"),
+                                        conv_count
+                                    )),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .when(conv_count > 0, |d| {
+                                d.child(
+                                    Button::new("ai-clear-all-sessions-btn", &t)
+                                        .label(i18n!(cx, "ai_assistant.clear_all_history"))
+                                        .small()
+                                        .variant(ControlVariant::Ghost)
+                                        .danger(true)
+                                        .on_click({
+                                            let panel_weak = panel_weak.clone();
+                                            move |_, _, cx| {
+                                                if let Some(panel) = panel_weak.upgrade() {
+                                                    panel.update(cx, |this, cx| {
+                                                        this.confirm_clear_all_conversations(cx);
+                                                    });
+                                                }
+                                            }
+                                        }),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .id("ai-popover-close-btn")
+                                    .cursor_pointer()
+                                    .p(px(2.0))
+                                    .rounded(RADIUS_XS)
+                                    .hover(|s| s.bg(p.surface_hover))
+                                    .child(
+                                        AppIcon::Close
+                                            .svg()
+                                            .size(ICON_MICRO)
+                                            .text_color(p.text_muted),
+                                    )
+                                    .on_click({
+                                        let panel_weak = panel_weak.clone();
+                                        move |_, _, cx| {
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    this.close_sessions_popover(cx);
+                                                });
+                                            }
+                                        }
+                                    }),
+                            ),
+                    ),
+            )
+            // Scrollable List
+            .child(
+                div()
+                    .id("ai-sessions-scroll-list")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .p(px(2.0))
+                    .children(list_items),
+            )
+            // Footer
+            .child(
+                h_flex()
+                    .p(SPACE_XS)
+                    .border_t_1()
+                    .border_color(p.border_subtle)
+                    .child(
+                        Button::new("ai-popover-footer-new-chat-btn", &t)
+                            .label(format!("+ {}", i18n!(cx, "ai_assistant.new_chat")))
+                            .small()
+                            .variant(ControlVariant::Secondary)
+                            .full_width(true)
+                            .on_click({
+                                let panel_weak = panel_weak.clone();
+                                move |_, _, cx| {
+                                    if let Some(panel) = panel_weak.upgrade() {
+                                        panel.update(cx, |this, cx| {
+                                            this.new_ai_chat(cx);
+                                        });
+                                    }
+                                }
+                            }),
+                    ),
+            );
+
+        div()
+            .id("ai-sessions-overlay-root")
+            .absolute()
+            .inset_0()
+            .child(backdrop)
+            .child(card)
     }
 
     fn clear_ai_chat(&mut self, cx: &mut Context<Self>) {
@@ -3767,18 +4520,33 @@ impl AiAssistantPanel {
                     cx.notify();
                     return;
                 }
-                if event.keystroke.key.as_str() == "escape" && this.ai_search_open {
-                    this.ai_search_open = false;
-                    if let Some(ref input) = this.ai_search_input {
-                        input.update(cx, |inp, cx| inp.set_value("", cx));
+                if event.keystroke.key.as_str() == "escape" {
+                    if this.renaming_conversation_id.is_some() {
+                        this.cancel_rename_conversation(cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
                     }
-                    if let Some(ref chat_input) = this.chat_input {
-                        chat_input.update(cx, |inp, cx| inp.focus(window, cx));
-                    } else {
-                        window.focus(&this.focus_handle, cx);
+                    if this.ai_sessions_popover_open {
+                        this.close_sessions_popover(cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
                     }
-                    cx.stop_propagation();
-                    cx.notify();
+                    if this.ai_search_open {
+                        this.ai_search_open = false;
+                        if let Some(ref input) = this.ai_search_input {
+                            input.update(cx, |inp, cx| inp.set_value("", cx));
+                        }
+                        if let Some(ref chat_input) = this.chat_input {
+                            chat_input.update(cx, |inp, cx| inp.focus(window, cx));
+                        } else {
+                            window.focus(&this.focus_handle, cx);
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
+                    }
                 }
             }))
             .child(
@@ -3796,6 +4564,14 @@ impl AiAssistantPanel {
                         &t,
                         cx,
                         |this, _, cx| this.new_ai_chat(cx),
+                    ))
+                    .child(self.ai_icon_btn(
+                        "ai-history-btn",
+                        AppIcon::History,
+                        i18n!(cx, "ai_assistant.chat_history"),
+                        &t,
+                        cx,
+                        |this, _, cx| this.toggle_sessions_popover(cx),
                     ))
                     .child(self.ai_icon_btn(
                         "ai-clear-chat",
@@ -4323,6 +5099,9 @@ impl AiAssistantPanel {
                         .right_0()
                         .h(SPACE_XS),
                     )
+            })
+            .when(self.ai_sessions_popover_open, |d| {
+                d.child(self.render_sessions_popover(window, cx))
             })
             .when(
                 self.ai_history_open && self.ai_input_area_bounds.is_some(),
