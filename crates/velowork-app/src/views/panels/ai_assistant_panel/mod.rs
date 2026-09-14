@@ -3874,12 +3874,12 @@ impl AiAssistantPanel {
                     .flex_col()
                     .items_center()
                     .justify_center()
-                    .py(SPACE_SM)
+                    .py(SPACE_MD)
                     .gap(SPACE_XS)
                     .child(AppIcon::History.svg().size(ICON_MD).text_color(p.text_muted))
                     .child(
                         div()
-                            .text_size(ui_text_xs(cx))
+                            .text_size(ui_text_md(cx))
                             .text_color(p.text_muted)
                             .child(i18n!(cx, "ai_assistant.no_chat_history")),
                     )
@@ -3902,7 +3902,7 @@ impl AiAssistantPanel {
                             .id(SharedString::from(format!("ai-session-renaming-{}", conv_id)))
                             .w_full()
                             .px(SPACE_XS)
-                            .py(px(2.0))
+                            .py(px(4.0))
                             .gap(px(2.0))
                             .items_center()
                             .when_some(self.rename_input_state.clone(), |d, input_st| {
@@ -3912,7 +3912,8 @@ impl AiAssistantPanel {
                                         .min_w_0()
                                         .child(
                                             SimpleInput::new(&input_st)
-                                                .size(ControlSize::Compact),
+                                                .size(ControlSize::Compact)
+                                                .text_size(ui_text_md(cx)),
                                         ),
                                 )
                             })
@@ -3966,7 +3967,7 @@ impl AiAssistantPanel {
                             .group(group_name.clone())
                             .w_full()
                             .px(SPACE_XS)
-                            .py(px(2.0))
+                            .py(px(4.0))
                             .rounded(RADIUS_SM)
                             .cursor_pointer()
                             .items_center()
@@ -3989,7 +3990,7 @@ impl AiAssistantPanel {
                                     .flex_1()
                                     .min_w_0()
                                     .items_center()
-                                    .gap(SPACE_XS)
+                                    .gap(SPACE_SM)
                                     .child(
                                         div()
                                             .size(px(6.0))
@@ -4001,7 +4002,7 @@ impl AiAssistantPanel {
                                         div()
                                             .flex_1()
                                             .truncate()
-                                            .text_size(ui_text_sm(cx))
+                                            .text_size(ui_text_md(cx))
                                             .text_color(if is_active { p.text_primary } else { p.text_secondary })
                                             .font_weight(if is_active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
                                             .child(title_str.clone()),
@@ -4010,7 +4011,7 @@ impl AiAssistantPanel {
                                         d.child(
                                             div()
                                                 .flex_shrink_0()
-                                                .text_size(ui_text_xs(cx))
+                                                .text_size(ui_text_sm(cx))
                                                 .text_color(p.text_muted)
                                                 .child(rel_time),
                                         )
@@ -4126,7 +4127,7 @@ impl AiAssistantPanel {
                             )
                             .child(
                                 div()
-                                    .text_size(ui_text_sm(cx))
+                                    .text_size(ui_text_md(cx))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(p.text_primary)
                                     .child(format!(
@@ -4142,11 +4143,16 @@ impl AiAssistantPanel {
                             .gap(px(2.0))
                             .when(conv_count > 0, |d| {
                                 d.child(
-                                    Button::new("ai-clear-all-sessions-btn", &t)
-                                        .label(i18n!(cx, "ai_assistant.clear_all_history"))
-                                        .small()
-                                        .variant(ControlVariant::Ghost)
-                                        .danger(true)
+                                    div()
+                                        .id("ai-clear-all-sessions-btn")
+                                        .cursor_pointer()
+                                        .px(SPACE_XS)
+                                        .py(px(2.0))
+                                        .rounded(RADIUS_SM)
+                                        .text_size(ui_text_md(cx))
+                                        .text_color(p.text_muted)
+                                        .hover(|s| s.text_color(p.status_error).bg(p.surface_hover))
+                                        .child(i18n!(cx, "ai_assistant.clear_all_history"))
                                         .on_click({
                                             let panel_weak = panel_weak.clone();
                                             move |_, _, cx| {
@@ -4204,6 +4210,7 @@ impl AiAssistantPanel {
                         Button::new("ai-popover-footer-new-chat-btn", &t)
                             .label(format!("+ {}", i18n!(cx, "ai_assistant.new_chat")))
                             .small()
+                            .text_size(ui_text_md(cx))
                             .variant(ControlVariant::Secondary)
                             .full_width(true)
                             .on_click({
