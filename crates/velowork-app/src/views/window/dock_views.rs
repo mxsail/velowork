@@ -436,6 +436,24 @@ impl WindowView {
             DockPosition::Top => 0,
         };
 
+        // ── Instant‑visible seed ──────────────────────────────────────
+        // When *opening* (target > current) from a fully‑collapsed state,
+        // immediately set animation to a small but above‑threshold value
+        // so that `should_render()` (which checks `animation > 0.01`)
+        // returns `true` on the very first render frame after the click.
+        // Without this, the first 16 ms is a "dead zone" where the dock
+        // container is not rendered at all, causing a perceived delay.
+        const ANIMATION_SEED: f32 = 0.02;
+        if target > current && current < ANIMATION_SEED {
+            match pos {
+                DockPosition::Left => self.left_dock_ctrl.set_animation(ANIMATION_SEED),
+                DockPosition::Right => self.right_dock_ctrl.set_animation(ANIMATION_SEED),
+                DockPosition::Bottom => self.bottom_dock_ctrl.set_animation(ANIMATION_SEED),
+                DockPosition::Top => {}
+            }
+            cx.notify();
+        }
+
         let duration = std::time::Duration::from_millis(ANIMATION_DURATION_MS);
         let step_duration = std::time::Duration::from_millis(FRAME_TIME_MS);
 
