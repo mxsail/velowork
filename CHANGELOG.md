@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.4] - 2026-09-16
+
+### Fixed / 修复
+- **标签展开动画终点空白闪烁与行号闪动根治**：
+  - 彻底移除了动效卡片在 300ms 时的提前退出脱靶判定，使其与恢复状态机原子同步，消灭交接瞬间因异步定时器时差造成的空白帧闪烁。
+  - 将 Tab 组内子容器与独立还原逻辑解耦，防止内外双重隐身定时器时间差；并统一动效卡片底色与终端调色板算法，平滑收敛终点圆角与外阴影。
+  - 抽离公共行号渲染器 `render_line_numbers_gutter` 供终端与动效卡片共享，确保行号自起始展开动画第一帧即刻对齐。
+  - 过滤全新创建 Tab 的展开动画误触发，解决终端打开时无行号闪烁问题。  
+  *(Eliminate visual flicker and blank-frame gap when expanding restored tabs; decouple inner container restore epochs; share line numbers gutter across preview cards and real terminal).*
+- **点击终端界面导致底部最小化标签闪烁问题修复**：
+  - 优化全局焦点与重绘响应链路，防止点击终端时因多余状态变更引起底部最小化胶囊不必要的重刷与闪烁。  
+  *(Prevent minimized tab capsules in bottom dock from flickering when clicking inside terminal panes).*
+
+### Improved / 优化
+- **标签页与底部胶囊悬浮预览弹窗定位与动效优化**：
+  - 重构标签页与最小化胶囊的预览弹窗坐标算法，支持自适应边界避让、平滑入场微动效与源点感知。  
+  *(Improve terminal tab and bottom dock thumbnail preview popup positioning, boundary detection, and smooth entrance transitions).*
+
 ## [0.1.0-beta.3] - 2026-09-12
 
 ### Fixed / 修复
