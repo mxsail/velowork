@@ -26,7 +26,7 @@ use velowork_ui::tokens::{
 };
 use velowork_ui::tooltip::Tooltip;
 
-pub use content::{TerminalContent, TerminalContentEvent};
+pub use content::{TerminalContent, TerminalContentEvent, render_line_numbers_gutter};
 use parking_lot::Mutex;
 
 use crate::ActionDispatch;

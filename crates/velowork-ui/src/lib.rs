@@ -111,7 +111,10 @@ pub use slider::{Slider, SliderEvent, SliderScale, SliderState, SliderValue};
 pub use stepper::{NumberStepper, number_stepper};
 pub use styled::{h_flex, v_flex};
 pub use tab::{TAB_HEIGHT, tab_height, tab_h_padding, tab_active_indicator, tab_style};
-pub use terminal_preview::{TerminalPreviewProps, terminal_preview_card};
+pub use terminal_preview::{
+    TabPreviewPlacement, TerminalPreviewProps, render_anchored_preview, terminal_preview_card,
+    terminal_preview_card_width,
+};
 pub use tooltip::Tooltip;
 pub use tree::{
     Tree, TreeNodeContext, TreeNodeData, tree, tree_row_appearance, expandable_folder_row,

@@ -37,8 +37,33 @@ pub struct TerminalPreviewProps {
     pub background_builder: Option<std::sync::Arc<dyn Fn(&App) -> Option<AnyElement> + Send + Sync>>,
 }
 
+/// Placement direction for anchored terminal preview overlay.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabPreviewPlacement {
+    /// Placed below the trigger bounds (used for tab strip).
+    Below,
+    /// Placed above the trigger bounds (used for minimized capsule).
+    Above,
+}
+
+/// Compute estimated width of the terminal preview card based on snapshot aspect ratio.
+pub fn terminal_preview_card_width(snapshot: Option<&TerminalPreviewSnapshot>) -> Pixels {
+    if let Some(snapshot) = snapshot {
+        let total_cols = (snapshot.cols.max(1)) as f32;
+        let total_rows = (snapshot.rows.max(snapshot.lines.len()).max(1)) as f32;
+        let cell_aspect = 0.52f32; // cell_w / cell_h
+        let aspect = (total_cols * cell_aspect) / total_rows;
+
+        let base_h = 220.0f32;
+        let raw_w = base_h * aspect;
+        px(raw_w.clamp(320.0, 520.0))
+    } else {
+        px(440.0)
+    }
+}
+
 /// Construct a terminal preview card element.
-pub fn terminal_preview_card(props: TerminalPreviewProps, cx: &mut App) -> impl IntoElement {
+pub fn terminal_preview_card(props: TerminalPreviewProps, cx: &App) -> impl IntoElement {
     let t = theme(cx);
     let p = SemanticPalette::from_theme(&t);
 
@@ -601,4 +626,115 @@ pub fn terminal_preview_card(props: TerminalPreviewProps, cx: &mut App) -> impl 
                 });
             screen_body
         })
+}
+
+/// Render a floating anchored preview overlay for tabs or capsules.
+///
+/// Handles:
+/// - Exact horizontal centering relative to trigger bounds
+/// - Viewport edge clamping (8px safe margin)
+/// - Directional placement (Below or Above)
+/// - Occlusion and stopping pointer propagation (Constitution Rule 3)
+/// - Smooth directional slide + opacity entrance animation
+#[allow(clippy::too_many_arguments)]
+pub fn render_anchored_preview(
+    id: impl Into<ElementId>,
+    props: TerminalPreviewProps,
+    trigger_bounds: Bounds<Pixels>,
+    placement: TabPreviewPlacement,
+    is_fresh_open: bool,
+    enable_animations: bool,
+    viewport_size: Option<Size<Pixels>>,
+    cx: &App,
+) -> Deferred {
+    let element_id = id.into();
+    let card_w = terminal_preview_card_width(props.snapshot.as_ref());
+    let trigger_center_x = trigger_bounds.origin.x + trigger_bounds.size.width * 0.5;
+    let ideal_x = trigger_center_x - card_w * 0.5;
+
+    let margin = px(8.0);
+    let clamped_x = if let Some(viewport) = viewport_size {
+        let max_x = (viewport.width - card_w - margin).max(margin);
+        ideal_x.clamp(margin, max_x)
+    } else {
+        ideal_x.max(margin)
+    };
+
+    let (anchor_pos, gpui_anchor, slide_from) = match placement {
+        TabPreviewPlacement::Below => {
+            let y = trigger_bounds.origin.y + trigger_bounds.size.height + px(4.0);
+            (point(clamped_x, y), gpui::Anchor::TopLeft, -px(8.0))
+        }
+        TabPreviewPlacement::Above => {
+            let y = trigger_bounds.origin.y - px(4.0);
+            (point(clamped_x, y), gpui::Anchor::BottomLeft, px(8.0))
+        }
+    };
+
+    let preview_card = terminal_preview_card(props, cx);
+
+    let card_container = div()
+        .occlude()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+        .child(preview_card);
+
+    let animated_container: AnyElement = if enable_animations && is_fresh_open {
+        card_container
+            .with_animation(
+                element_id,
+                Animation::new(std::time::Duration::from_millis(160))
+                    .with_easing(crate::motion::ease_out_cubic),
+                move |this, delta| {
+                    let offset_y = slide_from * (1.0 - delta);
+                    this.relative().top(offset_y).opacity(delta)
+                },
+            )
+            .into_any_element()
+    } else {
+        card_container.into_any_element()
+    };
+
+    deferred(
+        anchored()
+            .position(anchor_pos)
+            .anchor(gpui_anchor)
+            .snap_to_window()
+            .child(animated_container),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_terminal_preview_card_width_default() {
+        let width = terminal_preview_card_width(None);
+        assert_eq!(width, px(440.0));
+    }
+
+    #[test]
+    fn test_terminal_preview_card_width_aspect_ratio_clamp() {
+        let wide_snapshot = TerminalPreviewSnapshot {
+            lines: vec![],
+            cols: 200,
+            rows: 24,
+            cursor: None,
+            is_empty: false,
+        };
+        let wide_w = terminal_preview_card_width(Some(&wide_snapshot));
+        assert!(wide_w <= px(520.0));
+        assert!(wide_w >= px(320.0));
+
+        let narrow_snapshot = TerminalPreviewSnapshot {
+            lines: vec![],
+            cols: 20,
+            rows: 80,
+            cursor: None,
+            is_empty: false,
+        };
+        let narrow_w = terminal_preview_card_width(Some(&narrow_snapshot));
+        assert!(narrow_w >= px(320.0));
+    }
 }

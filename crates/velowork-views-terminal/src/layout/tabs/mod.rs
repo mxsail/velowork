@@ -397,7 +397,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             // 由 tab bar 右侧的“收起全屏”按钮退出全屏。
             return v_flex()
                 .size_full()
-                .child(self.render_tab_bar(children, zoomed_idx, false, cx))
+                .child(self.render_tab_bar(children, zoomed_idx, false, window, cx))
                 .child(
                     div()
                         .id("console")
@@ -455,7 +455,13 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                 let terminal_pane = this.child_containers.get(&child_path)
                                     .and_then(|c| c.read(cx).terminal_pane.clone());
                                 let terminal_arc = terminal_pane.as_ref().and_then(|p| p.read(cx).terminal_arc());
-                                let preview_el = terminal_arc.map(|term| TerminalElement::preview(term, cx.focus_handle()));
+                                let zoom_level = this.workspace.read(cx).get_terminal_zoom(&this.project_id, &child_path);
+                                let preview_el = terminal_arc.clone().map(|term| {
+                                    TerminalElement::preview(term, cx.focus_handle()).with_zoom(zoom_level)
+                                });
+                                let gutter_el = terminal_arc.as_ref().and_then(|term| {
+                                    crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, None, cx)
+                                });
 
                                 let ghost_card = div()
                                     .id(ElementId::Name(format!("tabs-ghost-card-{}-{}", tid, seq).into()))
@@ -467,10 +473,18 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                             .size_full()
                                             .relative()
                                             .flex()
-                                            .flex_col()
-                                            .when_some(preview_el, |d, el| {
-                                                d.child(el)
-                                            })
+                                            .flex_row()
+                                            .when_some(gutter_el, |el, g| el.child(g))
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .h_full()
+                                                    .p(SPACE_XS)
+                                                    .relative()
+                                                    .when_some(preview_el, |d, el| {
+                                                        d.child(el)
+                                                    }),
+                                            ),
                                     );
 
                                 let tid_str = tid.clone();
@@ -525,74 +539,105 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         let make_ghost_expanding_cards = |this: &Self, cx: &App| -> Vec<AnyElement> {
             let mut cards = Vec::new();
             if enable_animations {
-                let t = theme(cx);
+                let render_settings = crate::terminal_view_settings(cx);
+                let defaults = render_settings.terminal_defaults();
+                let default_opts = velowork_state::SessionTerminalOptions::default();
+                let effective_config = velowork_terminal::resolve_effective_terminal_config(&default_opts, &defaults);
+                let term_palette = velowork_core::theme::get_terminal_palette_with_custom(
+                    &effective_config.color_scheme,
+                    &render_settings.custom_terminal_color_schemes,
+                );
+                let image_set = render_settings
+                    .terminal_background_image
+                    .as_ref()
+                    .map(|s| !s.trim().is_empty())
+                    .unwrap_or(false);
+                let base_alpha = if image_set { 0.0 } else { velowork_ui::theme::bg_opacity(cx) };
+                let pane_bg = if base_alpha > 0.0 {
+                    velowork_ui::theme::with_alpha(term_palette.background, base_alpha)
+                } else {
+                    gpui::transparent_black()
+                };
+
+                let ghost_bounds = Some(Bounds {
+                    origin: Point::default(),
+                    size: Size {
+                        width: px(w),
+                        height: px(content_h),
+                    },
+                });
+
                 for (i, child) in children.iter().enumerate() {
                     if let LayoutNode::Terminal { terminal_id: Some(tid), .. } = child {
-                        if let Some(&(start, seq)) = this.restoring_tabs.get(tid) {
-                            if start.elapsed() < std::time::Duration::from_millis(300) {
-                                let mut child_path = this.layout_path.clone();
-                                child_path.push(i);
-                                let terminal_pane = this.child_containers.get(&child_path)
-                                    .and_then(|c| c.read(cx).terminal_pane.clone());
-                                let terminal_arc = terminal_pane.as_ref().and_then(|p| p.read(cx).terminal_arc());
-                                let preview_el = terminal_arc.map(|term| TerminalElement::preview(term, cx.focus_handle()));
+                        if let Some(&(_start, seq)) = this.restoring_tabs.get(tid) {
+                            let mut child_path = this.layout_path.clone();
+                            child_path.push(i);
+                            let terminal_pane = this.child_containers.get(&child_path)
+                                .and_then(|c| c.read(cx).terminal_pane.clone());
+                            let terminal_arc = terminal_pane.as_ref().and_then(|p| p.read(cx).terminal_arc());
+                            let zoom_level = this.workspace.read(cx).get_terminal_zoom(&this.project_id, &child_path);
+                            let preview_el = terminal_arc.clone().map(|term| {
+                                TerminalElement::preview(term, cx.focus_handle()).with_zoom(zoom_level)
+                            });
+                            let gutter_el = terminal_arc.as_ref().and_then(|term| {
+                                crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, ghost_bounds, cx)
+                            });
 
-                                let ghost_card = div()
-                                    .id(ElementId::Name(format!("tabs-ghost-expand-card-{}-{}", tid, seq).into()))
-                                    .bg(surface_bg_t(t.bg_panel, &t))
-                                    .shadow_lg()
-                                    .overflow_hidden()
-                                    .child(
-                                        div()
-                                            .size_full()
-                                            .relative()
-                                            .flex()
-                                            .flex_col()
-                                            .when_some(preview_el, |d, el| {
-                                                d.child(el)
-                                            })
-                                    );
-
-                                let tid_str = tid.clone();
-                                let expanding_el = ghost_card.with_animation(
-                                    format!("tabs-ghost-expand-{}-{}", tid_str, seq),
-                                    Animation::new(std::time::Duration::from_millis(300))
-                                        .with_easing(ease_out_panel),
-                                    move |this, delta| {
-                                        let t = delta;
-                                        if t >= 0.98 {
-                                            this.absolute()
-                                                .inset_0()
-                                                .size_full()
-                                                .opacity(0.0)
-                                        } else {
-                                            let scale = 0.18 + 0.82 * t;
-                                            let cur_w = (w * scale).max(10.0);
-                                            let cur_h = (content_h * scale).max(10.0);
-                                            let target_x = dock_x;
-                                            let target_y = (content_h - cur_h - 16.0).max(0.0);
-                                            let cur_x = target_x * (1.0 - t);
-                                            let cur_y = target_y * (1.0 - t);
-                                            let cur_radius = (12.0 - 6.0 * t).max(6.0);
-                                            let fade = if t < 0.25 {
-                                                (t / 0.25).clamp(0.0, 1.0)
-                                            } else {
-                                                1.0
-                                            };
-                                            this.absolute()
-                                                .left(px(cur_x))
-                                                .top(px(cur_y))
-                                                .w(px(cur_w))
-                                                .h(px(cur_h))
-                                                .rounded(px(cur_radius))
-                                                .shadow_lg()
-                                                .overflow_hidden()
-                                                .opacity(fade)
-                                        }
-                                    },
+                            let ghost_card = div()
+                                .id(ElementId::Name(format!("tabs-ghost-expand-card-{}-{}", tid, seq).into()))
+                                .bg(pane_bg)
+                                .overflow_hidden()
+                                .child(
+                                    div()
+                                        .size_full()
+                                        .relative()
+                                        .flex()
+                                        .flex_row()
+                                        .when_some(gutter_el, |el, g| el.child(g))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .h_full()
+                                                .p(SPACE_XS)
+                                                .relative()
+                                                .when_some(preview_el, |d, el| {
+                                                    d.child(el)
+                                                }),
+                                        ),
                                 );
-                                cards.push(expanding_el.into_any_element());
-                            }
+
+                            let tid_str = tid.clone();
+                            let expanding_el = ghost_card.with_animation(
+                                format!("tabs-ghost-expand-{}-{}", tid_str, seq),
+                                Animation::new(std::time::Duration::from_millis(300))
+                                    .with_easing(ease_out_panel),
+                                move |this, delta| {
+                                    let t = delta.clamp(0.0, 1.0);
+                                    let scale = 0.18 + 0.82 * t;
+                                    let cur_w = (w * scale).max(10.0);
+                                    let cur_h = (content_h * scale).max(10.0);
+                                    let target_x = dock_x;
+                                    let target_y = (content_h - cur_h - 16.0).max(0.0);
+                                    let cur_x = target_x * (1.0 - t);
+                                    let cur_y = target_y * (1.0 - t);
+                                    let cur_radius = (12.0 * (1.0 - t)).max(0.0);
+                                    let fade = if t < 0.25 {
+                                        (t / 0.25).clamp(0.0, 1.0)
+                                    } else {
+                                        1.0
+                                    };
+                                    this.absolute()
+                                        .left(px(cur_x))
+                                        .top(px(cur_y))
+                                        .w(px(cur_w))
+                                        .h(px(cur_h))
+                                        .rounded(px(cur_radius))
+                                        .when(t < 0.95, |d| d.shadow_lg())
+                                        .overflow_hidden()
+                                        .opacity(fade)
+                                },
+                            );
+                            cards.push(expanding_el.into_any_element());
                         }
                     }
                 }
@@ -601,7 +646,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         };
 
         if visible_indices.is_empty() {
-            let tab_bar = self.render_tab_bar(children, active_tab, false, cx);
+            let tab_bar = self.render_tab_bar(children, active_tab, false, window, cx);
             let welcome_view = self.render_welcome_empty_state(window, cx);
             let ghost_cards = make_ghost_collapsing_cards(self, cx);
             let expanding_cards = make_ghost_expanding_cards(self, cx);
@@ -666,7 +711,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             }
         }
 
-        let tab_bar = self.render_tab_bar(children, effective_active_tab, false, cx);
+        let tab_bar = self.render_tab_bar(children, effective_active_tab, false, window, cx);
         let ghost_cards = make_ghost_collapsing_cards(self, cx);
         let expanding_cards = make_ghost_expanding_cards(self, cx);
 
@@ -731,7 +776,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                         div()
                             .size_full()
                             .when(is_active_restoring, |d| d.opacity(0.0))
-                            .child(AnyView::from(container).cached(StyleRefinement::default().size_full()))
+                            .child(container.clone())
                     })
                     .children(ghost_cards)
                     .children(expanding_cards),
@@ -740,7 +785,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
 
     pub(super) fn render_standalone_tab_bar(
         &mut self,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let node = {
@@ -753,7 +798,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             _ => &[],
         };
 
-        self.render_tab_bar(children, 0, true, cx)
+        self.render_tab_bar(children, 0, true, window, cx)
     }
 
     /// Resolve the SSH connection display name for a terminal's shell.
@@ -862,6 +907,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         children: &[LayoutNode],
         active_tab: usize,
         standalone: bool,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
         let t = theme(cx);
@@ -889,27 +935,54 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .map(|g| g.0.read(cx).settings.enable_animations)
             .unwrap_or(true);
 
-        let current_visible_ids: HashSet<String> = children
+        let current_all_ids: HashSet<String> = children
             .iter()
             .filter_map(|child| {
-                if !child.is_all_hidden() {
-                    if let LayoutNode::Terminal { terminal_id: Some(id), .. } = child {
-                        return Some(id.clone());
-                    }
+                if let LayoutNode::Terminal { terminal_id: Some(id), .. } = child {
+                    Some(id.clone())
+                } else {
+                    None
                 }
-                None
             })
             .collect();
 
-        if enable_animations {
-            for prev_id in &self.prev_visible_tab_ids {
-                if !current_visible_ids.contains(prev_id) && !self.collapsing_tabs.contains_key(prev_id) {
+        let current_minimized_ids: HashSet<String> = children
+            .iter()
+            .filter_map(|child| {
+                if let LayoutNode::Terminal { terminal_id: Some(id), minimized: true, .. } = child {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let current_visible_ids: HashSet<String> = children
+            .iter()
+            .filter_map(|child| {
+                if !child.is_all_hidden()
+                    && let LayoutNode::Terminal { terminal_id: Some(id), .. } = child
+                {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if enable_animations && self.has_initialized_tabs {
+            // 1. 只有上一帧已存在且未最小化，当前帧变为最小化的 Tab，才触发收缩动画
+            for id in &current_minimized_ids {
+                if self.prev_all_tab_ids.contains(id)
+                    && !self.prev_minimized_tab_ids.contains(id)
+                    && !self.collapsing_tabs.contains_key(id)
+                {
                     self.tab_anim_seq = self.tab_anim_seq.wrapping_add(1);
                     let seq = self.tab_anim_seq;
-                    self.restoring_tabs.remove(prev_id);
-                    self.collapsing_tabs.insert(prev_id.clone(), (std::time::Instant::now(), seq));
+                    self.restoring_tabs.remove(id);
+                    self.collapsing_tabs.insert(id.clone(), (std::time::Instant::now(), seq));
                     let entity = cx.entity().downgrade();
-                    let tid_clone = prev_id.clone();
+                    let tid_clone = id.clone();
                     cx.spawn(async move |_, cx| {
                         smol::Timer::after(std::time::Duration::from_millis(290)).await;
                         let _ = entity.update(cx, |this, cx| {
@@ -920,30 +993,40 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 }
             }
 
-            if self.has_initialized_tabs {
-                for cur_id in &current_visible_ids {
-                    if !self.prev_visible_tab_ids.contains(cur_id) && !self.restoring_tabs.contains_key(cur_id) {
-                        self.tab_anim_seq = self.tab_anim_seq.wrapping_add(1);
-                        let seq = self.tab_anim_seq;
-                        self.collapsing_tabs.remove(cur_id);
-                        self.restoring_tabs.insert(cur_id.clone(), (std::time::Instant::now(), seq));
-                        let entity = cx.entity().downgrade();
-                        let tid_clone = cur_id.clone();
-                        cx.spawn(async move |_, cx| {
-                            smol::Timer::after(std::time::Duration::from_millis(300)).await;
-                            let _ = entity.update(cx, |this, cx| {
-                                this.restoring_tabs.remove(&tid_clone);
-                                cx.notify();
-                            });
-                        }).detach();
-                    }
+            // 2. 只有上一帧处于最小化，当前帧恢复可见的 Tab，才触发还原展开动画
+            //    全新创建的 Tab（上一帧不在 prev_all_tab_ids 和 prev_minimized_tab_ids 中）绝对不触发
+            for cur_id in &current_visible_ids {
+                if self.prev_minimized_tab_ids.contains(cur_id)
+                    && !self.restoring_tabs.contains_key(cur_id)
+                {
+                    self.tab_anim_seq = self.tab_anim_seq.wrapping_add(1);
+                    let seq = self.tab_anim_seq;
+                    self.collapsing_tabs.remove(cur_id);
+                    self.restoring_tabs.insert(cur_id.clone(), (std::time::Instant::now(), seq));
+                    let entity = cx.entity().downgrade();
+                    let tid_clone = cur_id.clone();
+                    cx.spawn(async move |_, cx| {
+                        smol::Timer::after(std::time::Duration::from_millis(300)).await;
+                        let _ = entity.update(cx, |this, cx| {
+                            this.restoring_tabs.remove(&tid_clone);
+                            for child in this.child_containers.values() {
+                                child.update(cx, |_, cx| cx.notify());
+                            }
+                            cx.notify();
+                        });
+                    }).detach();
                 }
             }
         }
         self.prev_visible_tab_ids = current_visible_ids;
+        self.prev_all_tab_ids = current_all_ids;
+        self.prev_minimized_tab_ids = current_minimized_ids;
         self.has_initialized_tabs = true;
 
         let this_weak = cx.entity().downgrade();
+        self.tab_bounds.borrow_mut().retain(|k, _| *k < children.len());
+        let active_preview_props: std::rc::Rc<std::cell::RefCell<Option<velowork_ui::TerminalPreviewProps>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
         let tab_elements: Vec<_> = children
             .iter()
             .enumerate()
@@ -1263,25 +1346,33 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 background_builder,
             };
 
+            let is_preview_target = enable_tab_preview && !is_active && self.preview_tab == Some(i) && self.preview_opened;
+            if is_preview_target {
+                *active_preview_props.borrow_mut() = Some(preview_props.clone());
+            }
+
             let tab_element = if enable_tab_preview && !is_active {
-                tab_element.tooltip(move |_, cx| {
-                    let props = preview_props.clone();
-                    cx.new(|_| {
-                        velowork_ui::tooltip::Tooltip::element(move |_window, cx| {
-                            velowork_ui::terminal_preview_card(props.clone(), cx).into_any_element()
-                        })
-                        .bare()
-                        .direction(velowork_ui::tooltip::TooltipDirection::Bottom)
-                    })
-                    .into()
-                })
+                tab_element
             } else {
                 tab_element.tooltip(move |_, cx| {
                     cx.new(|_| velowork_ui::tooltip::Tooltip::new(tab_tooltip_text.clone())).into()
                 })
             };
 
+            let bounds_map = self.tab_bounds.clone();
+            let tab_idx = i;
+
             let tab_item = tab_element
+                .child(
+                    canvas(
+                        move |bounds, _window, _cx| {
+                            bounds_map.borrow_mut().insert(tab_idx, bounds);
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0(),
+                )
                 .overflow_hidden()
                 .when(has_drop_animation, |d| {
                     let glow_alpha = animation_progress * 0.5;
@@ -1294,8 +1385,8 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                     let weak = this_weak.clone();
                     move |&hovered, _window, cx| {
                         if let Some(this) = weak.upgrade() {
-                            let _ = this.update(cx, |this, cx| {
-                                let changed = match (hovered, this.hovered_tab) {
+                            this.update(cx, |this, cx| {
+                                let hovered_tab_changed = match (hovered, this.hovered_tab) {
                                     (true, Some(cur)) if cur == i => false,
                                     (false, Some(cur)) if cur == i => {
                                         this.hovered_tab = None;
@@ -1307,7 +1398,52 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                     }
                                     (false, _) => false,
                                 };
-                                if changed {
+
+                                let preview_enabled = enable_tab_preview && !is_active;
+                                if preview_enabled {
+                                    if hovered {
+                                        if this.preview_opened {
+                                            if this.preview_tab != Some(i) {
+                                                this.preview_tab = Some(i);
+                                                this.preview_is_fresh = false;
+                                                this.preview_seq = this.preview_seq.wrapping_add(1);
+                                                cx.notify();
+                                            }
+                                        } else {
+                                            this.preview_tab = Some(i);
+                                            this.preview_is_fresh = true;
+                                            this.preview_seq = this.preview_seq.wrapping_add(1);
+                                            let seq = this.preview_seq;
+                                            let entity = weak.clone();
+                                            cx.spawn(async move |_, cx| {
+                                                smol::Timer::after(std::time::Duration::from_millis(200)).await;
+                                                let _ = entity.update(cx, |this, cx| {
+                                                    if this.preview_seq == seq && this.preview_tab == Some(i) {
+                                                        this.preview_opened = true;
+                                                        cx.notify();
+                                                    }
+                                                });
+                                            }).detach();
+                                        }
+                                    } else if this.preview_tab == Some(i) {
+                                        this.preview_seq = this.preview_seq.wrapping_add(1);
+                                        let seq = this.preview_seq;
+                                        let entity = weak.clone();
+                                        cx.spawn(async move |_, cx| {
+                                            smol::Timer::after(std::time::Duration::from_millis(80)).await;
+                                            let _ = entity.update(cx, |this, cx| {
+                                                if this.preview_seq == seq {
+                                                    this.preview_tab = None;
+                                                    this.preview_opened = false;
+                                                    this.preview_is_fresh = true;
+                                                    cx.notify();
+                                                }
+                                            });
+                                        }).detach();
+                                    }
+                                }
+
+                                if hovered_tab_changed {
                                     cx.notify();
                                 }
                             });
@@ -1351,6 +1487,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                                 if let Some(this) = weak_close.upgrade() {
                                     this.update(cx, |this, _| {
                                         this.hovered_tab = None;
+                                        this.preview_tab = None;
+                                        this.preview_opened = false;
+                                        this.preview_seq = this.preview_seq.wrapping_add(1);
                                     });
                                 }
                                 if let Some(ref dispatcher) = dispatcher_for_tab_close {
@@ -1455,7 +1594,15 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                     let project_id = project_id.clone();
                     let terminal_id = terminal_id.clone();
                     let action_dispatcher = self.action_dispatcher.clone();
+                    let weak_middle = this_weak.clone();
                     cx.listener(move |_this, _event: &MouseDownEvent, _window, cx| {
+                        if let Some(this) = weak_middle.upgrade() {
+                            this.update(cx, |this, _| {
+                                this.preview_tab = None;
+                                this.preview_opened = false;
+                                this.preview_seq = this.preview_seq.wrapping_add(1);
+                            });
+                        }
                         if let Some(ref tid) = terminal_id
                             && let Some(ref dispatcher) = action_dispatcher {
                                 dispatcher.dispatch(velowork_core::api::ActionRequest::CloseTerminal {
@@ -1560,6 +1707,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                     let tab_label = tab_label.clone();
                     let dispatcher_for_click = self.action_dispatcher.clone();
                     cx.listener(move |this, _, window, cx| {
+                        this.preview_tab = None;
+                        this.preview_opened = false;
+                        this.preview_seq = this.preview_seq.wrapping_add(1);
+
                         let is_double_click = this.tab_click_detector.check(i);
 
                         if this.tab_rename_state.is_some() && !is_double_click {
@@ -1872,6 +2023,27 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             p.surface_header
         };
 
+        let preview_overlay = if let (Some(preview_idx), Some(props)) = (self.preview_tab, active_preview_props.borrow_mut().take()) {
+            let bounds = self.tab_bounds.borrow().get(&preview_idx).copied();
+            bounds.map(|b| {
+                let enable_animations = velowork_app_core::settings::settings(cx).enable_animations;
+                let is_fresh = self.preview_is_fresh;
+                let anim_id: SharedString = format!("tab-preview-overlay-{:?}-{}", self.layout_path, preview_idx).into();
+                velowork_ui::render_anchored_preview(
+                    anim_id,
+                    props,
+                    b,
+                    velowork_ui::TabPreviewPlacement::Below,
+                    is_fresh,
+                    enable_animations,
+                    Some(window.viewport_size()),
+                    cx,
+                )
+            })
+        } else {
+            None
+        };
+
         div()
             .group("tab-bar-row")
             .h(bar_height)
@@ -2009,6 +2181,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                         .absolute()
                         .child(menu),
                 )
+            })
+            .when_some(preview_overlay, |this, overlay| {
+                this.child(overlay)
             })
     }
 

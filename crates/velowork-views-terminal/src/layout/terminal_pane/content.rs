@@ -956,122 +956,13 @@ impl Render for TerminalContent {
                     }
                 }),
             )
-            .child(
+            .child({
+                let gutter_el = render_line_numbers_gutter(&terminal, zoom_level, self.element_bounds, cx);
                 div()
                     .size_full()
                     .flex()
                     .flex_row()
-                    .when(render_settings.show_line_numbers, |el| {
-                        let terminal_for_lines = terminal.clone();
-                        let rows = terminal_for_lines.resize_state.lock().size.rows;
-                        let (line_labels, is_alt_screen, max_line_num) = terminal_for_lines.with_content(|term| {
-                            if term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
-                                return (Vec::new(), true, 0usize);
-                            }
-
-                            let grid = term.grid();
-                            let offset = grid.display_offset() as i32;
-                            let cols = grid.columns();
-                            let screen_lines = grid.screen_lines() as i32;
-
-                            let topmost = grid.topmost_line().0;
-
-                            let cursor_line = grid.cursor.point.line.0;
-                            let mut last_content_line = cursor_line.max(0);
-                            for row_idx in (0..screen_lines).rev() {
-                                let mut has_content = false;
-                                for col in 0..cols {
-                                    let c = grid[alacritty_terminal::index::Point::new(
-                                        Line(row_idx),
-                                        Column(col),
-                                    )]
-                                    .c;
-                                    if c != ' ' && c != '\0' {
-                                        has_content = true;
-                                        break;
-                                    }
-                                }
-                                if has_content {
-                                    last_content_line = last_content_line.max(row_idx);
-                                    break;
-                                }
-                            }
-                            let last_active_line = last_content_line.max(cursor_line);
-
-                            let mut current_logical_line = 1usize;
-                            let mut labels = Vec::with_capacity(screen_lines as usize);
-                            let mut max_line = 1usize;
-
-                            for l in topmost..=last_active_line {
-                                let is_continuation = if l > topmost {
-                                    let prev_line = Line(l - 1);
-                                    let last_col = Column(cols - 1);
-                                    let cell = &grid[alacritty_terminal::index::Point::new(prev_line, last_col)];
-                                    cell.flags.contains(alacritty_terminal::term::cell::Flags::WRAPLINE)
-                                } else {
-                                    false
-                                };
-
-                                if !is_continuation {
-                                    current_logical_line += 1;
-                                }
-
-                                let visual_row = l + offset;
-                                if visual_row >= 0 && visual_row < screen_lines {
-                                    let num = (current_logical_line - 1).max(1);
-                                    let label = if is_continuation {
-                                        String::new()
-                                    } else {
-                                        max_line = max_line.max(num);
-                                        format!("{}", num)
-                                    };
-                                    labels.push(label);
-                                }
-                            }
-
-                            (labels, false, max_line)
-                        });
-
-                        if is_alt_screen {
-                            return el;
-                        }
-
-                        let font_sz = effective_config.font_size * zoom_level * velowork_ui::tokens::ui_scale_factor(cx);
-                        let lh = font_sz * render_settings.line_height;
-                        let font_family = effective_config.font_family.clone();
-                        let line_num_color = with_alpha(term_palette.foreground, 0.45);
-
-                        let max_digits = max_line_num.to_string().len().max(3);
-                        let gutter_w = (max_digits as f32 * font_sz * 0.6 + 16.0).max(36.0);
-
-                        el.child(
-                            div()
-                                .flex_shrink_0()
-                                .w(px(gutter_w))
-                                .h_full()
-                                .pt(SPACE_XS)
-                                .pr(SPACE_SM)
-                                .flex()
-                                .flex_col()
-                                .overflow_hidden()
-                                .children((0..rows).map(move |row| {
-                                    let label = line_labels
-                                        .get(row as usize)
-                                        .cloned()
-                                        .unwrap_or_default();
-                                    let font_family = font_family.clone();
-                                    div()
-                                        .font_family(font_family)
-                                        .text_size(px(font_sz))
-                                        .line_height(px(lh))
-                                        .text_color(line_num_color)
-                                        .w_full()
-                                        .flex()
-                                        .justify_end()
-                                        .child(label)
-                                }))
-                        )
-                    })
+                    .when_some(gutter_el, |el, g| el.child(g))
                     .child(
                         div()
                             .flex_1()
@@ -1096,8 +987,8 @@ impl Render for TerminalContent {
                                     .with_font_size(effective_config.font_size)
                                     .with_color_scheme(effective_config.color_scheme.clone()),
                             ),
-                    ),
-            )
+                    )
+            })
             .child(self.scrollbar.clone())
             .into_any_element()
     }
@@ -1127,6 +1018,146 @@ pub(crate) fn compute_max_scroll_x(
     } else {
         content_width - available_width + cell_width
     }
+}
+
+/// Render terminal line number gutter element.
+/// Reused across `TerminalContent`, tab restore ghost cards, and standalone pane restore cards.
+pub fn render_line_numbers_gutter(
+    terminal: &Arc<Terminal>,
+    zoom_level: f32,
+    element_bounds: Option<Bounds<Pixels>>,
+    cx: &App,
+) -> Option<Div> {
+    let render_settings = crate::terminal_view_settings(cx);
+    if !render_settings.show_line_numbers {
+        return None;
+    }
+
+    let rows = terminal.resize_state.lock().size.rows;
+    let (line_labels, is_alt_screen, max_line_num) = terminal.with_content(|term| {
+        if term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
+            return (Vec::new(), true, 0usize);
+        }
+
+        let grid = term.grid();
+        let offset = grid.display_offset() as i32;
+        let cols = grid.columns();
+        let screen_lines = grid.screen_lines() as i32;
+
+        let topmost = grid.topmost_line().0;
+
+        let cursor_line = grid.cursor.point.line.0;
+        let mut last_content_line = cursor_line.max(0);
+        for row_idx in (0..screen_lines).rev() {
+            let mut has_content = false;
+            for col in 0..cols {
+                let c = grid[alacritty_terminal::index::Point::new(
+                    Line(row_idx),
+                    Column(col),
+                )]
+                .c;
+                if c != ' ' && c != '\0' {
+                    has_content = true;
+                    break;
+                }
+            }
+            if has_content {
+                last_content_line = last_content_line.max(row_idx);
+                break;
+            }
+        }
+        let last_active_line = last_content_line.max(cursor_line);
+
+        let mut current_logical_line = 1usize;
+        let mut labels = Vec::with_capacity(screen_lines as usize);
+        let mut max_line = 1usize;
+
+        for l in topmost..=last_active_line {
+            let is_continuation = if l > topmost {
+                let prev_line = Line(l - 1);
+                let last_col = Column(cols - 1);
+                let cell = &grid[alacritty_terminal::index::Point::new(prev_line, last_col)];
+                cell.flags.contains(alacritty_terminal::term::cell::Flags::WRAPLINE)
+            } else {
+                false
+            };
+
+            if !is_continuation {
+                current_logical_line += 1;
+            }
+
+            let visual_row = l + offset;
+            if visual_row >= 0 && visual_row < screen_lines {
+                let num = (current_logical_line - 1).max(1);
+                let label = if is_continuation {
+                    String::new()
+                } else {
+                    max_line = max_line.max(num);
+                    format!("{}", num)
+                };
+                labels.push(label);
+            }
+        }
+
+        (labels, false, max_line)
+    });
+
+    if is_alt_screen {
+        return None;
+    }
+
+    let defaults = render_settings.terminal_defaults();
+    let default_opts = velowork_state::SessionTerminalOptions::default();
+    let effective_config = velowork_terminal::resolve_effective_terminal_config(&default_opts, &defaults);
+    let font_sz = effective_config.font_size * zoom_level * velowork_ui::tokens::ui_scale_factor(cx);
+    let lh = font_sz * render_settings.line_height;
+    let font_family = effective_config.font_family.clone();
+    let term_palette = velowork_core::theme::get_terminal_palette_with_custom(
+        &effective_config.color_scheme,
+        &render_settings.custom_terminal_color_schemes,
+    );
+    let line_num_color = with_alpha(term_palette.foreground, 0.45);
+
+    let max_digits = max_line_num.to_string().len().max(3);
+    let gutter_w = (max_digits as f32 * font_sz * 0.6 + 16.0).max(36.0);
+
+    let effective_rows = if let Some(bounds) = element_bounds {
+        if lh > 0.0 {
+            ((f32::from(bounds.size.height) - 0.5) / lh).floor().max(1.0) as u16
+        } else {
+            rows
+        }
+    } else {
+        rows.max(30)
+    }.max(rows);
+
+    Some(
+        div()
+            .flex_shrink_0()
+            .w(px(gutter_w))
+            .h_full()
+            .pt(SPACE_XS)
+            .pr(SPACE_SM)
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .children((0..effective_rows).map(move |row| {
+                let label = line_labels
+                    .get(row as usize)
+                    .cloned()
+                    .unwrap_or_default();
+                let font_family = font_family.clone();
+                div()
+                    .font_family(font_family)
+                    .text_size(px(font_sz))
+                    .line_height(px(lh))
+                    .text_color(line_num_color)
+                    .w_full()
+                    .flex()
+                    .justify_end()
+                    .child(label)
+            }))
+    )
 }
 
 /// Lines to scroll for drag-selection auto-scroll, given the pointer's `y` and

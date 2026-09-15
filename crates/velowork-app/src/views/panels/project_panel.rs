@@ -65,6 +65,19 @@ pub struct ProjectColumn {
     taskbar_scroll_handle: ScrollHandle,
     /// Bounding box of this project column tracked during render
     pub(crate) column_bounds: Option<Bounds<Pixels>>,
+    /// Window-absolute bounds of rendered minimized capsules, keyed by terminal id.
+    capsule_bounds: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, Bounds<Pixels>>>>,
+    /// Currently hovered terminal id for minimized capsule preview.
+    capsule_preview_id: Option<String>,
+    /// Whether the capsule preview is currently opened (passed initial debounce).
+    capsule_preview_opened: bool,
+    /// Generation counter for capsule preview debounce / dismissal.
+    capsule_preview_seq: usize,
+    /// Whether the current preview open is a fresh open.
+    capsule_preview_is_fresh: bool,
+    /// Generation epoch for capsule entrance animation per terminal id.
+    capsule_epochs: std::rc::Rc<std::cell::RefCell<std::collections::HashMap<String, usize>>>,
+    capsule_epoch_counter: std::rc::Rc<std::cell::RefCell<usize>>,
 }
 
 impl ProjectColumn {
@@ -136,6 +149,13 @@ impl ProjectColumn {
             welcome_selected_index: None,
             taskbar_scroll_handle: ScrollHandle::new(),
             column_bounds: None,
+            capsule_bounds: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
+            capsule_preview_id: None,
+            capsule_preview_opened: false,
+            capsule_preview_seq: 0,
+            capsule_preview_is_fresh: true,
+            capsule_epochs: std::rc::Rc::new(std::cell::RefCell::new(std::collections::HashMap::new())),
+            capsule_epoch_counter: std::rc::Rc::new(std::cell::RefCell::new(0)),
         }
     }
 
@@ -213,6 +233,8 @@ impl ProjectColumn {
         &self,
         project: &ProjectData,
         t: ThemeColors,
+        window: &Window,
+        this_weak: WeakEntity<Self>,
         cx: &App,
     ) -> impl IntoElement {
         let minimized_terminals = project
@@ -236,6 +258,32 @@ impl ProjectColumn {
 
         let restore_tip = i18n!(cx, "project.restore_terminal_tooltip");
         let attach_tip = i18n!(cx, "project.attach_terminal_tooltip");
+
+        let active_capsule_props: std::rc::Rc<std::cell::RefCell<Option<(String, velowork_ui::TerminalPreviewProps)>>> =
+            std::rc::Rc::new(std::cell::RefCell::new(None));
+
+        let mut active_ids: std::collections::HashSet<&str> =
+            minimized_terminals.iter().map(|(t, _, _)| t.as_str()).collect();
+        active_ids.extend(detached_terminals.iter().map(|(t, _, _)| t.as_str()));
+        self.capsule_bounds.borrow_mut().retain(|k, _| active_ids.contains(k.as_str()));
+
+        let mut epochs_map = std::collections::HashMap::new();
+        {
+            let mut epochs = self.capsule_epochs.borrow_mut();
+            epochs.retain(|k, _| active_ids.contains(k.as_str()));
+            let mut counter = self.capsule_epoch_counter.borrow_mut();
+            for tid in &active_ids {
+                let ep = if let Some(&ep) = epochs.get(*tid) {
+                    ep
+                } else {
+                    *counter = counter.wrapping_add(1);
+                    let next_ep = *counter;
+                    epochs.insert(tid.to_string(), next_ep);
+                    next_ep
+                };
+                epochs_map.insert(tid.to_string(), ep);
+            }
+        }
 
         let is_terminal_connection_lost = |tid: &str, cx: &App| -> bool {
             if let Some(s) = self.backend.get_ssh_session(tid) {
@@ -502,25 +550,31 @@ impl ProjectColumn {
                     .overflow_hidden()
                     .text_size(ui_text_sm(cx));
 
+                if enable_tab_preview && self.capsule_preview_id.as_ref() == Some(&terminal_id) && self.capsule_preview_opened {
+                    *active_capsule_props.borrow_mut() = Some((terminal_id.clone(), preview_props.clone()));
+                }
+
                 let card_el = if enable_tab_preview {
-                    let props = preview_props;
-                    card_el.tooltip(move |_, cx| {
-                        let p_inner = props.clone();
-                        cx.new(|_| {
-                            Tooltip::element(move |_window, cx| {
-                                velowork_ui::terminal_preview_card(p_inner.clone(), cx).into_any_element()
-                            })
-                            .bare()
-                            .direction(velowork_ui::tooltip::TooltipDirection::Top)
-                        })
-                        .into()
-                    })
+                    card_el
                 } else {
                     let tip = tip_text.clone();
                     card_el.tooltip(move |_, cx| {
                         cx.new(|_| Tooltip::new(tip.clone())).into()
                     })
                 };
+
+                let bounds_map = self.capsule_bounds.clone();
+                let tid_for_bounds = terminal_id.clone();
+                let card_el = card_el.child(
+                    canvas(
+                        move |bounds, _window, _cx| {
+                            bounds_map.borrow_mut().insert(tid_for_bounds.clone(), bounds);
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0(),
+                );
 
                 let card_el = card_el
                     .child(
@@ -573,12 +627,23 @@ impl ProjectColumn {
                             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                 cx.stop_propagation();
                             })
-                            .on_click(move |_, _window, cx| {
-                                backend.kill(&terminal_id);
-                                workspace.update(cx, |ws, cx| {
-                                    ws.close_terminal(&project_id, &layout_path, cx);
-                                });
-                                cx.stop_propagation();
+                            .on_click({
+                                let this_weak = this_weak.clone();
+                                move |_, _window, cx| {
+                                    if let Some(this) = this_weak.upgrade() {
+                                        this.update(cx, |this, cx| {
+                                            this.capsule_preview_id = None;
+                                            this.capsule_preview_opened = false;
+                                            this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                            cx.notify();
+                                        });
+                                    }
+                                    backend.kill(&terminal_id);
+                                    workspace.update(cx, |ws, cx| {
+                                        ws.close_terminal(&project_id, &layout_path, cx);
+                                    });
+                                    cx.stop_propagation();
+                                }
                             })
                     })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
@@ -591,7 +656,16 @@ impl ProjectColumn {
                         let focus_manager = focus_manager.clone();
                         let layout_container = self.layout_container.clone();
                         let window_id = self.window_id;
+                        let this_weak = this_weak.clone();
                         move |_, window, cx| {
+                            if let Some(this) = this_weak.upgrade() {
+                                this.update(cx, |this, cx| {
+                                    this.capsule_preview_id = None;
+                                    this.capsule_preview_opened = false;
+                                    this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                    cx.notify();
+                                });
+                            }
                             let tid_for_lc = terminal_id.clone();
                             let mut target_path = None;
                             focus_manager.update(cx, |fm, cx| {
@@ -640,13 +714,67 @@ impl ProjectColumn {
                             });
                             cx.stop_propagation();
                         }
+                    })
+                    .on_hover({
+                        let weak = this_weak.clone();
+                        let tid = terminal_id.clone();
+                        move |&hovered, _window, cx| {
+                            if let Some(this) = weak.upgrade() {
+                                this.update(cx, |this, cx| {
+                                    if !enable_tab_preview {
+                                        return;
+                                    }
+                                    if hovered {
+                                        if this.capsule_preview_opened {
+                                            if this.capsule_preview_id.as_deref() != Some(&tid) {
+                                                this.capsule_preview_id = Some(tid.clone());
+                                                this.capsule_preview_is_fresh = false;
+                                                this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                                cx.notify();
+                                            }
+                                        } else {
+                                            this.capsule_preview_id = Some(tid.clone());
+                                            this.capsule_preview_is_fresh = true;
+                                            this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                            let seq = this.capsule_preview_seq;
+                                            let entity = weak.clone();
+                                            let tid_clone = tid.clone();
+                                            cx.spawn(async move |_, cx| {
+                                                smol::Timer::after(std::time::Duration::from_millis(200)).await;
+                                                let _ = entity.update(cx, |this, cx| {
+                                                    if this.capsule_preview_seq == seq && this.capsule_preview_id.as_deref() == Some(&tid_clone) {
+                                                        this.capsule_preview_opened = true;
+                                                        cx.notify();
+                                                    }
+                                                });
+                                            }).detach();
+                                        }
+                                    } else if this.capsule_preview_id.as_deref() == Some(&tid) {
+                                        this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                        let seq = this.capsule_preview_seq;
+                                        let entity = weak.clone();
+                                        cx.spawn(async move |_, cx| {
+                                            smol::Timer::after(std::time::Duration::from_millis(80)).await;
+                                            let _ = entity.update(cx, |this, cx| {
+                                                if this.capsule_preview_seq == seq {
+                                                    this.capsule_preview_id = None;
+                                                    this.capsule_preview_opened = false;
+                                                    this.capsule_preview_is_fresh = true;
+                                                    cx.notify();
+                                                }
+                                            });
+                                        }).detach();
+                                    }
+                                });
+                            }
+                        }
                     });
 
-                let ws_version = self.workspace.read(cx).data_version();
                 let enable_animations = velowork_app_core::settings::settings(cx).enable_animations;
+                let epoch = epochs_map.get(&terminal_id).copied().unwrap_or(0);
                 if enable_animations {
                     card_el.with_animation(
-                        format!("minimized-capsule-enter-{}-{}", terminal_id, ws_version),
+                        format!("minimized-capsule-enter-{}-{}", terminal_id, epoch),
                         Animation::new(std::time::Duration::from_millis(240))
                             .with_easing(ease_tab_expand),
                         |this, delta| {
@@ -660,7 +788,8 @@ impl ProjectColumn {
                 } else {
                     card_el.into_any_element()
                 }
-            });
+            })
+            .collect::<Vec<_>>();
 
         let detached_elements = detached_terminals
             .into_iter()
@@ -897,19 +1026,12 @@ impl ProjectColumn {
                     .text_size(ui_text_sm(cx))
                     .text_color(rgb(t.text_primary));
 
+                if enable_tab_preview && self.capsule_preview_id.as_ref() == Some(&terminal_id) && self.capsule_preview_opened {
+                    *active_capsule_props.borrow_mut() = Some((terminal_id.clone(), preview_props.clone()));
+                }
+
                 let card_el = if enable_tab_preview {
-                    let props = preview_props;
-                    card_el.tooltip(move |_, cx| {
-                        let p_inner = props.clone();
-                        cx.new(|_| {
-                            Tooltip::element(move |_window, cx| {
-                                velowork_ui::terminal_preview_card(p_inner.clone(), cx).into_any_element()
-                            })
-                            .bare()
-                            .direction(velowork_ui::tooltip::TooltipDirection::Top)
-                        })
-                        .into()
-                    })
+                    card_el
                 } else {
                     let tip = tip_text.clone();
                     card_el.tooltip(move |_, cx| {
@@ -917,7 +1039,20 @@ impl ProjectColumn {
                     })
                 };
 
-                card_el
+                let bounds_map = self.capsule_bounds.clone();
+                let tid_for_bounds = terminal_id.clone();
+                let card_el = card_el.child(
+                    canvas(
+                        move |bounds, _window, _cx| {
+                            bounds_map.borrow_mut().insert(tid_for_bounds.clone(), bounds);
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .inset_0(),
+                );
+
+                let card_el = card_el
                     .child(
                         div()
                             .flex_shrink_0()
@@ -954,7 +1089,16 @@ impl ProjectColumn {
                         let focus_manager = self.focus_manager.clone();
                         let window_id = self.window_id;
                         let terminal_id = terminal_id_for_click.clone();
+                        let this_weak = this_weak.clone();
                         move |_, window, cx| {
+                            if let Some(this) = this_weak.upgrade() {
+                                this.update(cx, |this, cx| {
+                                    this.capsule_preview_id = None;
+                                    this.capsule_preview_opened = false;
+                                    this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                    cx.notify();
+                                });
+                            }
                             let mut target_path = None;
                             workspace.update(cx, |ws, cx| {
                                 ws.attach_terminal(&terminal_id, cx);
@@ -977,10 +1121,105 @@ impl ProjectColumn {
                             }
                         }
                     })
-            });
+                    .on_hover({
+                        let weak = this_weak.clone();
+                        let tid = terminal_id.clone();
+                        move |&hovered, _window, cx| {
+                            if let Some(this) = weak.upgrade() {
+                                this.update(cx, |this, cx| {
+                                    if !enable_tab_preview {
+                                        return;
+                                    }
+                                    if hovered {
+                                        if this.capsule_preview_opened {
+                                            if this.capsule_preview_id.as_deref() != Some(&tid) {
+                                                this.capsule_preview_id = Some(tid.clone());
+                                                this.capsule_preview_is_fresh = false;
+                                                this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                                cx.notify();
+                                            }
+                                        } else {
+                                            this.capsule_preview_id = Some(tid.clone());
+                                            this.capsule_preview_is_fresh = true;
+                                            this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                            let seq = this.capsule_preview_seq;
+                                            let entity = weak.clone();
+                                            let tid_clone = tid.clone();
+                                            cx.spawn(async move |_, cx| {
+                                                smol::Timer::after(std::time::Duration::from_millis(200)).await;
+                                                let _ = entity.update(cx, |this, cx| {
+                                                    if this.capsule_preview_seq == seq && this.capsule_preview_id.as_deref() == Some(&tid_clone) {
+                                                        this.capsule_preview_opened = true;
+                                                        cx.notify();
+                                                    }
+                                                });
+                                            }).detach();
+                                        }
+                                    } else if this.capsule_preview_id.as_deref() == Some(&tid) {
+                                        this.capsule_preview_seq = this.capsule_preview_seq.wrapping_add(1);
+                                        let seq = this.capsule_preview_seq;
+                                        let entity = weak.clone();
+                                        cx.spawn(async move |_, cx| {
+                                            smol::Timer::after(std::time::Duration::from_millis(80)).await;
+                                            let _ = entity.update(cx, |this, cx| {
+                                                if this.capsule_preview_seq == seq {
+                                                    this.capsule_preview_id = None;
+                                                    this.capsule_preview_opened = false;
+                                                    this.capsule_preview_is_fresh = true;
+                                                    cx.notify();
+                                                }
+                                            });
+                                        }).detach();
+                                    }
+                                });
+                            }
+                        }
+                    });
+
+                let enable_animations = velowork_app_core::settings::settings(cx).enable_animations;
+                let epoch = epochs_map.get(&terminal_id).copied().unwrap_or(0);
+                if enable_animations {
+                    card_el.with_animation(
+                        format!("minimized-capsule-enter-{}-{}", terminal_id, epoch),
+                        Animation::new(std::time::Duration::from_millis(240))
+                            .with_easing(ease_tab_expand),
+                        |this, delta| {
+                            let t = delta;
+                            this.relative()
+                                .left(px(-12.0 * (1.0 - t)))
+                                .opacity(t)
+                                .max_w(px(160.0 * t))
+                        },
+                    ).into_any_element()
+                } else {
+                    card_el.into_any_element()
+                }
+            })
+            .collect::<Vec<_>>();
 
         let scroll_container_id = format!("hidden-taskbar-scroll-container-{}", self.project_id);
         let scroll_id = format!("hidden-taskbar-scroll-{}", self.project_id);
+
+        let preview_overlay = if let Some((tid, props)) = active_capsule_props.borrow_mut().take() {
+            let bounds = self.capsule_bounds.borrow().get(&tid).copied();
+            bounds.map(|b| {
+                let enable_animations = velowork_app_core::settings::settings(cx).enable_animations;
+                let is_fresh = self.capsule_preview_is_fresh;
+                let anim_id: SharedString = format!("capsule-preview-overlay-{}", tid).into();
+                velowork_ui::render_anchored_preview(
+                    anim_id,
+                    props,
+                    b,
+                    velowork_ui::TabPreviewPlacement::Above,
+                    is_fresh,
+                    enable_animations,
+                    Some(window.viewport_size()),
+                    cx,
+                )
+            })
+        } else {
+            None
+        };
 
         div()
             .id(ElementId::Name(scroll_container_id.into()))
@@ -1006,6 +1245,7 @@ impl ProjectColumn {
                 Scrollbar::horizontal(&self.taskbar_scroll_handle)
                     .scrollbar_show(ScrollbarShow::Hover),
             )
+            .when_some(preview_overlay, |d, overlay| d.child(overlay))
             .into_any_element()
     }
 
@@ -1365,9 +1605,8 @@ impl Render for ProjectColumn {
                         .into_any_element()
                 };
 
-                let hidden_taskbar = self.render_hidden_taskbar(&project, t, cx);
-
                 let this_entity = cx.entity().downgrade();
+                let hidden_taskbar = self.render_hidden_taskbar(&project, t, window, this_entity.clone(), cx);
                 let bounds_tracker = canvas(
                     move |bounds, _window, cx| {
                         if let Some(entity) = this_entity.upgrade() {

@@ -17,6 +17,7 @@ use crate::layout::pane_drag::{PaneDrag, DropZone};
 use crate::layout::split_pane::{ActiveDrag, render_split_divider};
 use crate::layout::terminal_pane::TerminalPane;
 use crate::elements::terminal_element::TerminalElement;
+use velowork_ui::tokens::SPACE_XS;
 use velowork_terminal::TerminalsRegistry;
 use velowork_workspace::focus::FocusManager;
 use velowork_workspace::request_broker::RequestBroker;
@@ -78,6 +79,17 @@ pub struct LayoutContainer<D: ActionDispatch> {
     /// Index of the tab currently hovered by the mouse, used to reveal its
     /// close button (hidden by default). `None` when no tab is hovered.
     pub(super) hovered_tab: Option<usize>,
+    /// Window-absolute bounds of rendered tabs, keyed by tab index.
+    pub(super) tab_bounds: Rc<RefCell<HashMap<usize, Bounds<Pixels>>>>,
+    /// Currently hovered tab index for content preview.
+    pub(super) preview_tab: Option<usize>,
+    /// Whether the tab preview is currently opened (has passed the initial debounce delay).
+    pub(super) preview_opened: bool,
+    /// Generation counter to invalidate stale debounce / dismissal timers.
+    pub(super) preview_seq: usize,
+    /// Whether the current preview open is a fresh open (plays slide-down entrance)
+    /// vs. an adjacent tab switch (smooth instant swap without vertical jump).
+    pub(super) preview_is_fresh: bool,
     pub(super) prev_zoomed: Option<bool>,
     pub(super) zoom_epoch: usize,
     pub(super) prev_minimized: Option<bool>,
@@ -88,6 +100,8 @@ pub struct LayoutContainer<D: ActionDispatch> {
     pub(super) welcome_input: Option<Entity<SimpleInputState>>,
     pub(super) welcome_selected_index: Option<usize>,
     pub(super) prev_visible_tab_ids: HashSet<String>,
+    pub(super) prev_all_tab_ids: HashSet<String>,
+    pub(super) prev_minimized_tab_ids: HashSet<String>,
     pub(super) has_initialized_tabs: bool,
     pub(super) tab_anim_seq: usize,
     pub(super) collapsing_tabs: HashMap<String, (std::time::Instant, usize)>,
@@ -232,6 +246,11 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             overlay_registry: None,
             background_cache_observed: false,
             hovered_tab: None,
+            tab_bounds: Rc::new(RefCell::new(HashMap::new())),
+            preview_tab: None,
+            preview_opened: false,
+            preview_seq: 0,
+            preview_is_fresh: true,
             prev_zoomed: None,
             zoom_epoch: 0,
             prev_minimized: None,
@@ -242,6 +261,8 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             welcome_input: None,
             welcome_selected_index: None,
             prev_visible_tab_ids: HashSet::new(),
+            prev_all_tab_ids: HashSet::new(),
+            prev_minimized_tab_ids: HashSet::new(),
             has_initialized_tabs: false,
             tab_anim_seq: 0,
             collapsing_tabs: HashMap::new(),
@@ -251,14 +272,26 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
 
     /// Mark a terminal as restored so any collapsing ghost tab is dismissed.
     pub fn mark_restoring(&mut self, target_terminal_id: &str, cx: &mut Context<Self>) {
-        self.collapsing_tabs.remove(target_terminal_id);
-        self.restoring_tabs.remove(target_terminal_id);
-        self.restore_epoch = self.restore_epoch.wrapping_add(1);
-        self.restoring_terminal_id = Some((
-            target_terminal_id.to_string(),
-            self.restore_epoch,
-            std::time::Instant::now(),
-        ));
+        let in_tab_group = self.is_in_tab_group(cx);
+        if !in_tab_group {
+            self.collapsing_tabs.remove(target_terminal_id);
+            self.restoring_tabs.remove(target_terminal_id);
+            self.restore_epoch = self.restore_epoch.wrapping_add(1);
+            self.restoring_terminal_id = Some((
+                target_terminal_id.to_string(),
+                self.restore_epoch,
+                std::time::Instant::now(),
+            ));
+
+            let entity = cx.entity().downgrade();
+            cx.spawn(async move |_, cx| {
+                smol::Timer::after(std::time::Duration::from_millis(300)).await;
+                let _ = entity.update(cx, |this, cx| {
+                    this.restoring_terminal_id = None;
+                    cx.notify();
+                });
+            }).detach();
+        }
 
         for child_container in self.child_containers.values() {
             child_container.update(cx, |child, cx| {
@@ -817,9 +850,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .unwrap_or(true);
 
         let was_normal = self.prev_minimized == Some(false);
-        let is_minimize = was_normal && minimized;
+        let is_minimize = !in_tab_group && was_normal && minimized;
         let was_minimized = self.prev_minimized == Some(true);
-        let is_restore = was_minimized && !minimized;
+        let is_restore = !in_tab_group && was_minimized && !minimized;
         self.prev_minimized = Some(minimized);
 
         if is_minimize {
@@ -853,9 +886,14 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
 
             if enable_animations && current_minimize_epoch > 0 && minimized {
                 let anim_id = terminal_id.clone().unwrap_or_else(|| format!("term-min-{:?}", self.layout_path));
-                let preview_el = self.terminal_pane.as_ref()
-                    .and_then(|p| p.read(cx).terminal_arc())
-                    .map(|term| TerminalElement::preview(term, cx.focus_handle()));
+                let zoom_level = self.workspace.read(cx).get_terminal_zoom(&self.project_id, &self.layout_path);
+                let terminal_arc = self.terminal_pane.as_ref().and_then(|p| p.read(cx).terminal_arc());
+                let preview_el = terminal_arc.clone().map(|term| {
+                    TerminalElement::preview(term, cx.focus_handle()).with_zoom(zoom_level)
+                });
+                let gutter_el = terminal_arc.as_ref().and_then(|term| {
+                    crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, None, cx)
+                });
 
                 let ghost_card = div()
                     .id(ElementId::Name(format!("terminal-ghost-card-{}-{}", anim_id, current_minimize_epoch).into()))
@@ -867,10 +905,18 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             .size_full()
                             .relative()
                             .flex()
-                            .flex_col()
-                            .when_some(preview_el, |d, el| {
-                                d.child(el)
-                            })
+                            .flex_row()
+                            .when_some(gutter_el, |el, g| el.child(g))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h_full()
+                                    .p(SPACE_XS)
+                                    .relative()
+                                    .when_some(preview_el, |d, el| {
+                                        d.child(el)
+                                    }),
+                            ),
                     );
 
                 let contracting_el = ghost_card.with_animation(
@@ -948,12 +994,13 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .overflow_hidden()
             .into_any_element();
 
-        let is_restoring_this = is_restore
-            || self.restoring_terminal_id.as_ref().map(|(tid, ep, start)| {
+        let is_restoring_this = !in_tab_group && (
+            is_restore
+            || self.restoring_terminal_id.as_ref().map(|(tid, ep, _start)| {
                 *ep == current_restore_epoch
                     && terminal_id.as_deref() == Some(tid.as_str())
-                    && start.elapsed() < std::time::Duration::from_millis(320)
-            }).unwrap_or(false);
+            }).unwrap_or(false)
+        );
 
         let mut content_area = div()
             .flex_1()
@@ -967,25 +1014,64 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .child(content_el);
 
         if enable_animations && is_restoring_this && current_restore_epoch > 0 {
-            let t = theme(cx);
-            let preview_el = self.terminal_pane.as_ref()
-                .and_then(|p| p.read(cx).terminal_arc())
-                .map(|term| TerminalElement::preview(term, cx.focus_handle()));
+            let render_settings = crate::terminal_view_settings(cx);
+            let defaults = render_settings.terminal_defaults();
+            let default_opts = velowork_state::SessionTerminalOptions::default();
+            let effective_config = velowork_terminal::resolve_effective_terminal_config(&default_opts, &defaults);
+            let term_palette = velowork_core::theme::get_terminal_palette_with_custom(
+                &effective_config.color_scheme,
+                &render_settings.custom_terminal_color_schemes,
+            );
+            let image_set = render_settings
+                .terminal_background_image
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            let base_alpha = if image_set { 0.0 } else { velowork_ui::theme::bg_opacity(cx) };
+            let pane_bg = if base_alpha > 0.0 {
+                velowork_ui::theme::with_alpha(term_palette.background, base_alpha)
+            } else {
+                gpui::transparent_black()
+            };
+
+            let ghost_bounds = Some(Bounds {
+                origin: Point::default(),
+                size: Size {
+                    width: px(w),
+                    height: px(content_h),
+                },
+            });
+
+            let zoom_level = self.workspace.read(cx).get_terminal_zoom(&self.project_id, &self.layout_path);
+            let terminal_arc = self.terminal_pane.as_ref().and_then(|p| p.read(cx).terminal_arc());
+            let preview_el = terminal_arc.clone().map(|term| {
+                TerminalElement::preview(term, cx.focus_handle()).with_zoom(zoom_level)
+            });
+            let gutter_el = terminal_arc.as_ref().and_then(|term| {
+                crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, ghost_bounds, cx)
+            });
 
             let expand_ghost_card = div()
                 .id(ElementId::Name(format!("terminal-expand-card-{}-{}", anim_id, current_restore_epoch).into()))
-                .bg(surface_bg_t(t.bg_panel, &t))
-                .shadow_lg()
+                .bg(pane_bg)
                 .overflow_hidden()
                 .child(
                     div()
                         .size_full()
                         .relative()
                         .flex()
-                        .flex_col()
-                        .when_some(preview_el, |d, el| {
-                            d.child(el)
-                        })
+                        .flex_row()
+                        .when_some(gutter_el, |el, g| el.child(g))
+                        .child(
+                            div()
+                                .flex_1()
+                                .h_full()
+                                .p(SPACE_XS)
+                                .relative()
+                                .when_some(preview_el, |d, el| {
+                                    d.child(el)
+                                }),
+                        ),
                 );
 
             let expanding_el = expand_ghost_card.with_animation(
@@ -993,36 +1079,29 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 Animation::new(std::time::Duration::from_millis(300))
                     .with_easing(ease_out_panel),
                 move |this, delta| {
-                    let t = delta;
-                    if t >= 0.98 {
-                        this.absolute()
-                            .inset_0()
-                            .size_full()
-                            .opacity(0.0)
+                    let t = delta.clamp(0.0, 1.0);
+                    let scale = 0.18 + 0.82 * t;
+                    let cur_w = (w * scale).max(10.0);
+                    let cur_h = (content_h * scale).max(10.0);
+                    let target_x = dock_x;
+                    let target_y = (content_h - cur_h - 16.0).max(0.0);
+                    let cur_x = target_x * (1.0 - t);
+                    let cur_y = target_y * (1.0 - t);
+                    let cur_radius = (12.0 * (1.0 - t)).max(0.0);
+                    let fade = if t < 0.25 {
+                        (t / 0.25).clamp(0.0, 1.0)
                     } else {
-                        let scale = 0.18 + 0.82 * t;
-                        let cur_w = (w * scale).max(10.0);
-                        let cur_h = (content_h * scale).max(10.0);
-                        let target_x = dock_x;
-                        let target_y = (content_h - cur_h - 16.0).max(0.0);
-                        let cur_x = target_x * (1.0 - t);
-                        let cur_y = target_y * (1.0 - t);
-                        let cur_radius = (12.0 - 6.0 * t).max(6.0);
-                        let fade = if t < 0.25 {
-                            (t / 0.25).clamp(0.0, 1.0)
-                        } else {
-                            1.0
-                        };
-                        this.absolute()
-                            .left(px(cur_x))
-                            .top(px(cur_y))
-                            .w(px(cur_w))
-                            .h(px(cur_h))
-                            .rounded(px(cur_radius))
-                            .shadow_lg()
-                            .overflow_hidden()
-                            .opacity(fade)
-                    }
+                        1.0
+                    };
+                    this.absolute()
+                        .left(px(cur_x))
+                        .top(px(cur_y))
+                        .w(px(cur_w))
+                        .h(px(cur_h))
+                        .rounded(px(cur_radius))
+                        .when(t < 0.95, |d| d.shadow_lg())
+                        .overflow_hidden()
+                        .opacity(fade)
                 },
             );
             content_area = content_area.child(expanding_el);
