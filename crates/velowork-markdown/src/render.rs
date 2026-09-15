@@ -641,7 +641,7 @@ impl MarkdownDocument {
         cx: &App,
         selection: Option<(usize, usize)>,
     ) -> Div {
-        let styled = Self::build_inline_styled(inlines, base, t, cx, selection);
+        let styled = Self::build_inline_styled(inlines, base, t, cx, selection, &[]);
         div().whitespace_normal().child(styled)
     }
 
@@ -655,6 +655,7 @@ impl MarkdownDocument {
         t: &ThemeColors,
         _cx: &App,
         selection: Option<(usize, usize)>,
+        search_highlights: &[(Range<usize>, HighlightStyle)],
     ) -> StyledText {
         let text = Self::render_inlines_as_text(inlines);
         let mut highlights: Vec<(Range<usize>, HighlightStyle)> = Vec::new();
@@ -672,6 +673,9 @@ impl MarkdownDocument {
             false,
             &mut highlights,
         );
+
+        // Append search highlights
+        highlights.extend_from_slice(search_highlights);
 
         let sel_byte_range = selection.and_then(|(start, end)| {
             let sel_start = Self::char_to_byte(&text, start);

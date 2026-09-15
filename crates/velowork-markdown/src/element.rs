@@ -53,6 +53,16 @@ struct BlockHitTest {
     layout: TextLayout,
 }
 
+/// 搜索关键词高亮配置。
+#[derive(Clone, Debug)]
+pub struct MarkdownSearchConfig {
+    pub query: String,
+    pub case_sensitive: bool,
+    pub use_regex: bool,
+    pub current_match: Option<usize>,
+    pub start_flat_index: usize,
+}
+
 /// A unified GPUI element that renders a complete Markdown document without
 /// fragmenting paragraphs into separate input entities, with full selection support.
 #[derive(IntoElement)]
@@ -61,6 +71,7 @@ pub struct MarkdownElement {
     document: MarkdownDocument,
     copied_code_block: Option<usize>,
     selection: Option<(usize, usize)>,
+    search_config: Option<MarkdownSearchConfig>,
     on_url_click: Option<UrlClickCallback>,
     on_copy_code: Option<CodeCopyCallback>,
     on_selection_event: Option<SelectionEventCallback>,
@@ -75,6 +86,7 @@ impl MarkdownElement {
             document: doc,
             copied_code_block: None,
             selection: None,
+            search_config: None,
             on_url_click: None,
             on_copy_code: None,
             on_selection_event: None,
@@ -88,6 +100,7 @@ impl MarkdownElement {
             document,
             copied_code_block: None,
             selection: None,
+            search_config: None,
             on_url_click: None,
             on_copy_code: None,
             on_selection_event: None,
@@ -103,6 +116,28 @@ impl MarkdownElement {
     /// Set character-level selection range `(start_char, end_char)` for highlighting.
     pub fn selection(mut self, selection: Option<(usize, usize)>) -> Self {
         self.selection = selection;
+        self
+    }
+
+    /// 配置搜索高亮。
+    pub fn search(
+        mut self,
+        query: impl Into<String>,
+        case_sensitive: bool,
+        use_regex: bool,
+        current_match: Option<usize>,
+        start_flat_index: usize,
+    ) -> Self {
+        let q = query.into();
+        if !q.trim().is_empty() {
+            self.search_config = Some(MarkdownSearchConfig {
+                query: q,
+                case_sensitive,
+                use_regex,
+                current_match,
+                start_flat_index,
+            });
+        }
         self
     }
 
@@ -134,6 +169,93 @@ impl MarkdownElement {
     }
 }
 
+struct RunningSearchState<'a> {
+    config: &'a MarkdownSearchConfig,
+    running_index: usize,
+}
+
+fn find_search_matches(
+    text: &str,
+    query: &str,
+    case_sensitive: bool,
+    use_regex: bool,
+) -> Vec<Range<usize>> {
+    if query.is_empty() || text.is_empty() {
+        return Vec::new();
+    }
+    if use_regex {
+        if let Ok(re) = regex::Regex::new(query) {
+            re.find_iter(text).map(|m| m.range()).collect()
+        } else {
+            Vec::new()
+        }
+    } else {
+        let text_lower = text.to_lowercase();
+        let query_lower = query.to_lowercase();
+        let (haystack, needle) = if case_sensitive {
+            (text, query)
+        } else {
+            (text_lower.as_str(), query_lower.as_str())
+        };
+        let mut ranges = Vec::new();
+        let mut start = 0;
+        while start < haystack.len() {
+            if let Some(rel) = haystack[start..].find(needle) {
+                let idx = start + rel;
+                let end = idx + needle.len();
+                if text.is_char_boundary(idx) && text.is_char_boundary(end) {
+                    ranges.push(idx..end);
+                }
+                start = end.max(start + 1);
+            } else {
+                break;
+            }
+        }
+        ranges
+    }
+}
+
+fn search_highlights_for_text(
+    text: &str,
+    state: &mut Option<RunningSearchState>,
+    t: &ThemeColors,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let Some(state) = state.as_mut() else {
+        return Vec::new();
+    };
+
+    let ranges = find_search_matches(
+        text,
+        &state.config.query,
+        state.config.case_sensitive,
+        state.config.use_regex,
+    );
+
+    let mut out = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        let global_match_idx = state.running_index;
+        state.running_index += 1;
+
+        let is_current = state.config.current_match == Some(global_match_idx);
+        let style = if is_current {
+            HighlightStyle {
+                background_color: Some(rgb(t.accent).into()),
+                color: Some(rgb(0xffffff).into()),
+                font_weight: Some(FontWeight::BOLD),
+                ..Default::default()
+            }
+        } else {
+            HighlightStyle {
+                background_color: Some(rgb(t.accent).opacity(0.28).into()),
+                ..Default::default()
+            }
+        };
+        out.push((range, style));
+    }
+
+    out
+}
+
 impl RenderOnce for MarkdownElement {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = theme(cx);
@@ -143,6 +265,11 @@ impl RenderOnce for MarkdownElement {
         let doc = Rc::new(self.document);
         let nodes = doc.nodes();
         let hit_test_blocks: Rc<RefCell<Vec<BlockHitTest>>> = Rc::new(RefCell::new(Vec::new()));
+
+        let mut search_state = self.search_config.as_ref().map(|c| RunningSearchState {
+            config: c,
+            running_index: c.start_flat_index,
+        });
 
         for (node_idx, node) in nodes.iter().enumerate() {
             let offset = doc.node_offsets.get(node_idx).copied().unwrap_or(0);
@@ -172,6 +299,7 @@ impl RenderOnce for MarkdownElement {
                         node_idx,
                         offset,
                         node_selection,
+                        &mut search_state,
                         &hit_test_blocks,
                     )
                 }
@@ -184,6 +312,7 @@ impl RenderOnce for MarkdownElement {
                         node_idx,
                         offset,
                         node_selection,
+                        &mut search_state,
                         &hit_test_blocks,
                     )
                 }
@@ -200,6 +329,7 @@ impl RenderOnce for MarkdownElement {
                         is_copied,
                         self.on_copy_code.clone(),
                         node_selection,
+                        &mut search_state,
                         &hit_test_blocks,
                     )
                 }
@@ -213,6 +343,7 @@ impl RenderOnce for MarkdownElement {
                         node_idx,
                         offset,
                         node_selection,
+                        &mut search_state,
                         &hit_test_blocks,
                     )
                 }
@@ -225,6 +356,7 @@ impl RenderOnce for MarkdownElement {
                         node_idx,
                         offset,
                         node_selection,
+                        &mut search_state,
                         &hit_test_blocks,
                     )
                 }
@@ -419,6 +551,7 @@ fn render_paragraph(
     node_idx: usize,
     node_offset: usize,
     selection: Option<(usize, usize)>,
+    search_state: &mut Option<RunningSearchState>,
     hit_tests: &Rc<RefCell<Vec<BlockHitTest>>>,
 ) -> AnyElement {
     let base = TextStyle {
@@ -433,7 +566,8 @@ fn render_paragraph(
     let mut char_offset = 0usize;
     collect_inline_links(inlines, &flat_text, &mut char_offset, &mut links);
 
-    let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, selection);
+    let search_hl = search_highlights_for_text(&flat_text, search_state, t);
+    let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, selection, &search_hl);
 
     let inlines_char_len = flat_text.chars().count();
     hit_tests.borrow_mut().push(BlockHitTest {
@@ -471,6 +605,7 @@ fn render_heading(
     node_idx: usize,
     node_offset: usize,
     selection: Option<(usize, usize)>,
+    search_state: &mut Option<RunningSearchState>,
     hit_tests: &Rc<RefCell<Vec<BlockHitTest>>>,
 ) -> AnyElement {
     let (size, weight) = match level {
@@ -494,7 +629,8 @@ fn render_heading(
     let mut char_offset = 0usize;
     collect_inline_links(inlines, &flat_text, &mut char_offset, &mut links);
 
-    let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, selection);
+    let search_hl = search_highlights_for_text(&flat_text, search_state, t);
+    let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, selection, &search_hl);
 
     let inlines_char_len = flat_text.chars().count();
     hit_tests.borrow_mut().push(BlockHitTest {
@@ -544,6 +680,7 @@ fn render_list(
     node_idx: usize,
     node_offset: usize,
     selection: Option<(usize, usize)>,
+    search_state: &mut Option<RunningSearchState>,
     hit_tests: &Rc<RefCell<Vec<BlockHitTest>>>,
 ) -> AnyElement {
     let base = TextStyle {
@@ -585,7 +722,8 @@ fn render_list(
         let mut char_offset = 0usize;
         collect_inline_links(inlines, &flat_text, &mut char_offset, &mut links);
 
-        let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, item_sel);
+        let search_hl = search_highlights_for_text(&flat_text, search_state, t);
+        let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, item_sel, &search_hl);
 
         hit_tests.borrow_mut().push(BlockHitTest {
             char_start: item_offset,
@@ -619,7 +757,7 @@ fn render_list(
         let bullet_str = if ordered {
             format!("{}.", visible_count)
         } else {
-            "\u{2022}".to_string()
+            "•".to_string()
         };
 
         list_items.push(
@@ -629,8 +767,8 @@ fn render_list(
                 .gap(px(6.0))
                 .child(
                     div()
+                        .w(px(16.0))
                         .flex_shrink_0()
-                        .min_w(if ordered { px(18.0) } else { px(10.0) })
                         .text_color(rgb(t.text_muted))
                         .text_size(ui_text_md(cx))
                         .font_weight(if ordered {
@@ -673,6 +811,7 @@ fn render_blockquote(
     node_idx: usize,
     node_offset: usize,
     selection: Option<(usize, usize)>,
+    search_state: &mut Option<RunningSearchState>,
     hit_tests: &Rc<RefCell<Vec<BlockHitTest>>>,
 ) -> AnyElement {
     let base = TextStyle {
@@ -689,7 +828,8 @@ fn render_blockquote(
     let mut char_offset = 0usize;
     collect_inline_links(inlines, &flat_text, &mut char_offset, &mut links);
 
-    let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, selection);
+    let search_hl = search_highlights_for_text(&flat_text, search_state, t);
+    let styled = MarkdownDocument::build_inline_styled(inlines, &base, t, cx, selection, &search_hl);
 
     hit_tests.borrow_mut().push(BlockHitTest {
         char_start: node_offset,
@@ -736,6 +876,7 @@ fn render_code_block(
     is_copied: bool,
     on_copy_code: Option<CodeCopyCallback>,
     selection: Option<(usize, usize)>,
+    search_state: &mut Option<RunningSearchState>,
     hit_tests: &Rc<RefCell<Vec<BlockHitTest>>>,
 ) -> AnyElement {
     let raw_code = code.trim_end_matches(['\r', '\n']).to_string();
@@ -824,6 +965,9 @@ fn render_code_block(
             ));
             byte_pos += span_byte_len;
         }
+
+        let search_hl = search_highlights_for_text(&line_text, search_state, t);
+        highlights.extend(search_hl);
 
         let sel_byte_range = line_sel.and_then(|(s_char, e_char)| {
             let s_byte = MarkdownDocument::char_to_byte(&line_text, s_char);

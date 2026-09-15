@@ -692,6 +692,18 @@ pub struct AiAssistantPanel {
     renaming_conversation_id: Option<String>,
     /// 内联重命名的输入框状态
     rename_input_state: Option<Entity<SimpleInputState>>,
+    /// 历史会话搜索关键字
+    ai_sessions_search_query: String,
+    /// 历史会话搜索模式：false 为仅搜标题，true 为消息全文检索
+    ai_sessions_search_content: bool,
+    /// 历史会话搜索输入框
+    ai_sessions_search_input: Option<Entity<InputState>>,
+    /// 历史会话搜索命中结果列表（当有搜索关键词时生效）
+    ai_sessions_search_results: Option<Vec<velowork_workspace::repositories::AiConversationSearchResult>>,
+    /// 历史会话搜索是否正在后台异步查询
+    ai_sessions_searching: bool,
+    /// 历史会话搜索请求代数（防止乱序覆盖）
+    ai_sessions_search_generation: u64,
     /// 按项目隔离的 AI 聊天会话状态 Map
     project_chat_sessions: std::collections::HashMap<String, ProjectChatSession>,
     /// 从终端右键「AI 解读」注入的引用内容。展示在输入框上方，可删除/编辑。
@@ -960,6 +972,12 @@ impl AiAssistantPanel {
             ai_conversation_list: Vec::new(),
             renaming_conversation_id: None,
             rename_input_state: None,
+            ai_sessions_search_query: String::new(),
+            ai_sessions_search_content: false,
+            ai_sessions_search_input: None,
+            ai_sessions_search_results: None,
+            ai_sessions_searching: false,
+            ai_sessions_search_generation: 0,
             project_chat_sessions,
             ai_quote: None,
             ai_quote_editing: false,
@@ -2752,6 +2770,41 @@ impl AiAssistantPanel {
         cx.notify();
     }
 
+    fn update_ai_search_matches(&mut self, cx: &mut Context<Self>) {
+        let q = self
+            .ai_search_input
+            .as_ref()
+            .map(|i| i.read(cx).text().to_string())
+            .unwrap_or_default();
+        if q.is_empty() {
+            self.ai_search_flat_index = None;
+            cx.notify();
+            return;
+        }
+
+        let mut matches = Vec::new();
+        for (mi, msg) in self.messages.iter().enumerate() {
+            for range in find_match_ranges(
+                &msg.text,
+                &q,
+                self.ai_search_case_sensitive,
+                self.ai_search_use_regex,
+            ) {
+                matches.push((mi, range));
+            }
+        }
+
+        if matches.is_empty() {
+            self.ai_search_flat_index = None;
+        } else {
+            self.ai_search_flat_index = Some(0);
+            if let Some((mi, _range)) = matches.first() {
+                self.scroll_to_message(*mi, cx);
+            }
+        }
+        cx.notify();
+    }
+
     fn search_next(&mut self, cx: &mut Context<Self>) {
         let q = self
             .ai_search_input
@@ -3548,6 +3601,7 @@ impl AiAssistantPanel {
         } else {
             self.ai_sessions_popover_open = true;
             self.cancel_rename_conversation(cx);
+            self.init_sessions_search_input(cx);
             self.refresh_conversation_list();
             let reg = self.overlay_manager.read(cx).overlay_registry();
             let weak = cx.entity().downgrade();
@@ -3574,10 +3628,80 @@ impl AiAssistantPanel {
         }
     }
 
+    fn init_sessions_search_input(&mut self, cx: &mut Context<Self>) {
+        if self.ai_sessions_search_input.is_none() {
+            let input = cx.new(|cx| {
+                InputState::new(cx)
+                    .placeholder(i18n!(cx, "ai_assistant.search_sessions_placeholder"))
+            });
+            let input_clone = input.clone();
+            cx.subscribe(
+                &input_clone,
+                |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                    if *event == velowork_ui::input::InputEvent::Change {
+                        this.refresh_sessions_search(cx);
+                    }
+                },
+            )
+            .detach();
+            self.ai_sessions_search_input = Some(input);
+        }
+    }
+
+    fn refresh_sessions_search(&mut self, cx: &mut Context<Self>) {
+        let q = self
+            .ai_sessions_search_input
+            .as_ref()
+            .map(|i| i.read(cx).text().trim().to_string())
+            .unwrap_or_default();
+        self.ai_sessions_search_query = q.clone();
+
+        if q.is_empty() {
+            self.ai_sessions_search_results = None;
+            self.ai_sessions_searching = false;
+            cx.notify();
+            return;
+        }
+
+        self.ai_sessions_search_generation = self.ai_sessions_search_generation.wrapping_add(1);
+        let current_gen = self.ai_sessions_search_generation;
+        let search_content = self.ai_sessions_search_content;
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+
+        self.ai_sessions_searching = true;
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let results = smol::unblock(move || {
+                let db = velowork_core::storage::database()?;
+                let repo = velowork_workspace::repositories::AiRepository::new(db);
+                let p = if pid == "default" { None } else { Some(pid.as_str()) };
+                repo.search_conversations(p, &q, search_content).ok()
+            })
+            .await;
+
+            let _ = this.update(cx, |this, cx| {
+                if this.ai_sessions_search_generation != current_gen {
+                    return;
+                }
+                this.ai_sessions_searching = false;
+                this.ai_sessions_search_results = results;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn close_sessions_popover(&mut self, cx: &mut Context<Self>) {
         if self.ai_sessions_popover_open {
             self.ai_sessions_popover_open = false;
             self.cancel_rename_conversation(cx);
+            self.ai_sessions_search_query.clear();
+            self.ai_sessions_search_results = None;
+            self.ai_sessions_searching = false;
+            if let Some(ref inp) = self.ai_sessions_search_input {
+                inp.update(cx, |i, cx| i.set_value("", cx));
+            }
             let reg = self.overlay_manager.read(cx).overlay_registry();
             reg.update(cx, |r, _| {
                 r.unregister(&"ai-sessions-popover".into());
@@ -3667,9 +3791,32 @@ impl AiAssistantPanel {
                 this.list_state.scroll_to_end();
                 this.update_all_message_input_states(cx);
                 this.refresh_conversation_list();
+                if this.ai_search_open {
+                    this.update_ai_search_matches(cx);
+                }
                 cx.notify();
             });
         }).detach();
+    }
+
+    fn switch_to_conversation_with_search(
+        &mut self,
+        target_id: &str,
+        search_query: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let has_query = search_query.as_ref().map(|q| !q.trim().is_empty()).unwrap_or(false);
+        let q = search_query.unwrap_or_default();
+        self.switch_to_conversation(target_id, cx);
+        if has_query {
+            self.ai_search_open = true;
+            if let Some(ref input) = self.ai_search_input {
+                input.update(cx, |inp, cx| {
+                    inp.set_value(&q, cx);
+                });
+            }
+            self.update_ai_search_matches(cx);
+        }
     }
 
     fn delete_conversation(&mut self, target_id: &str, cx: &mut Context<Self>) {
@@ -3867,7 +4014,152 @@ impl AiAssistantPanel {
                 }
             });
 
-        let list_items: Vec<AnyElement> = if conv_count == 0 {
+        let list_items: Vec<AnyElement> = if let Some(ref search_results) = self.ai_sessions_search_results {
+            if search_results.is_empty() {
+                vec![
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .py(SPACE_LG)
+                        .gap(SPACE_XS)
+                        .child(AppIcon::Search.svg().size(ICON_MD).text_color(p.text_muted))
+                        .child(
+                            div()
+                                .text_size(ui_text_md(cx))
+                                .text_color(p.text_muted)
+                                .child(i18n!(cx, "ai_assistant.no_sessions_found")),
+                        )
+                        .into_any_element(),
+                ]
+            } else {
+                search_results
+                    .iter()
+                    .map(|res| {
+                        let is_active = active_id.as_deref() == Some(&res.conversation.id);
+                        let conv_id = res.conversation.id.clone();
+                        let default_title = i18n!(cx, "ai_assistant.new_chat_title");
+                        let title = res.conversation.title.as_deref().unwrap_or(&default_title);
+                        let rel_time = format_relative_time(&res.conversation.updated_at, cx);
+                        let title_str = title.to_string();
+                        let snippet = res.matched_snippet.clone();
+                        let group_name = SharedString::from(format!("session-search-row-{}", conv_id));
+                        let row_id = SharedString::from(format!("ai-session-search-row-{}", conv_id));
+                        let search_q = self.ai_sessions_search_query.clone();
+                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.delete_chat").into_boxed_str());
+
+                        v_flex()
+                            .id(row_id)
+                            .group(group_name.clone())
+                            .w_full()
+                            .px(SPACE_XS)
+                            .py(px(4.0))
+                            .rounded(RADIUS_SM)
+                            .cursor_pointer()
+                            .gap(px(2.0))
+                            .bg(if is_active { p.surface_hover } else { gpui::transparent_black() })
+                            .hover(|s| s.bg(p.surface_hover))
+                            .on_click({
+                                let panel_weak = panel_weak.clone();
+                                let cid = conv_id.clone();
+                                let sq = search_q.clone();
+                                move |_, _, cx| {
+                                    if let Some(panel) = panel_weak.upgrade() {
+                                        panel.update(cx, |this, cx| {
+                                            this.switch_to_conversation_with_search(&cid, Some(sq.clone()), cx);
+                                        });
+                                    }
+                                }
+                            })
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        h_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .items_center()
+                                            .gap(SPACE_SM)
+                                            .child(
+                                                div()
+                                                    .size(px(6.0))
+                                                    .rounded_full()
+                                                    .bg(if is_active { p.surface_accent } else { gpui::transparent_black() })
+                                                    .flex_shrink_0(),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .truncate()
+                                                    .text_size(ui_text_md(cx))
+                                                    .text_color(if is_active { p.text_primary } else { p.text_secondary })
+                                                    .font_weight(if is_active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                                                    .child(title_str.clone()),
+                                            )
+                                            .when(!rel_time.is_empty(), |d| {
+                                                d.child(
+                                                    div()
+                                                        .flex_shrink_0()
+                                                        .text_size(ui_text_sm(cx))
+                                                        .text_color(p.text_muted)
+                                                        .child(rel_time),
+                                                )
+                                            }),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap(px(2.0))
+                                            .opacity(0.0)
+                                            .group_hover(group_name.clone(), |s| s.opacity(1.0))
+                                            .child(
+                                                div()
+                                                    .id(SharedString::from(format!("session-search-delete-icon-{}", conv_id)))
+                                                    .cursor_pointer()
+                                                    .p(px(2.0))
+                                                    .rounded(RADIUS_XS)
+                                                    .hover(|s| s.bg(p.surface_hover))
+                                                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(delete_tip)).into())
+                                                    .child(AppIcon::Trash.svg().size(ICON_MICRO).text_color(p.status_error))
+                                                    .on_click({
+                                                        let panel_weak = panel_weak.clone();
+                                                        let cid = conv_id.clone();
+                                                        move |_, _, cx| {
+                                                            cx.stop_propagation();
+                                                            if let Some(panel) = panel_weak.upgrade() {
+                                                                panel.update(cx, |this, cx| {
+                                                                    this.delete_conversation(&cid, cx);
+                                                                    this.refresh_sessions_search(cx);
+                                                                });
+                                                            }
+                                                        }
+                                                    }),
+                                            ),
+                                    ),
+                            )
+                            .when_some(snippet, |d, snip| {
+                                let snippet_prefix = i18n!(cx, "ai_assistant.snippet_prefix");
+                                d.child(
+                                    div()
+                                        .w_full()
+                                        .ml(px(14.0))
+                                        .px(px(4.0))
+                                        .py(px(2.0))
+                                        .rounded(RADIUS_XS)
+                                        .bg(p.surface_base)
+                                        .text_size(ui_text_xs(cx))
+                                        .text_color(p.text_muted)
+                                        .child(format!("{}: {}", snippet_prefix, snip.trim())),
+                                )
+                            })
+                            .into_any_element()
+                    })
+                    .collect()
+            }
+        } else if conv_count == 0 {
             vec![
                 div()
                     .flex()
@@ -4130,11 +4422,11 @@ impl AiAssistantPanel {
                                     .text_size(ui_text_md(cx))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(p.text_primary)
-                                    .child(format!(
-                                        "{} ({})",
-                                        i18n!(cx, "ai_assistant.chat_history"),
-                                        conv_count
-                                    )),
+                                    .child(if let Some(ref search_results) = self.ai_sessions_search_results {
+                                        format!("{} ({})", i18n!(cx, "ai_assistant.chat_history"), search_results.len())
+                                    } else {
+                                        format!("{} ({})", i18n!(cx, "ai_assistant.chat_history"), conv_count)
+                                    }),
                             ),
                     )
                     .child(
@@ -4191,6 +4483,114 @@ impl AiAssistantPanel {
                             ),
                     ),
             )
+            // Sessions Search Bar
+            .child({
+                let has_search_query = !self.ai_sessions_search_query.is_empty();
+                let search_content = self.ai_sessions_search_content;
+                let scope_title_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.search_scope_title").into_boxed_str());
+                let scope_content_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.search_scope_content").into_boxed_str());
+                let current_scope_tip = if search_content { scope_content_tip } else { scope_title_tip };
+                let panel_weak_search = panel_weak.clone();
+
+                h_flex()
+                    .h(px(32.0))
+                    .px(SPACE_SM)
+                    .py(px(2.0))
+                    .gap(SPACE_XS)
+                    .items_center()
+                    .border_b_1()
+                    .border_color(p.border_subtle)
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .h(px(26.0))
+                            .px(SPACE_XS)
+                            .bg(p.surface_base)
+                            .border_1()
+                            .border_color(p.border_subtle)
+                            .rounded(RADIUS_SM)
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(AppIcon::Search.svg().size(ICON_MICRO).text_color(p.text_muted))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h_full()
+                                    .flex()
+                                    .items_center()
+                                    .child(if let Some(ref s_input) = self.ai_sessions_search_input {
+                                        Input::new(s_input).borderless(true).into_any_element()
+                                    } else {
+                                        div().into_any_element()
+                                    })
+                            )
+                            .when(has_search_query, |d| {
+                                let panel_weak = panel_weak_search.clone();
+                                d.child(
+                                    div()
+                                        .id("ai-sessions-search-clear")
+                                        .cursor_pointer()
+                                        .p(px(2.0))
+                                        .rounded(RADIUS_XS)
+                                        .hover(|s| s.bg(p.surface_hover))
+                                        .child(AppIcon::Close.svg().size(ICON_MICRO).text_color(p.text_muted))
+                                        .on_click(move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    if let Some(ref inp) = this.ai_sessions_search_input {
+                                                        inp.update(cx, |i, cx| i.set_value("", cx));
+                                                    }
+                                                    this.refresh_sessions_search(cx);
+                                                });
+                                            }
+                                        })
+                                )
+                            })
+                    )
+                    .child({
+                        let panel_weak = panel_weak_search.clone();
+                        div()
+                            .id("ai-sessions-search-scope-toggle")
+                            .cursor_pointer()
+                            .px(px(6.0))
+                            .h(px(26.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .rounded(RADIUS_SM)
+                            .border_1()
+                            .border_color(if search_content { p.surface_accent } else { p.border_subtle })
+                            .bg(if search_content { p.surface_accent.opacity(0.12) } else { gpui::transparent_black() })
+                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(current_scope_tip)).into())
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                if let Some(panel) = panel_weak.upgrade() {
+                                    panel.update(cx, |this, cx| {
+                                        this.ai_sessions_search_content = !this.ai_sessions_search_content;
+                                        this.refresh_sessions_search(cx);
+                                    });
+                                }
+                            })
+                            .child(
+                                AppIcon::File
+                                    .svg()
+                                    .size(ICON_MICRO)
+                                    .text_color(if search_content { p.surface_accent } else { p.text_muted })
+                            )
+                            .child(
+                                div()
+                                    .text_size(ui_text_xs(cx))
+                                    .font_weight(if search_content { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                                    .text_color(if search_content { p.surface_accent } else { p.text_muted })
+                                    .child(if search_content {
+                                        i18n!(cx, "ai_assistant.search_scope_content")
+                                    } else {
+                                        i18n!(cx, "ai_assistant.search_scope_title")
+                                    })
+                            )
+                    })
+            })
             // Scrollable List
             .child(
                 div()
@@ -4296,9 +4696,12 @@ impl AiAssistantPanel {
                 let input_clone = input.clone();
                 cx.subscribe(
                     &input_clone,
-                    |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
-                        this.ai_search_flat_index = None;
-                        cx.notify();
+                    |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                        if *event == velowork_ui::input::InputEvent::PressEnter {
+                            this.search_next(cx);
+                        } else {
+                            this.update_ai_search_matches(cx);
+                        }
                     },
                 )
                 .detach();
@@ -4308,6 +4711,7 @@ impl AiAssistantPanel {
                 input.focus(window, cx);
                 input.select_all(cx);
             });
+            self.update_ai_search_matches(cx);
         } else if let Some(ref input) = self.ai_search_input {
             input.update(cx, |input, cx| input.set_value("", cx));
         }
@@ -4381,9 +4785,12 @@ impl AiAssistantPanel {
             let input_clone = input.clone();
             cx.subscribe(
                 &input_clone,
-                |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
-                    this.ai_search_flat_index = None;
-                    cx.notify();
+                |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                    if *event == velowork_ui::input::InputEvent::PressEnter {
+                        this.search_next(cx);
+                    } else {
+                        this.update_ai_search_matches(cx);
+                    }
                 },
             )
             .detach();
@@ -5303,7 +5710,7 @@ impl AiAssistantPanel {
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.ai_search_case_sensitive =
                                                 !this.ai_search_case_sensitive;
-                                            cx.notify();
+                                            this.update_ai_search_matches(cx);
                                         }))
                                         .child(
                                             div()
@@ -5345,7 +5752,7 @@ impl AiAssistantPanel {
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.ai_search_use_regex = !this.ai_search_use_regex;
-                                            cx.notify();
+                                            this.update_ai_search_matches(cx);
                                         }))
                                         .child(
                                             div()
@@ -5898,7 +6305,7 @@ fn render_ai_message(
                                     .filter(|s| s.msg_index == msg_index && s.seg_index == text_seg_idx);
                                 let sel_range = active_sel.map(|s| (s.start, s.end));
                                 let panel_for_sel = panel_entity.clone();
-                                let md_el = velowork_markdown::MarkdownElement::new(
+                                let mut md_el = velowork_markdown::MarkdownElement::new(
                                     ElementId::from(format!("ai-md-{}-{}", msg_index, text_seg_idx)),
                                     &revealed_text,
                                 )
@@ -5917,8 +6324,20 @@ fn render_ai_message(
                                 .on_url_click(move |url, _window, cx| {
                                     cx.open_url(url);
                                 });
-                                children.push(md_el.into_any_element());
 
+                                if !search_query.is_empty() {
+                                    md_el = md_el.search(
+                                        search_query,
+                                        case_sensitive,
+                                        use_regex,
+                                        current_match,
+                                        flat_idx,
+                                    );
+                                    let seg_cnt = find_match_ranges(&revealed_text, search_query, case_sensitive, use_regex).len();
+                                    flat_idx += seg_cnt;
+                                }
+
+                                children.push(md_el.into_any_element());
                             }
                             text_line_offset += seg_lines;
                             text_seg_idx += 1;
@@ -5946,13 +6365,22 @@ fn render_ai_message(
         }
 
         if children.is_empty() && !msg.text.is_empty() {
-            children.push(
-                div()
-                    .text_size(ui_text_md(cx))
-                    .text_color(rgb(t.text_primary))
-                    .child(msg.text.clone())
-                    .into_any_element(),
+            let (el, cnt) = text_bubble(
+                &msg.text,
+                false,
+                t,
+                window,
+                cx,
+                search_query,
+                case_sensitive,
+                use_regex,
+                msg_index,
+                flat_idx,
+                current_match,
+                panel_entity,
             );
+            let _ = cnt;
+            children.push(el);
         }
 
         // 归并到本气泡的多次工具调用：默认折叠显示摘要，点击展开查看每个详情卡片。
@@ -6433,10 +6861,20 @@ fn text_bubble(
             range.clone(),
             HighlightStyle {
                 background_color: Some(if is_current {
-                    rgb(t.bg_selection).into()
+                    rgb(t.accent).into()
                 } else {
-                    rgb(t.bg_hover).into()
+                    rgb(t.accent).opacity(0.28).into()
                 }),
+                color: if is_current {
+                    Some(rgb(0xffffff).into())
+                } else {
+                    None
+                },
+                font_weight: if is_current {
+                    Some(FontWeight::BOLD)
+                } else {
+                    None
+                },
                 ..Default::default()
             },
         ));
