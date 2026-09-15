@@ -1099,6 +1099,14 @@ pub struct AppSettings {
     #[serde(default = "default_true")]
     pub ai_auto_compress: bool,
 
+    /// 是否在终端划选文本后自动显示 AI 悬浮微工具条
+    #[serde(default = "default_true")]
+    pub terminal_ai_floating_toolbar_enabled: bool,
+
+    /// 终端内就地呼出 AI 对话框快捷键（默认 ctrl-k）
+    #[serde(default = "default_inline_ai_shortcut")]
+    pub terminal_ai_inline_shortcut: String,
+
     // ============================================================
     // Command History settings
     // ============================================================
@@ -1405,6 +1413,8 @@ impl Default for AppSettings {
             ai_max_context_tokens: default_ai_max_context_tokens(),
             ai_max_history_messages: default_ai_max_history_messages(),
             ai_auto_compress: true,
+            terminal_ai_floating_toolbar_enabled: true,
+            terminal_ai_inline_shortcut: default_inline_ai_shortcut(),
             command_history_max_count: default_command_history_max_count(),
             command_history_retention_days: default_command_history_retention_days(),
             command_history_auto_completion: true,
@@ -1598,6 +1608,10 @@ fn default_ai_max_context_tokens() -> usize {
 
 fn default_ai_max_history_messages() -> usize {
     20
+}
+
+fn default_inline_ai_shortcut() -> String {
+    "ctrl-k".to_string()
 }
 
 /// Get the directory that holds the config files (`config/`).

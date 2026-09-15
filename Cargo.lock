@@ -8857,8 +8857,11 @@ version = "0.1.0"
 dependencies = [
  "gpui",
  "pulldown-cmark",
+ "regex",
  "serde_yaml_ng",
+ "smol",
  "velowork-core",
+ "velowork-i18n",
  "velowork-ui",
 ]
 

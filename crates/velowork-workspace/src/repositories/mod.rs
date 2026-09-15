@@ -19,8 +19,8 @@ pub mod tunnel_tree;
 pub mod workspace;
 
 pub use ai::{
-    AiAttachmentRow, AiContextRow, AiConversationRow, AiMemoryRow, AiMessageRow, AiRepository,
-    AiService,
+    AiAttachmentRow, AiContextRow, AiConversationRow, AiConversationSearchResult, AiMemoryRow,
+    AiMessageRow, AiRepository, AiService,
 };
 pub use credential::{CredentialApplicationService, CredentialRepository};
 pub use history::{HistoryApplicationService, HistoryEntry, HistoryRepository};

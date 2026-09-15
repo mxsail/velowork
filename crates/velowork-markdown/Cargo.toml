@@ -7,8 +7,11 @@ license = "MIT"
 [dependencies]
 velowork-core = { path = "../velowork-core" }
 velowork-ui = { path = "../velowork-ui" }
+velowork-i18n = { path = "../velowork-i18n" }
 
 gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
+smol = "2.0"
+regex = "1.10"
 
 pulldown-cmark = "0.12"
 serde_yaml_ng = "0.10"

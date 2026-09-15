@@ -86,6 +86,7 @@ impl DetachedTerminalView {
                 TerminalContentEvent::RequestContextMenu { position, has_selection, link_url } => {
                     this.show_context_menu(*position, *has_selection, link_url.clone(), cx);
                 }
+                _ => {}
             }
         })
         .detach();

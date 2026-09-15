@@ -30,6 +30,8 @@ pub mod terminal_context_menu;
 pub mod rename_directory_dialog;
 pub mod transfer_popup;
 pub mod lock_screen;
+pub mod terminal_ai_inline;
+pub use terminal_ai_inline::*;
 
 pub mod dialogs;
 pub mod menus;

@@ -48,7 +48,7 @@ pub fn export_selection_to_markdown(
                     out.push(' ');
                     out.push_str(&substring);
                 }
-                DocumentBlock::CodeBlock { language, code } => {
+                DocumentBlock::CodeBlock { language, code, .. } => {
                     let lang = language.as_deref().unwrap_or("");
                     out.push_str("```");
                     out.push_str(lang);
@@ -63,11 +63,13 @@ pub fn export_selection_to_markdown(
                     out.push_str("> ");
                     out.push_str(&substring);
                 }
-                DocumentBlock::ListItem { ordered, depth, .. } => {
+                DocumentBlock::ListItem { ordered, index, depth, .. } => {
                     for _ in 0..*depth {
                         out.push_str("  ");
                     }
-                    if *ordered {
+                    if let Some(idx) = index {
+                        out.push_str(&format!("{}. ", idx));
+                    } else if *ordered {
                         out.push_str("1. ");
                     } else {
                         out.push_str("- ");

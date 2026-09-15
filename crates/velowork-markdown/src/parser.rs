@@ -5,6 +5,19 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, T
 use super::types::{FmValue, Frontmatter, Inline, Node};
 use super::MarkdownDocument;
 
+pub(crate) fn inlines_are_empty(inlines: &[Inline]) -> bool {
+    if inlines.is_empty() {
+        return true;
+    }
+    inlines.iter().all(|inline| match inline {
+        Inline::Text(s) | Inline::Code(s) => s.trim().is_empty(),
+        Inline::Bold(sub)
+        | Inline::Italic(sub)
+        | Inline::Strikethrough(sub)
+        | Inline::Link { children: sub, .. } => inlines_are_empty(sub),
+    })
+}
+
 impl MarkdownDocument {
     /// Parse markdown content into a document.
     pub fn parse(content: &str) -> Self {
@@ -25,6 +38,8 @@ impl MarkdownDocument {
 
         let mut options = Options::empty();
         options.insert(Options::ENABLE_TABLES);
+        options.insert(Options::ENABLE_STRIKETHROUGH);
+        options.insert(Options::ENABLE_TASKLISTS);
         let parser = Parser::new_ext(markdown, options);
 
         let mut inline_stack: Vec<Vec<Inline>> = vec![Vec::new()];
@@ -35,15 +50,33 @@ impl MarkdownDocument {
         let mut in_code_block = false;
         let mut code_block_lang: Option<String> = None;
         let mut code_block_content = String::new();
-        let mut in_list = false;
-        let mut list_ordered = false;
-        let mut list_items: Vec<Vec<Inline>> = Vec::new();
+        struct ListState {
+            ordered: bool,
+            items: Vec<Vec<Inline>>,
+        }
+        let mut list_stack: Vec<ListState> = Vec::new();
         let mut in_blockquote = false;
         let mut in_table = false;
         let mut in_table_head = false;
         let mut table_headers: Vec<Vec<Inline>> = Vec::new();
         let mut table_rows: Vec<Vec<Vec<Inline>>> = Vec::new();
         let mut current_row: Vec<Vec<Inline>> = Vec::new();
+
+        let flush_pending_list = |inline_stack: &mut Vec<Vec<Inline>>,
+                                      list_stack: &mut Vec<ListState>,
+                                      nodes: &mut Vec<Node>| {
+            if let (Some(item_inlines), Some(cur)) = (inline_stack.last_mut(), list_stack.last_mut())
+                && !inlines_are_empty(item_inlines)
+            {
+                cur.items.push(std::mem::take(item_inlines));
+            }
+            if let Some(cur) = list_stack.last_mut().filter(|c| !c.items.is_empty()) {
+                nodes.push(Node::List {
+                    ordered: cur.ordered,
+                    items: std::mem::take(&mut cur.items),
+                });
+            }
+        };
 
         for event in parser {
             match event {
@@ -76,7 +109,7 @@ impl MarkdownDocument {
                         if let Some(last) = inline_stack.last_mut() {
                             last.extend(children);
                         }
-                    } else if in_list {
+                    } else if !list_stack.is_empty() {
                         // Will be collected by Item end
                         if let Some(last) = inline_stack.last_mut() {
                             last.extend(children);
@@ -86,12 +119,13 @@ impl MarkdownDocument {
                         if let Some(last) = inline_stack.last_mut() {
                             last.extend(children);
                         }
-                    } else {
+                    } else if !inlines_are_empty(&children) {
                         nodes.push(Node::Paragraph { children });
                     }
                     in_paragraph = false;
                 }
                 Event::Start(Tag::CodeBlock(kind)) => {
+                    flush_pending_list(&mut inline_stack, &mut list_stack, &mut nodes);
                     in_code_block = true;
                     code_block_lang = match kind {
                         CodeBlockKind::Fenced(lang) if !lang.is_empty() => Some(lang.to_string()),
@@ -107,23 +141,28 @@ impl MarkdownDocument {
                     in_code_block = false;
                 }
                 Event::Start(Tag::List(first_item)) => {
-                    in_list = true;
-                    list_ordered = first_item.is_some();
-                    list_items.clear();
+                    flush_pending_list(&mut inline_stack, &mut list_stack, &mut nodes);
+                    list_stack.push(ListState {
+                        ordered: first_item.is_some(),
+                        items: Vec::new(),
+                    });
                 }
                 Event::End(TagEnd::List(_)) => {
-                    nodes.push(Node::List {
-                        ordered: list_ordered,
-                        items: std::mem::take(&mut list_items),
-                    });
-                    in_list = false;
+                    if let Some(cur) = list_stack.pop().filter(|c| !c.items.is_empty()) {
+                        nodes.push(Node::List {
+                            ordered: cur.ordered,
+                            items: cur.items,
+                        });
+                    }
                 }
                 Event::Start(Tag::Item) => {
                     inline_stack.push(Vec::new());
                 }
                 Event::End(TagEnd::Item) => {
                     let children = inline_stack.pop().unwrap_or_default();
-                    list_items.push(children);
+                    if let Some(cur) = list_stack.last_mut().filter(|_| !inlines_are_empty(&children)) {
+                        cur.items.push(children);
+                    }
                 }
                 Event::Start(Tag::BlockQuote(_)) => {
                     in_blockquote = true;
@@ -192,6 +231,15 @@ impl MarkdownDocument {
                         last.push(Inline::Italic(children));
                     }
                 }
+                Event::Start(Tag::Strikethrough) => {
+                    inline_stack.push(Vec::new());
+                }
+                Event::End(TagEnd::Strikethrough) => {
+                    let children = inline_stack.pop().unwrap_or_default();
+                    if let Some(last) = inline_stack.last_mut() {
+                        last.push(Inline::Strikethrough(children));
+                    }
+                }
                 Event::Start(Tag::Link { dest_url, .. }) => {
                     inline_stack.push(Vec::new());
                     // Store URL temporarily - we'll use it on End
@@ -217,7 +265,7 @@ impl MarkdownDocument {
                         }
                     });
                     if let Some(last) = inline_stack.last_mut() {
-                        last.push(Inline::Link { _url: url, children });
+                        last.push(Inline::Link { url, children });
                     }
                 }
                 Event::Code(text) => {
@@ -242,6 +290,15 @@ impl MarkdownDocument {
                     }
                 }
                 _ => {}
+            }
+        }
+
+        while let Some(cur) = list_stack.pop() {
+            if !cur.items.is_empty() {
+                nodes.push(Node::List {
+                    ordered: cur.ordered,
+                    items: cur.items,
+                });
             }
         }
 
@@ -337,7 +394,7 @@ impl MarkdownDocument {
             match inline {
                 Inline::Text(t) => text.push_str(t),
                 Inline::Code(c) => text.push_str(c),
-                Inline::Bold(children) | Inline::Italic(children) => {
+                Inline::Bold(children) | Inline::Italic(children) | Inline::Strikethrough(children) => {
                     Self::inlines_to_flat_text(children, text);
                 }
                 Inline::Link { children, .. } => {
@@ -587,5 +644,30 @@ author:
             .map(MarkdownDocument::node_text_length)
             .sum();
         assert_eq!(total, doc.plain_text.chars().count());
+    }
+
+    #[test]
+    fn test_nested_list_with_code_block() {
+        let md = r#"
+* 清理包管理器缓存
+  ```bash
+  sudo apt-get clean
+  ```
+* 检查日志
+"#;
+        let doc = MarkdownDocument::parse(md);
+        for (i, node) in doc.nodes.iter().enumerate() {
+            println!("TEST 1 NODE {}: {:?}", i, node);
+        }
+
+        let md2 = r#"
+2. **清理包管理器缓存**：
+   * **apt clean**
+   * **pacman**
+"#;
+        let doc2 = MarkdownDocument::parse(md2);
+        for (i, node) in doc2.nodes.iter().enumerate() {
+            println!("TEST 2 NODE {}: {:?}", i, node);
+        }
     }
 }

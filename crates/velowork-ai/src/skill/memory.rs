@@ -103,8 +103,9 @@ impl AiMemory {
             self.selection = None;
         } else {
             // 选中文本可能很长，截断以避免污染上下文。
-            self.selection = Some(if s.len() > 4000 {
-                format!("{}…", &s[..4000])
+            let char_limit = 4000;
+            self.selection = Some(if s.chars().count() > char_limit {
+                format!("{}…", s.chars().take(char_limit).collect::<String>())
             } else {
                 s
             });

@@ -77,6 +77,7 @@ pub use velowork_views_terminal::actions::{
     ToggleFullscreen,
     JumpToPreviousPrompt, JumpToNextPrompt,
     DuplicateSession, DuplicateChannel, ReconnectTerminal,
+    TerminalInlineAi,
 };
 
 // Generic cancel action for overlays is `velowork_ui::Cancel`.
@@ -297,6 +298,7 @@ fn create_keybinding(action: &str, keystroke: &str, context: Option<&str>) -> Op
         "ShowQuickCommandsPanel" => Some(KeyBinding::new(keystroke, ShowQuickCommandsPanel, context)),
         "ShowHistoryPanel" => Some(KeyBinding::new(keystroke, ShowHistoryPanel, context)),
         "ShowAiAssistant" => Some(KeyBinding::new(keystroke, ShowAiAssistant, context)),
+        "TerminalInlineAi" => Some(KeyBinding::new(keystroke, TerminalInlineAi, context)),
         "ToggleSftpPanel" => Some(KeyBinding::new(keystroke, ToggleSftpPanel, context)),
         "ToggleCommandsPanel" => Some(KeyBinding::new(keystroke, ToggleCommandsPanel, context)),
         "NewSession" => Some(KeyBinding::new(keystroke, NewSession, context)),

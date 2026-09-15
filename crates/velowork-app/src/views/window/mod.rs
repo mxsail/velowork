@@ -190,6 +190,8 @@ pub struct WindowView {
     /// Selected terminal text to inject into the AI assistant panel as a quote
     /// (activated on the next render pass, which has a Window).
     pending_ai_interpret: Option<String>,
+    /// Request to open right dock AI assistant panel, scroll to bottom, and focus input.
+    pub(crate) pending_ai_open: bool,
     /// Last-known on-disk paths per local project, used to detect renames
     /// so we can refresh cached git providers / service paths.
     last_project_paths: HashMap<String, String>,
@@ -665,6 +667,7 @@ impl WindowView {
             was_project_focused: false,
             pending_center_scroll: None,
             pending_ai_interpret: None,
+            pending_ai_open: false,
             last_project_paths: HashMap::new(),
             last_data_replacement_epoch,
             cycle_dock_index: 1,
@@ -881,6 +884,24 @@ impl WindowView {
     /// supplied via `focus_manager.update(cx, |fm, cx| ws.method(fm, ...))`.
     pub fn focus_manager(&self) -> Entity<FocusManager> {
         self.focus_manager.clone()
+    }
+
+    /// Find the active or registered AiAssistantPanel in the right dock if available.
+    pub fn find_ai_assistant_panel(
+        &self,
+        cx: &App,
+    ) -> Option<Entity<crate::views::panels::ai_assistant_panel::AiAssistantPanel>> {
+        let dock = self.right_dock.as_ref()?;
+        for tab in &dock.read(cx).tabs {
+            if let Ok(ai) = tab
+                .view
+                .clone()
+                .downcast::<crate::views::panels::ai_assistant_panel::AiAssistantPanel>()
+            {
+                return Some(ai);
+            }
+        }
+        None
     }
 
     /// Snapshot current on-disk paths for local projects (keyed by project_id).

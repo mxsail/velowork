@@ -57,6 +57,7 @@ use crate::views::overlays::menus::quick_command_context_menu::{
     open_quick_command_context_menu, QuickCommandContextMenuEvent, QuickCommandMenuRequest,
 };
 use crate::views::overlays::transfer_popup::{TransferPopup, TransferPopupEvent};
+use crate::views::overlays::terminal_ai_inline::{TerminalAiInline, TerminalAiInlineEvent};
 use velowork_ui::confirm_dialog::{ConfirmDialog, ConfirmDialogEvent};
 use velowork_ui::{AnimatedModal, AnimatedModalEvent};
 use velowork_state::{ServiceDefinition, ServiceNode, TunnelNode};
@@ -244,6 +245,9 @@ pub enum OverlayManagerEvent {
 
     /// A modal overlay was closed (signals WindowView to restore terminal/root focus)
     ModalClosed,
+
+    /// Inline AI toolbar / popover event
+    TerminalAiInline(TerminalAiInlineEvent),
 }
 
 #[derive(Clone)]
@@ -305,6 +309,9 @@ pub struct OverlayManager {
 
     /// Transfer manager popup (anchored above the status-bar transfer button).
     transfer_popup: OverlaySlot<TransferPopup>,
+
+    /// Terminal inline AI toolbar / popover.
+    pub(crate) terminal_ai_inline: OverlaySlot<TerminalAiInline>,
 
     /// OS window handle of the detached settings panel window (if open).
     /// Used to prevent opening multiple settings windows — if the handle is
@@ -370,6 +377,7 @@ impl OverlayManager {
             last_click_origin: None,
             last_terminal_context: None,
             transfer_popup: OverlaySlot::new(),
+            terminal_ai_inline: OverlaySlot::new(),
             settings_window_handle: None,
             settings_panel_entity: None,
         }
@@ -1529,6 +1537,104 @@ impl OverlayManager {
     /// Get terminal context menu entity for rendering.
     pub fn render_terminal_context_menu(&self) -> Option<Entity<PopupMenu>> {
         self.terminal_context_menu.render()
+    }
+
+    // ========================================================================
+    // Terminal AI Inline (Floating Toolbar & Popover)
+    // ========================================================================
+
+    pub fn show_terminal_ai_floating_toolbar(
+        &mut self,
+        terminal_id: String,
+        project_id: String,
+        position: Point<Pixels>,
+        selection_text: String,
+        cx: &mut Context<Self>,
+    ) {
+        let settings = settings_entity(cx).read(cx).settings.clone();
+        if !settings.ai_enabled || !settings.terminal_ai_floating_toolbar_enabled {
+            return;
+        }
+
+        let reg = Some(self.overlay_registry.clone());
+        let view = cx.new(|cx| {
+            TerminalAiInline::new_toolbar(
+                terminal_id,
+                project_id,
+                position,
+                selection_text,
+                reg,
+                cx,
+            )
+        });
+
+        self.subscribe_terminal_ai_inline(&view, cx);
+        self.terminal_ai_inline.set(view);
+        cx.notify();
+    }
+
+    pub fn show_terminal_ai_popover(
+        &mut self,
+        terminal_id: String,
+        project_id: String,
+        position: Point<Pixels>,
+        selection_text: String,
+        cx: &mut Context<Self>,
+    ) {
+        let settings = settings_entity(cx).read(cx).settings.clone();
+        if !settings.ai_enabled {
+            return;
+        }
+
+        let reg = Some(self.overlay_registry.clone());
+        let view = cx.new(|cx| {
+            TerminalAiInline::new_popover(
+                terminal_id,
+                project_id,
+                position,
+                selection_text,
+                reg,
+                cx,
+            )
+        });
+
+        self.subscribe_terminal_ai_inline(&view, cx);
+        self.terminal_ai_inline.set(view);
+        cx.notify();
+    }
+
+    fn subscribe_terminal_ai_inline(
+        &mut self,
+        view: &Entity<TerminalAiInline>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.subscribe(view, |this: &mut Self, _, event: &TerminalAiInlineEvent, cx| {
+            match event {
+                TerminalAiInlineEvent::Close => {
+                    this.terminal_ai_inline.close();
+                    cx.notify();
+                }
+                _ => {
+                    cx.emit(OverlayManagerEvent::TerminalAiInline(event.clone()));
+                }
+            }
+        })
+        .detach();
+    }
+
+    pub fn dismiss_terminal_ai_inline(&mut self, cx: &mut Context<Self>) {
+        if self.terminal_ai_inline.is_open() {
+            self.terminal_ai_inline.close();
+            cx.notify();
+        }
+    }
+
+    pub fn has_terminal_ai_inline(&self) -> bool {
+        self.terminal_ai_inline.is_open()
+    }
+
+    pub fn render_terminal_ai_inline(&self) -> Option<Entity<TerminalAiInline>> {
+        self.terminal_ai_inline.render()
     }
 
     // ========================================================================

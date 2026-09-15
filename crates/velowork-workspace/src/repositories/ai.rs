@@ -103,6 +103,52 @@ pub struct AiAttachmentRow {
     pub created_at: String,
 }
 
+/// AI 会话检索结果（包含会话行以及可选的高亮摘要上下文片段）。
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiConversationSearchResult {
+    pub conversation: AiConversationRow,
+    pub matched_snippet: Option<String>,
+}
+
+/// 安全地从文本中提取包含关键词的前后上下文片段（UTF-8 字符边界安全，杜绝切片 Panic）。
+pub fn safe_extract_snippet(text: &str, query: &str, max_chars_around: usize) -> Option<String> {
+    if text.is_empty() || query.is_empty() {
+        return None;
+    }
+    let lower_text = text.to_lowercase();
+    let lower_query = query.to_lowercase();
+    let byte_pos = lower_text.find(&lower_query)?;
+
+    let char_indices: Vec<(usize, char)> = text.char_indices().collect();
+    let match_char_idx = char_indices.iter().position(|&(b, _)| b >= byte_pos).unwrap_or(0);
+
+    let start_char_idx = match_char_idx.saturating_sub(max_chars_around);
+    let end_char_idx = (match_char_idx + query.chars().count() + max_chars_around).min(char_indices.len());
+
+    let start_byte = char_indices.get(start_char_idx).map(|&(b, _)| b).unwrap_or(0);
+    let end_byte = if end_char_idx >= char_indices.len() {
+        text.len()
+    } else {
+        char_indices.get(end_char_idx).map(|&(b, _)| b).unwrap_or(text.len())
+    };
+
+    let mut snippet = String::new();
+    if start_char_idx > 0 {
+        snippet.push_str("...");
+    }
+    let raw_slice = &text[start_byte..end_byte];
+    let sanitized: String = raw_slice
+        .chars()
+        .map(|c| if c == '\n' || c == '\r' { ' ' } else { c })
+        .collect();
+    snippet.push_str(sanitized.trim());
+    if end_char_idx < char_indices.len() {
+        snippet.push_str("...");
+    }
+
+    Some(snippet)
+}
+
 /// 工作流定义。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Workflow {
@@ -182,6 +228,23 @@ impl AiRepository {
         }
     }
 
+    fn map_conversation_row(row: &rusqlite::Row) -> rusqlite::Result<AiConversationRow> {
+        Ok(AiConversationRow {
+            id: row.get(0)?,
+            profile_id: row.get(1)?,
+            project_id: row.get(2)?,
+            title: row.get(3)?,
+            provider_id: row.get(4)?,
+            model: row.get(5)?,
+            status: row.get(6)?,
+            context_mode: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+            revision: row.get::<_, i64>(10).map(|v| v as u64).unwrap_or(1),
+            device_id: row.get(11).unwrap_or_default(),
+        })
+    }
+
     pub fn list_conversations(&self, project_id: Option<&str>) -> Result<Vec<AiConversationRow>> {
         let conn = self.db.conn();
         let mut out = Vec::new();
@@ -190,22 +253,7 @@ impl AiRepository {
                 "SELECT id, profile_id, project_id, title, provider_id, model, status, context_mode, created_at, updated_at, revision, device_id \
                  FROM ai_conversations WHERE project_id = ?1 AND status != 'deleted' ORDER BY updated_at DESC"
             )?;
-            let rows = stmt.query_map([pid], |row| {
-                Ok(AiConversationRow {
-                    id: row.get(0)?,
-                    profile_id: row.get(1)?,
-                    project_id: row.get(2)?,
-                    title: row.get(3)?,
-                    provider_id: row.get(4)?,
-                    model: row.get(5)?,
-                    status: row.get(6)?,
-                    context_mode: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                    revision: row.get::<_, i64>(10).map(|v| v as u64).unwrap_or(1),
-                    device_id: row.get(11).unwrap_or_default(),
-                })
-            })?;
+            let rows = stmt.query_map([pid], Self::map_conversation_row)?;
             for r in rows {
                 out.push(r.context("map ai_conversation row")?);
             }
@@ -214,27 +262,125 @@ impl AiRepository {
                 "SELECT id, profile_id, project_id, title, provider_id, model, status, context_mode, created_at, updated_at, revision, device_id \
                  FROM ai_conversations WHERE status != 'deleted' ORDER BY updated_at DESC"
             )?;
-            let rows = stmt.query_map([], |row| {
-                Ok(AiConversationRow {
-                    id: row.get(0)?,
-                    profile_id: row.get(1)?,
-                    project_id: row.get(2)?,
-                    title: row.get(3)?,
-                    provider_id: row.get(4)?,
-                    model: row.get(5)?,
-                    status: row.get(6)?,
-                    context_mode: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                    revision: row.get::<_, i64>(10).map(|v| v as u64).unwrap_or(1),
-                    device_id: row.get(11).unwrap_or_default(),
-                })
-            })?;
+            let rows = stmt.query_map([], Self::map_conversation_row)?;
             for r in rows {
                 out.push(r.context("map ai_conversation row")?);
             }
         }
         Ok(out)
+    }
+
+    /// 搜索历史会话。
+    /// - `search_content = false`：仅在会话标题中进行 LIKE 模糊搜索；
+    /// - `search_content = true`：联合检索会话标题与消息正文，并在命中的正文中提取上下文片段。
+    pub fn search_conversations(
+        &self,
+        project_id: Option<&str>,
+        query: &str,
+        search_content: bool,
+    ) -> Result<Vec<AiConversationSearchResult>> {
+        let trimmed = query.trim();
+        if trimmed.is_empty() {
+            let convs = self.list_conversations(project_id)?;
+            return Ok(convs
+                .into_iter()
+                .map(|c| AiConversationSearchResult {
+                    conversation: c,
+                    matched_snippet: None,
+                })
+                .collect());
+        }
+
+        let conn = self.db.conn();
+        let pattern = format!("%{}%", trimmed);
+
+        if !search_content {
+            let mut out = Vec::new();
+            if let Some(pid) = project_id {
+                let mut stmt = conn.prepare(
+                    "SELECT id, profile_id, project_id, title, provider_id, model, status, context_mode, created_at, updated_at, revision, device_id \
+                     FROM ai_conversations WHERE project_id = ?1 AND status != 'deleted' AND title LIKE ?2 ORDER BY updated_at DESC LIMIT 50"
+                )?;
+                let rows = stmt.query_map(rusqlite::params![pid, pattern], Self::map_conversation_row)?;
+                for r in rows {
+                    out.push(AiConversationSearchResult {
+                        conversation: r.context("map ai_conversation row")?,
+                        matched_snippet: None,
+                    });
+                }
+            } else {
+                let mut stmt = conn.prepare(
+                    "SELECT id, profile_id, project_id, title, provider_id, model, status, context_mode, created_at, updated_at, revision, device_id \
+                     FROM ai_conversations WHERE status != 'deleted' AND title LIKE ?1 ORDER BY updated_at DESC LIMIT 50"
+                )?;
+                let rows = stmt.query_map(rusqlite::params![pattern], Self::map_conversation_row)?;
+                for r in rows {
+                    out.push(AiConversationSearchResult {
+                        conversation: r.context("map ai_conversation row")?,
+                        matched_snippet: None,
+                    });
+                }
+            }
+            return Ok(out);
+        }
+
+        // 全文消息正文联合检索
+        let mut results = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        // 1. 先查标题直接命中的会话
+        let title_matches = self.search_conversations(project_id, query, false)?;
+        for item in title_matches {
+            seen_ids.insert(item.conversation.id.clone());
+            results.push(item);
+        }
+
+        // 2. 查 ai_messages 中正文命中的会话
+        let mut stmt = if project_id.is_some() {
+            conn.prepare(
+                "SELECT c.id, c.profile_id, c.project_id, c.title, c.provider_id, c.model, c.status, c.context_mode, c.created_at, c.updated_at, c.revision, c.device_id, m.content \
+                 FROM ai_messages m \
+                 JOIN ai_conversations c ON m.conversation_id = c.id \
+                 WHERE c.project_id = ?1 AND c.status != 'deleted' AND m.content LIKE ?2 \
+                 ORDER BY m.rowid DESC LIMIT 100"
+            )?
+        } else {
+            conn.prepare(
+                "SELECT c.id, c.profile_id, c.project_id, c.title, c.provider_id, c.model, c.status, c.context_mode, c.created_at, c.updated_at, c.revision, c.device_id, m.content \
+                 FROM ai_messages m \
+                 JOIN ai_conversations c ON m.conversation_id = c.id \
+                 WHERE c.status != 'deleted' AND m.content LIKE ?1 \
+                 ORDER BY m.rowid DESC LIMIT 100"
+            )?
+        };
+
+        fn map_conv_content(row: &rusqlite::Row) -> rusqlite::Result<(AiConversationRow, String)> {
+            let conv = AiRepository::map_conversation_row(row)?;
+            let content: String = row.get(12)?;
+            Ok((conv, content))
+        }
+
+        let rows = if let Some(pid) = project_id {
+            stmt.query_map(rusqlite::params![pid, pattern], map_conv_content)?
+        } else {
+            stmt.query_map(rusqlite::params![pattern], map_conv_content)?
+        };
+
+        for r in rows {
+            let (conv, content) = r.context("query message row")?;
+            if seen_ids.insert(conv.id.clone()) {
+                let snippet = safe_extract_snippet(&content, trimmed, 30);
+                results.push(AiConversationSearchResult {
+                    conversation: conv,
+                    matched_snippet: snippet,
+                });
+                if results.len() >= 50 {
+                    break;
+                }
+            }
+        }
+
+        Ok(results)
     }
 
     pub fn delete_conversation(&self, id: &str) -> Result<()> {
@@ -282,6 +428,77 @@ impl AiRepository {
         }
         out.reverse();
         Ok(out)
+    }
+
+    /// 分页加载指定会话的消息（按时间正序返回），同时返回本批次最早消息的 rowid 以及是否还有更多。
+    /// - `before_rowid`: 若为 `Some(rid)`，仅查询 `rowid < rid` 的更早消息；若为 `None`，从最新消息开始取。
+    /// - `limit`: 查询条数上限。
+    /// 返回值：`(messages, oldest_rowid, has_more)`
+    pub fn list_messages_paged(
+        &self,
+        conversation_id: &str,
+        before_rowid: Option<i64>,
+        limit: usize,
+    ) -> Result<(Vec<AiMessageRow>, Option<i64>, bool)> {
+        let conn = self.db.conn();
+        let map_row = |row: &rusqlite::Row| -> rusqlite::Result<(AiMessageRow, i64)> {
+            Ok((
+                AiMessageRow {
+                    id: row.get(0)?,
+                    conversation_id: row.get(1)?,
+                    role: row.get(2)?,
+                    content: row.get(3)?,
+                    token_count: row.get(4)?,
+                    metadata: row.get(5)?,
+                    created_at: row.get(6)?,
+                    revision: row.get::<_, i64>(7).map(|v| v as u64).unwrap_or(1),
+                    device_id: row.get(8).unwrap_or_default(),
+                },
+                row.get::<_, i64>(9)?,
+            ))
+        };
+
+        let mut items = Vec::new();
+        if let Some(before_id) = before_rowid {
+            let mut stmt = conn.prepare(
+                "SELECT id, conversation_id, role, content, token_count, metadata, created_at, revision, device_id, rowid \
+                 FROM ai_messages WHERE conversation_id = ?1 AND rowid < ?2 ORDER BY rowid DESC LIMIT ?3"
+            )?;
+            let rows = stmt.query_map(rusqlite::params![conversation_id, before_id, (limit + 1) as i64], map_row)?;
+            for r in rows {
+                items.push(r.context("map ai_message row with rowid")?);
+            }
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT id, conversation_id, role, content, token_count, metadata, created_at, revision, device_id, rowid \
+                 FROM ai_messages WHERE conversation_id = ?1 ORDER BY rowid DESC LIMIT ?2"
+            )?;
+            let rows = stmt.query_map(rusqlite::params![conversation_id, (limit + 1) as i64], map_row)?;
+            for r in rows {
+                items.push(r.context("map ai_message row with rowid")?);
+            }
+        }
+
+        let has_more = items.len() > limit;
+        if has_more {
+            items.truncate(limit);
+        }
+
+        let oldest_rowid = items.last().map(|(_, rid)| *rid);
+        let mut messages: Vec<AiMessageRow> = items.into_iter().map(|(msg, _)| msg).collect();
+        messages.reverse();
+        Ok((messages, oldest_rowid, has_more))
+    }
+
+    /// 获取会话消息总数
+    pub fn count_messages(&self, conversation_id: &str) -> Result<usize> {
+        let conn = self.db.conn();
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM ai_messages WHERE conversation_id = ?1",
+            [conversation_id],
+            |row| row.get(0),
+        )?;
+        Ok(count.max(0) as usize)
     }
 
     pub fn delete_messages(&self, conversation_id: &str) -> Result<()> {
@@ -694,12 +911,34 @@ impl AiService {
         self.repo.delete_conversation(id)
     }
 
+    pub fn search_conversations(
+        &self,
+        project_id: Option<&str>,
+        query: &str,
+        search_content: bool,
+    ) -> Result<Vec<AiConversationSearchResult>> {
+        self.repo.search_conversations(project_id, query, search_content)
+    }
+
     pub fn save_message(&self, msg: &AiMessageRow) -> Result<()> {
         self.repo.save_message(msg)
     }
 
     pub fn list_messages(&self, conversation_id: &str) -> Result<Vec<AiMessageRow>> {
         self.repo.list_messages(conversation_id)
+    }
+
+    pub fn list_messages_paged(
+        &self,
+        conversation_id: &str,
+        before_rowid: Option<i64>,
+        limit: usize,
+    ) -> Result<(Vec<AiMessageRow>, Option<i64>, bool)> {
+        self.repo.list_messages_paged(conversation_id, before_rowid, limit)
+    }
+
+    pub fn count_messages(&self, conversation_id: &str) -> Result<usize> {
+        self.repo.count_messages(conversation_id)
     }
 
     pub fn delete_messages(&self, conversation_id: &str) -> Result<()> {
@@ -880,5 +1119,143 @@ mod tests {
         let memories = s.list_memories(Some("session")).unwrap();
         assert_eq!(memories.len(), 1);
         assert_eq!(memories[0].content, "Production runs Ubuntu 22.04");
+    }
+
+    #[test]
+    fn test_list_messages_paged_and_count() {
+        let s = svc();
+        let conv = AiConversationRow {
+            id: "conv-page".into(),
+            profile_id: Some("default".into()),
+            project_id: Some("p1".into()),
+            title: Some("Paging Test".into()),
+            provider_id: None,
+            model: None,
+            status: "active".into(),
+            context_mode: "session".into(),
+            created_at: "2026-08-07T00:00:00Z".into(),
+            updated_at: "2026-08-07T00:00:00Z".into(),
+            revision: 1,
+            device_id: "".into(),
+        };
+        s.save_conversation(&conv).unwrap();
+
+        // 插入 25 条消息
+        for i in 1..=25 {
+            let msg = AiMessageRow {
+                id: format!("msg-{}", i),
+                conversation_id: "conv-page".into(),
+                role: if i % 2 == 1 { "user".into() } else { "assistant".into() },
+                content: format!("Message {}", i),
+                token_count: Some(10),
+                metadata: "{}".into(),
+                created_at: format!("2026-08-07T00:{:02}:00Z", i),
+                revision: 1,
+                device_id: "".into(),
+            };
+            s.save_message(&msg).unwrap();
+        }
+
+        assert_eq!(s.count_messages("conv-page").unwrap(), 25);
+
+        // 首屏：取最新的 10 条（即 16..=25，正序排列）
+        let (page1, oldest_rowid, has_more) = s.list_messages_paged("conv-page", None, 10).unwrap();
+        assert_eq!(page1.len(), 10);
+        assert!(has_more);
+        assert_eq!(page1[0].content, "Message 16");
+        assert_eq!(page1[9].content, "Message 25");
+        assert!(oldest_rowid.is_some());
+
+        // 第二页：取最早 rowid 之前的 10 条（即 6..=15）
+        let (page2, oldest_rowid2, has_more2) = s.list_messages_paged("conv-page", oldest_rowid, 10).unwrap();
+        assert_eq!(page2.len(), 10);
+        assert!(has_more2);
+        assert_eq!(page2[0].content, "Message 6");
+        assert_eq!(page2[9].content, "Message 15");
+
+        // 第三页：剩余 5 条（即 1..=5）
+        let (page3, _oldest_rowid3, has_more3) = s.list_messages_paged("conv-page", oldest_rowid2, 10).unwrap();
+        assert_eq!(page3.len(), 5);
+        assert!(!has_more3);
+        assert_eq!(page3[0].content, "Message 1");
+        assert_eq!(page3[4].content, "Message 5");
+    }
+
+    #[test]
+    fn test_search_conversations_title_and_content() {
+        let s = svc();
+        let conv1 = AiConversationRow {
+            id: "conv-search-1".into(),
+            profile_id: Some("default".into()),
+            project_id: Some("proj-alpha".into()),
+            title: Some("Docker 容器网络排查".into()),
+            provider_id: None,
+            model: None,
+            status: "active".into(),
+            context_mode: "session".into(),
+            created_at: "2026-08-07T00:00:00Z".into(),
+            updated_at: "2026-08-07T00:00:00Z".into(),
+            revision: 1,
+            device_id: "".into(),
+        };
+        let conv2 = AiConversationRow {
+            id: "conv-search-2".into(),
+            profile_id: Some("default".into()),
+            project_id: Some("proj-alpha".into()),
+            title: Some("常规前端开发记录".into()),
+            provider_id: None,
+            model: None,
+            status: "active".into(),
+            context_mode: "session".into(),
+            created_at: "2026-08-07T00:01:00Z".into(),
+            updated_at: "2026-08-07T00:01:00Z".into(),
+            revision: 1,
+            device_id: "".into(),
+        };
+        s.save_conversation(&conv1).unwrap();
+        s.save_conversation(&conv2).unwrap();
+
+        let msg2 = AiMessageRow {
+            id: "msg-nested-1".into(),
+            conversation_id: "conv-search-2".into(),
+            role: "assistant".into(),
+            content: "在配置中遇到了一个跨域 CORS error 错误，需要修改代理设置。".into(),
+            token_count: Some(20),
+            metadata: "{}".into(),
+            created_at: "2026-08-07T00:02:00Z".into(),
+            revision: 1,
+            device_id: "".into(),
+        };
+        s.save_message(&msg2).unwrap();
+
+        // 1. 纯标题搜索：搜 "Docker" 能搜出 conv1
+        let title_res = s.search_conversations(Some("proj-alpha"), "Docker", false).unwrap();
+        assert_eq!(title_res.len(), 1);
+        assert_eq!(title_res[0].conversation.id, "conv-search-1");
+        assert!(title_res[0].matched_snippet.is_none());
+
+        // 2. 纯标题搜索：搜 "CORS" 搜不出任何结果（因为标题不含 CORS）
+        let title_none = s.search_conversations(Some("proj-alpha"), "CORS", false).unwrap();
+        assert_eq!(title_none.len(), 0);
+
+        // 3. 全文检索：开启 search_content 后，搜 "CORS" 成功搜出 conv2 并带有匹配摘要
+        let content_res = s.search_conversations(Some("proj-alpha"), "CORS", true).unwrap();
+        assert_eq!(content_res.len(), 1);
+        assert_eq!(content_res[0].conversation.id, "conv-search-2");
+        assert!(content_res[0].matched_snippet.is_some());
+        let snip = content_res[0].matched_snippet.as_ref().unwrap();
+        assert!(snip.contains("CORS"));
+    }
+
+    #[test]
+    fn test_safe_extract_snippet() {
+        use super::safe_extract_snippet;
+        let text = "这是一段很长很长的文本，包含关键字 Velowork 终端应用，后面还有很多字符。";
+        let snip = safe_extract_snippet(text, "Velowork", 5);
+        assert!(snip.is_some());
+        let s = snip.unwrap();
+        assert!(s.contains("Velowork"));
+        assert!(s.starts_with("..."));
+        assert!(s.ends_with("..."));
     }
 }

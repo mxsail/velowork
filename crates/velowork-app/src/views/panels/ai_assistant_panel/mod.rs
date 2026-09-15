@@ -23,20 +23,25 @@ use velowork_ui::dropdown::{
 use velowork_ui::icon::AppIcon;
 use velowork_ui::menu::PopupMenu;
 use crate::views::overlays::menus::ai_context_menu::open_ai_context_menu;
+use velowork_ui::confirm_dialog::{ConfirmDialog, ConfirmDialogEvent};
+use velowork_ui::design::appearance::{ControlSize, ControlVariant};
 use velowork_ui::input::{Input, InputState};
+use velowork_ui::overlay_registry::{ClosePolicy, OverlayInfo};
 use velowork_ui::scrollable::{Scrollbar, ScrollbarAxis, ScrollbarShow};
 use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState};
+use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
 use velowork_ui::theme::{ThemeColors, surface_bg, theme, with_alpha};
 use velowork_ui::tokens::{
-    ui_space_lg, ui_space_md, ui_space_sm, ui_space_xs,
-    ICON_MD, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM,
-    SPACE_XL,
-    SPACE_XS, markdown_font_family, mono_font_family, ui_font_family, ui_text_md, ui_text_sm,
+    elevation_menu_shadow, ui_space_lg, ui_space_md, ui_space_sm, ui_space_xs,
+    ICON_MD, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_SM, RADIUS_STD, RADIUS_XS,
+    SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
+    markdown_font_family, mono_font_family, ui_font_family, ui_text_md, ui_text_sm,
     ui_text_xs, use_custom_markdown_font, use_custom_ui_font,
 };
 use velowork_ui::tooltip::Tooltip;
-use velowork_ui::{Button, button_primary, h_flex, v_flex};
+use velowork_ui::{Button, ProgressRing, button_primary, format_token_count, h_flex, v_flex};
 use velowork_workspace::focus::FocusManager;
+use velowork_workspace::repositories::AiConversationRow;
 use velowork_workspace::settings::AiModelConfig;
 use velowork_workspace::state::Workspace;
 
@@ -208,6 +213,7 @@ impl ProjectChatSession {
 
     pub fn from_saved(saved: SavedProjectChatSession) -> Self {
         ProjectChatSession {
+            active_conversation_id: None,
             messages: saved.messages.into_iter().map(ChatMessage::from_saved).collect(),
             ai_history: saved.ai_history,
             selected_model_id: saved.selected_model_id,
@@ -215,7 +221,173 @@ impl ProjectChatSession {
     }
 }
 
+pub struct PagedLoadResult {
+    pub messages: Vec<ChatMessage>,
+    pub ai_history: Vec<(usize, String)>,
+    pub selected_model_id: Option<String>,
+    pub has_more: bool,
+    pub oldest_rowid: Option<i64>,
+    pub conv_id: String,
+}
 
+fn parse_message_row(m_row: velowork_workspace::repositories::AiMessageRow, repo: &velowork_workspace::repositories::AiRepository) -> ChatMessage {
+    let mut quote = None;
+    let mut thinking = None;
+    let mut tool_call = None;
+    let mut streaming = false;
+
+    let mut attachments = Vec::new();
+    if let Ok(att_rows) = repo.list_attachments(&m_row.id) {
+        for att in att_rows {
+            let p = std::path::PathBuf::from(&att.path);
+            let is_img = is_image_path(&p);
+            let text_content = None;
+            attachments.push(ChatAttachment {
+                name: p
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                path: p,
+                is_image: is_img,
+                text_content,
+            });
+        }
+    }
+
+    if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&m_row.metadata) {
+        if let Some(q) = meta_json.get("quote").and_then(|v| v.as_str()) {
+            quote = Some(q.to_string());
+        }
+        if let Some(t) = meta_json.get("thinking").and_then(|v| v.as_str()) {
+            thinking = Some(t.to_string());
+        }
+        if let Some(s) = meta_json.get("streaming").and_then(|v| v.as_bool()) {
+            streaming = s;
+        }
+        if let Some(tc_json) = meta_json.get("tool_call") {
+            let kind_str = tc_json
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("use");
+            let name = tc_json
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let body = tc_json
+                .get("body")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let mut params = Vec::new();
+            if let Some(arr) = tc_json.get("params").and_then(|v| v.as_array()) {
+                for p in arr {
+                    if let (Some(k), Some(v)) = (
+                        p.get(0).and_then(|x| x.as_str()),
+                        p.get(1).and_then(|x| x.as_str()),
+                    ) {
+                        params.push((k.to_string(), v.to_string()));
+                    }
+                }
+            }
+            if name.is_empty() && body.is_empty() {
+                tool_call = None;
+            } else {
+                tool_call = Some(ToolCallCardData {
+                    kind: if kind_str == "result" {
+                        ToolCallKind::Result
+                    } else {
+                        ToolCallKind::Use
+                    },
+                    name,
+                    body,
+                    params,
+                });
+            }
+        }
+    }
+
+    ChatMessage {
+        is_user: m_row.role == "user",
+        text: m_row.content,
+        streaming,
+        document_views: std::cell::RefCell::new(Vec::new()),
+        tool_call,
+        thinking,
+        attachments,
+        quote,
+    }
+}
+
+fn format_relative_time(iso_str: &str, cx: &App) -> String {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(iso_str) {
+        let now = chrono::Utc::now();
+        let duration = now.signed_duration_since(dt.with_timezone(&chrono::Utc));
+        let secs = duration.num_seconds();
+        if secs < 60 {
+            i18n!(cx, "common.just_now")
+        } else if secs < 3600 {
+            format!("{}m", duration.num_minutes())
+        } else if secs < 86400 {
+            format!("{}h", duration.num_hours())
+        } else if secs < 86400 * 7 {
+            format!("{}d", duration.num_days())
+        } else {
+            dt.format("%m-%d").to_string()
+        }
+    } else {
+        String::new()
+    }
+}
+
+fn load_project_session_paged(
+    pid: &str,
+    target_conv_id: Option<&str>,
+    before_rowid: Option<i64>,
+    limit: usize,
+) -> Option<PagedLoadResult> {
+    let db = velowork_core::storage::database()?;
+    let repo = velowork_workspace::repositories::AiRepository::new(db);
+
+    let convs = if pid == "default" {
+        repo.list_conversations(None).ok()?
+    } else {
+        repo.list_conversations(Some(pid)).ok()?
+    };
+
+    let conv = if let Some(target_id) = target_conv_id {
+        convs.into_iter().find(|c| c.id == target_id)?
+    } else {
+        convs.into_iter().find(|c| {
+            let c_pid = c.project_id.as_deref().unwrap_or("default");
+            c_pid == pid
+        })?
+    };
+
+    let (msgs_rows, oldest_rowid, has_more) = repo.list_messages_paged(&conv.id, before_rowid, limit).ok()?;
+    log::debug!(
+        "[AI DB Paged] Conversation {} for project {}, loaded: {}, has_more: {}, oldest_rowid: {:?}",
+        conv.id, pid, msgs_rows.len(), has_more, oldest_rowid
+    );
+
+    let mut messages = Vec::new();
+    let mut ai_history = Vec::new();
+    for (idx, m_row) in msgs_rows.into_iter().enumerate() {
+        if m_row.role == "user" {
+            ai_history.push((idx, m_row.content.clone()));
+        }
+        messages.push(parse_message_row(m_row, &repo));
+    }
+
+    Some(PagedLoadResult {
+        messages,
+        ai_history,
+        selected_model_id: conv.model,
+        has_more,
+        oldest_rowid,
+        conv_id: conv.id,
+    })
+}
 
 fn load_single_project_session_from_db(pid: &str) -> Option<ProjectChatSession> {
     let db = velowork_core::storage::database()?;
@@ -241,92 +413,7 @@ fn load_single_project_session_from_db(pid: &str) -> Option<ProjectChatSession> 
         if is_user {
             ai_history.push((idx, m_row.content.clone()));
         }
-        let mut quote = None;
-        let mut thinking = None;
-        let mut tool_call = None;
-        let mut streaming = false;
-
-        let mut attachments = Vec::new();
-        if let Ok(att_rows) = repo.list_attachments(&m_row.id) {
-            for att in att_rows {
-                let p = std::path::PathBuf::from(&att.path);
-                let is_img = is_image_path(&p);
-                let text_content = read_text_safe(&p);
-                attachments.push(ChatAttachment {
-                    name: p
-                        .file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_default(),
-                    path: p,
-                    is_image: is_img,
-                    text_content,
-                });
-            }
-        }
-
-        if let Ok(meta_json) = serde_json::from_str::<serde_json::Value>(&m_row.metadata) {
-            if let Some(q) = meta_json.get("quote").and_then(|v| v.as_str()) {
-                quote = Some(q.to_string());
-            }
-            if let Some(t) = meta_json.get("thinking").and_then(|v| v.as_str()) {
-                thinking = Some(t.to_string());
-            }
-            if let Some(s) = meta_json.get("streaming").and_then(|v| v.as_bool()) {
-                streaming = s;
-            }
-            if let Some(tc_json) = meta_json.get("tool_call") {
-                let kind_str = tc_json
-                    .get("kind")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("use");
-                let name = tc_json
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let body = tc_json
-                    .get("body")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let mut params = Vec::new();
-                if let Some(arr) = tc_json.get("params").and_then(|v| v.as_array()) {
-                    for p in arr {
-                        if let (Some(k), Some(v)) = (
-                            p.get(0).and_then(|x| x.as_str()),
-                            p.get(1).and_then(|x| x.as_str()),
-                        ) {
-                            params.push((k.to_string(), v.to_string()));
-                        }
-                    }
-                }
-                if name.is_empty() && body.is_empty() {
-                    tool_call = None;
-                } else {
-                    tool_call = Some(ToolCallCardData {
-                        kind: if kind_str == "result" {
-                            ToolCallKind::Result
-                        } else {
-                            ToolCallKind::Use
-                        },
-                        name,
-                        body,
-                        params,
-                    });
-                }
-            }
-        }
-
-        messages.push(ChatMessage {
-            is_user,
-            text: m_row.content,
-            streaming,
-            document_views: std::cell::RefCell::new(Vec::new()),
-            tool_call,
-            thinking,
-            attachments,
-            quote,
-        });
+        messages.push(parse_message_row(m_row, &repo));
     }
 
     if messages.is_empty() {
@@ -334,6 +421,7 @@ fn load_single_project_session_from_db(pid: &str) -> Option<ProjectChatSession> 
     }
 
     Some(ProjectChatSession {
+        active_conversation_id: Some(conv.id),
         messages,
         ai_history,
         selected_model_id: conv.model,
@@ -558,7 +646,16 @@ pub struct AiAssistantPanel {
     ai_agent_alive: Option<Arc<AtomicBool>>,
     _ai_agent_task: Option<Task<()>>,
     _ai_consume_task: Option<Task<()>>,
-    ai_scroll_handle: ScrollHandle,
+    /// 虚拟化消息列表滚动状态 (gpui::list)
+    list_state: ListState,
+    /// 是否正在初次加载历史会话（显示居中 loading）
+    loading_history: bool,
+    /// 向上滚动是否还有更早的历史可分页加载
+    has_more_history: bool,
+    /// 已加载消息中最早消息的 SQLite rowid（用于向上分页查询游标）
+    oldest_rowid: Option<i64>,
+    /// 是否正在向上加载更早的历史消息（防止并发重复触发）
+    loading_older: bool,
     /// 历史记录下拉列表的滚动句柄，用于驱动右侧可见滚动条。
     ai_history_scroll: ScrollHandle,
     ai_context_menu: Option<Entity<PopupMenu>>,
@@ -573,10 +670,6 @@ pub struct AiAssistantPanel {
     /// AI 回复逐行显示动画：每条消息的起始帧与已显示行数（按消息索引对齐）。
     ai_reveal_start: std::cell::RefCell<Vec<u64>>,
     ai_reveal_revealed: std::cell::RefCell<Vec<usize>>,
-    /// 自动滚动开关：用户向上滚动查看历史时置为 false 暂停跟随，回到底部时恢复。
-    ai_autoscroll: std::cell::Cell<bool>,
-    /// 上一帧的滚动偏移，用于区分「用户主动上滚」与「内容增长导致的偏移变化」。
-    ai_prev_scroll_offset: std::cell::Cell<Point<Pixels>>,
 
     /// 待发送的输入框附件（本地文件 / 图片），发送后转移到对应 ChatMessage。
     attachments: Vec<ChatAttachment>,
@@ -589,6 +682,28 @@ pub struct AiAssistantPanel {
     ai_history: Vec<(usize, String)>,
     /// 当前关联的项目 ID
     current_project_id: Option<String>,
+    /// 当前活跃的会话 ID
+    active_conversation_id: Option<String>,
+    /// 历史会话下拉 Popover 浮层是否展开
+    ai_sessions_popover_open: bool,
+    /// 缓存的当前项目下的历史会话列表
+    ai_conversation_list: Vec<AiConversationRow>,
+    /// 正在内联重命名标题的会话 ID
+    renaming_conversation_id: Option<String>,
+    /// 内联重命名的输入框状态
+    rename_input_state: Option<Entity<SimpleInputState>>,
+    /// 历史会话搜索关键字
+    ai_sessions_search_query: String,
+    /// 历史会话搜索模式：false 为仅搜标题，true 为消息全文检索
+    ai_sessions_search_content: bool,
+    /// 历史会话搜索输入框
+    ai_sessions_search_input: Option<Entity<InputState>>,
+    /// 历史会话搜索命中结果列表（当有搜索关键词时生效）
+    ai_sessions_search_results: Option<Vec<velowork_workspace::repositories::AiConversationSearchResult>>,
+    /// 历史会话搜索是否正在后台异步查询
+    ai_sessions_searching: bool,
+    /// 历史会话搜索请求代数（防止乱序覆盖）
+    ai_sessions_search_generation: u64,
     /// 按项目隔离的 AI 聊天会话状态 Map
     project_chat_sessions: std::collections::HashMap<String, ProjectChatSession>,
     /// 从终端右键「AI 解读」注入的引用内容。展示在输入框上方，可删除/编辑。
@@ -608,10 +723,34 @@ pub struct AiAssistantPanel {
     ai_input_area_height: f32,
     /// 拖拽调整输入区域高度的状态。
     ai_input_resize_dragging: Option<AiInputResizeDrag>,
+    /// 当前 AI 助手消息中的选区状态（消息索引、分段索引、字符起止偏移、提取文本）。
+    ai_active_selection: Option<AiChatSelection>,
+    /// 选区拖拽中的锚点状态。
+    ai_selection_dragging: Option<AiSelectionDrag>,
+}
+
+/// AI 助手聊天气泡中的文本选区状态。
+#[derive(Clone, Debug)]
+pub struct AiChatSelection {
+    pub msg_index: usize,
+    pub seg_index: usize,
+    pub start: usize,
+    pub end: usize,
+    pub text: String,
+}
+
+/// AI 助手聊天气泡中的文本选区拖拽锚点。
+#[derive(Clone, Debug)]
+pub struct AiSelectionDrag {
+    pub msg_index: usize,
+    pub seg_index: usize,
+    pub anchor: usize,
+    pub plain_text: String,
 }
 
 #[derive(Clone)]
 pub struct ProjectChatSession {
+    pub active_conversation_id: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub ai_history: Vec<(usize, String)>,
     pub selected_model_id: Option<String>,
@@ -626,8 +765,8 @@ const AI_AGENT_MAX_ROUNDS: usize = 24;
 
 const MAX_MEMORY_MESSAGES: usize = 200;
 
-/// 输入区域默认高度（像素）。
-const AI_INPUT_AREA_DEFAULT_HEIGHT: f32 = 160.0;
+/// 输入区域默认高度（像素）。增加 2 行高度（+48px），确保添加引用内容时无需手动拖拽也能自如多行输入。
+const AI_INPUT_AREA_DEFAULT_HEIGHT: f32 = 208.0;
 /// 输入区域最小高度（像素）。
 const AI_INPUT_AREA_MIN_HEIGHT: f32 = 100.0;
 /// 输入区域最大高度（像素）。
@@ -643,9 +782,12 @@ struct AiInputResizeDrag {
 impl AiAssistantPanel {
     fn push_message(&mut self, msg: ChatMessage) {
         self.messages.push(msg);
+        let count = self.messages.len();
+        self.list_state.splice(count - 1..count - 1, 1);
         if self.messages.len() > MAX_MEMORY_MESSAGES {
             let overflow = self.messages.len() - MAX_MEMORY_MESSAGES;
             self.messages.drain(0..overflow);
+            self.list_state.splice(0..overflow, 0);
         }
     }
     pub fn new(
@@ -655,46 +797,22 @@ impl AiAssistantPanel {
         overlay_manager: Entity<OverlayManager>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut project_chat_sessions = std::collections::HashMap::new();
-
-        if let Some(db) = velowork_core::storage::database() {
-            let repo = velowork_workspace::repositories::AiRepository::new(db);
-            if let Ok(convs) = repo.list_conversations(None) {
-                for conv in convs {
-                    let pid = conv.project_id.unwrap_or_else(|| "default".into());
-                    if !project_chat_sessions.contains_key(&pid) {
-                        if let Some(sess) = load_single_project_session_from_db(&pid) {
-                            project_chat_sessions.insert(pid, sess);
-                        }
-                    }
-                }
-            }
-        }
-
         let initial_pid = focus_manager.read(cx).active_project_id().cloned();
         let key = initial_pid.as_deref().unwrap_or("default").to_string();
 
-        let (messages, ai_history, restored_model_id) =
-            if let Some(sess) = project_chat_sessions.remove(&key) {
-                (sess.messages, sess.ai_history, sess.selected_model_id)
-            } else if let Some(sess) = load_single_project_session_from_db(&key) {
-                (sess.messages, sess.ai_history, sess.selected_model_id)
-            } else {
-                (
-                    vec![ChatMessage {
-                        is_user: false,
-                        text: i18n!(cx, "ai_assistant.welcome"),
-                        streaming: false,
-                        document_views: std::cell::RefCell::new(Vec::new()),
-                        tool_call: None,
-                        thinking: None,
-                        attachments: Vec::new(),
-                        quote: None,
-                    }],
-                    Vec::new(),
-                    None,
-                )
-            };
+        let project_chat_sessions = std::collections::HashMap::new();
+        let messages = vec![ChatMessage {
+            is_user: false,
+            text: i18n!(cx, "ai_assistant.welcome"),
+            streaming: false,
+            document_views: std::cell::RefCell::new(Vec::new()),
+            tool_call: None,
+            thinking: None,
+            attachments: Vec::new(),
+            quote: None,
+        }];
+        let ai_history = Vec::new();
+        let restored_model_id = None;
 
         let ai_client = AiClient::new(focus_manager.clone(), workspace.clone(), terminals.clone());
 
@@ -703,7 +821,10 @@ impl AiAssistantPanel {
         let ai_model_select = cx.new(|cx| {
             let mut s = SelectState::new(cx)
                 .placeholder(i18n!(cx, "ai_assistant.model"))
-                .placement(SelectPlacement::Above);
+                .placement(SelectPlacement::Above)
+                .ghost(true)
+                .size(ControlSize::Compact)
+                .text_size(ui_text_md(cx));
             s.set_overlay_registry(reg.clone());
             s
         });
@@ -717,7 +838,10 @@ impl AiAssistantPanel {
                         .collect(),
                 )
                 .selected(Some(AiPermission::ReadOnly))
-                .placement(SelectPlacement::Above);
+                .placement(SelectPlacement::Above)
+                .ghost(true)
+                .size(ControlSize::Compact)
+                .text_size(ui_text_md(cx));
             s.set_overlay_registry(reg.clone());
             s
         });
@@ -746,14 +870,21 @@ impl AiAssistantPanel {
         let chat_input = cx.new(|cx| {
             InputState::new(cx)
                 .multiline()
+                .submit_on_enter(true)
                 .wrap(true)
                 .fill_height(true)
-                .placeholder(i18n!(cx, "ai_assistant.title"))
+                .placeholder(i18n!(cx, "terminal.inline_ai_follow_up_placeholder"))
         });
         let chat_input_clone = chat_input.clone();
         cx.subscribe(
             &chat_input_clone,
-            |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
+            |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                if *event == velowork_ui::input::InputEvent::PressEnter {
+                    if this.has_input_content(cx) {
+                        this.on_send_button(cx);
+                    }
+                    return;
+                }
                 let val = this
                     .chat_input
                     .as_ref()
@@ -813,7 +944,15 @@ impl AiAssistantPanel {
             ai_pending_queue: Vec::new(),
             _ai_agent_task: None,
             _ai_consume_task: None,
-            ai_scroll_handle: ScrollHandle::new(),
+            list_state: {
+                let ls = ListState::new(0, ListAlignment::Top, px(2048.0));
+                ls.set_follow_mode(FollowMode::Tail);
+                ls
+            },
+            loading_history: true,
+            has_more_history: false,
+            oldest_rowid: None,
+            loading_older: false,
             ai_history_scroll: ScrollHandle::new(),
             ai_context_menu: None,
             ai_editing_index: None,
@@ -822,14 +961,23 @@ impl AiAssistantPanel {
             ai_copy_done_indices: std::cell::RefCell::new(Vec::new()),
             ai_reveal_start: std::cell::RefCell::new(Vec::new()),
             ai_reveal_revealed: std::cell::RefCell::new(Vec::new()),
-            ai_autoscroll: std::cell::Cell::new(true),
-            ai_prev_scroll_offset: std::cell::Cell::new(Point::default()),
             attachments: Vec::new(),
 
             ai_history_open: false,
             ai_input_area_bounds: None,
             ai_history,
             current_project_id: initial_pid,
+            active_conversation_id: None,
+            ai_sessions_popover_open: false,
+            ai_conversation_list: Vec::new(),
+            renaming_conversation_id: None,
+            rename_input_state: None,
+            ai_sessions_search_query: String::new(),
+            ai_sessions_search_content: false,
+            ai_sessions_search_input: None,
+            ai_sessions_search_results: None,
+            ai_sessions_searching: false,
+            ai_sessions_search_generation: 0,
             project_chat_sessions,
             ai_quote: None,
             ai_quote_editing: false,
@@ -839,7 +987,21 @@ impl AiAssistantPanel {
             ai_scrollbar_hovered: std::cell::Cell::new(false),
             ai_input_area_height: AI_INPUT_AREA_DEFAULT_HEIGHT,
             ai_input_resize_dragging: None,
+            ai_active_selection: None,
+            ai_selection_dragging: None,
         };
+
+        let panel_weak = cx.entity().downgrade();
+        panel.list_state.set_scroll_handler(move |event, _window, cx| {
+            if event.visible_range.start <= 2
+                && let Some(panel) = panel_weak.upgrade()
+            {
+                panel.update(cx, |this, cx| {
+                    this.load_more_history(cx);
+                });
+            }
+        });
+
 
         // 监听 Workspace 实体而非 FocusManager：所有项目切换路径（如
         // `Workspace::set_focused_project`）都会调用 `cx.notify()` 通知
@@ -863,31 +1025,96 @@ impl AiAssistantPanel {
             })
             .detach();
         }
-        // 启动动画帧循环（~20fps），在「AI 流式回复中」「仍有逐行显示未完成」
-        // 或「自动滚动开启但尚未到底部」时驱动重渲染。
+        // 启动动画帧循环（~60fps，16ms）：在「AI 流式回复中」「仍有逐行显示未完成」
+        // 或「处于加载动画态」时持续以 60fps 驱动重绘；滚动跟随完全由 gpui::ListState 原生处理。
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             loop {
-                smol::Timer::after(std::time::Duration::from_millis(50)).await;
-                let _ = this.update(cx, |this, cx| {
+                smol::Timer::after(std::time::Duration::from_millis(16)).await;
+                let should_continue = this.update(cx, |this, cx| {
                     this.animation_frame = this.animation_frame.wrapping_add(1);
-                    // 自动滚动开启但未到底部时，仍需持续重渲染以平滑跟随最新内容
-                    // （例如一次性完整到达的含代码块 / 工具调用消息）。
-                    let follow = if this.ai_autoscroll.get() {
-                        let max = this.ai_scroll_handle.max_offset();
-                        let cur = this.ai_scroll_handle.offset();
-                        (cur.y + max.y).abs() > px(4.0)
-                    } else {
-                        false
-                    };
-                    // 仅在需要动画 / 跟随时通知重渲染；全部完成后静默，节省 CPU。
-                    if this.animation_active() || follow {
+
+                    // 仅在需要动画时通知重渲染；空闲时静默，零 CPU 占用。
+                    if this.animation_active() || this.loading_history || this.loading_older {
                         cx.notify();
                     }
-                });
+                    true
+                }).unwrap_or(false);
+
+                if !should_continue {
+                    break;
+                }
             }
         })
         .detach();
 
+        // 异步后台首屏分页加载当前项目的历史会话（最新 15 条），绝不阻塞 UI 主线程展开动效
+        let load_key = key.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let lk_query = load_key.clone();
+            let paged = smol::unblock(move || {
+                load_project_session_paged(&lk_query, None, None, 15)
+            }).await;
+
+            let _ = this.update(cx, |this, cx| {
+                let cur_key = this.current_project_id.as_deref().unwrap_or("default");
+                if cur_key == load_key {
+                    this.loading_history = false;
+                    if let Some(paged) = paged {
+                        this.active_conversation_id = Some(paged.conv_id.clone());
+                        if !paged.messages.is_empty() {
+                            let has_user_msg = this.messages.iter().any(|m| m.is_user);
+                            if has_user_msg {
+                                // 智能合并保障：用户已在后台加载期间先行发送了新消息，将历史会话拼接到当前新消息之前
+                                let new_msgs: Vec<ChatMessage> = this
+                                    .messages
+                                    .drain(..)
+                                    .filter(|m| m.is_user || m.streaming || m.thinking.is_some() || m.tool_call.is_some())
+                                    .collect();
+                                let mut merged_messages = paged.messages;
+                                let offset_idx = merged_messages.len();
+                                merged_messages.extend(new_msgs);
+                                this.messages = merged_messages;
+
+                                let mut merged_history = paged.ai_history;
+                                for (idx, msg) in this.messages.iter().enumerate().skip(offset_idx) {
+                                    if msg.is_user {
+                                        merged_history.push((idx, msg.text.clone()));
+                                    }
+                                }
+                                this.ai_history = merged_history;
+                            } else {
+                                this.messages = paged.messages;
+                                this.ai_history = paged.ai_history;
+                            }
+                            this.has_more_history = paged.has_more;
+                            this.oldest_rowid = paged.oldest_rowid;
+                        } else {
+                            this.has_more_history = false;
+                            this.oldest_rowid = None;
+                        }
+                        if let Some(m_id) = paged.selected_model_id {
+                            this.ai_selected_model_id = Some(m_id.clone());
+                            this.ai_model_select.update(cx, |s, cx| {
+                                s.set_selected_value(Some(m_id), cx);
+                            });
+                        }
+                    } else {
+                        let new_id = format!("conv_{}_{}", load_key, chrono::Utc::now().timestamp_millis());
+                        this.active_conversation_id = Some(new_id);
+                        this.has_more_history = false;
+                        this.oldest_rowid = None;
+                    }
+                    this.refresh_conversation_list();
+                    this.list_state.reset(this.messages.len());
+                    this.list_state.scroll_to_end();
+                    this.update_all_message_input_states(cx);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+
+        panel.list_state.reset(panel.messages.len());
         panel.update_all_message_input_states(cx);
         panel
     }
@@ -919,6 +1146,7 @@ impl AiAssistantPanel {
                 .unwrap_or("default")
                 .to_string();
             let session = ProjectChatSession {
+                active_conversation_id: self.active_conversation_id.clone(),
                 messages: std::mem::take(&mut self.messages),
                 ai_history: std::mem::take(&mut self.ai_history),
                 selected_model_id: self.ai_selected_model_id.clone(),
@@ -926,16 +1154,28 @@ impl AiAssistantPanel {
             self.project_chat_sessions.insert(old_key, session);
 
             let new_key = active_pid.as_deref().unwrap_or("default").to_string();
-            let new_session = if let Some(sess) = self.project_chat_sessions.remove(&new_key) {
-                Some(sess)
-            } else {
-                load_single_project_session_from_db(&new_key)
-            };
+            self.current_project_id = active_pid;
+            self.ai_history_open = false;
+            self.ai_sessions_popover_open = false;
+            self.cancel_rename_conversation(cx);
 
-            if let Some(sess) = new_session {
+            if let Some(sess) = self.project_chat_sessions.remove(&new_key) {
+                self.active_conversation_id = sess.active_conversation_id;
                 self.messages = sess.messages;
                 self.ai_history = sess.ai_history;
-                self.ai_selected_model_id = sess.selected_model_id;
+                self.ai_selected_model_id = sess.selected_model_id.clone();
+                if let Some(m_id) = sess.selected_model_id {
+                    self.ai_model_select.update(cx, |s, cx| {
+                        s.set_selected_value(Some(m_id), cx);
+                    });
+                }
+                self.loading_history = false;
+                self.list_state.reset(self.messages.len());
+                self.list_state.scroll_to_end();
+                self.update_all_message_input_states(cx);
+                self.save_current_sessions_to_disk();
+                self.refresh_conversation_list();
+                cx.notify();
             } else {
                 self.messages = vec![ChatMessage {
                     is_user: false,
@@ -948,66 +1188,149 @@ impl AiAssistantPanel {
                     quote: None,
                 }];
                 self.ai_history = Vec::new();
+                self.loading_history = true;
+                self.has_more_history = false;
+                self.oldest_rowid = None;
+                self.loading_older = false;
+                self.list_state.reset(self.messages.len());
+                self.update_all_message_input_states(cx);
+                cx.notify();
+
+                let load_key = new_key.clone();
+                cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                    let lk_query = load_key.clone();
+                    let paged = smol::unblock(move || {
+                        load_project_session_paged(&lk_query, None, None, 15)
+                    }).await;
+
+                    let _ = this.update(cx, |this, cx| {
+                        let cur_key = this.current_project_id.as_deref().unwrap_or("default");
+                        if cur_key == load_key {
+                            this.loading_history = false;
+                            if let Some(paged) = paged {
+                                this.active_conversation_id = Some(paged.conv_id.clone());
+                                if !paged.messages.is_empty() {
+                                    let has_user_msg = this.messages.iter().any(|m| m.is_user);
+                                    if has_user_msg {
+                                        let new_msgs: Vec<ChatMessage> = this
+                                            .messages
+                                            .drain(..)
+                                            .filter(|m| m.is_user || m.streaming || m.thinking.is_some() || m.tool_call.is_some())
+                                            .collect();
+                                        let mut merged_messages = paged.messages;
+                                        let offset_idx = merged_messages.len();
+                                        merged_messages.extend(new_msgs);
+                                        this.messages = merged_messages;
+
+                                        let mut merged_history = paged.ai_history;
+                                        for (idx, msg) in this.messages.iter().enumerate().skip(offset_idx) {
+                                            if msg.is_user {
+                                                merged_history.push((idx, msg.text.clone()));
+                                            }
+                                        }
+                                        this.ai_history = merged_history;
+                                    } else {
+                                        this.messages = paged.messages;
+                                        this.ai_history = paged.ai_history;
+                                    }
+                                    this.has_more_history = paged.has_more;
+                                    this.oldest_rowid = paged.oldest_rowid;
+                                } else {
+                                    this.has_more_history = false;
+                                    this.oldest_rowid = None;
+                                }
+                                if let Some(m_id) = paged.selected_model_id {
+                                    this.ai_selected_model_id = Some(m_id.clone());
+                                    this.ai_model_select.update(cx, |s, cx| {
+                                        s.set_selected_value(Some(m_id), cx);
+                                    });
+                                }
+                            } else {
+                                let new_id = format!("conv_{}_{}", load_key, chrono::Utc::now().timestamp_millis());
+                                this.active_conversation_id = Some(new_id);
+                                this.has_more_history = false;
+                                this.oldest_rowid = None;
+                            }
+                            this.refresh_conversation_list();
+                            this.list_state.reset(this.messages.len());
+                            this.list_state.scroll_to_end();
+                            this.update_all_message_input_states(cx);
+                            cx.notify();
+                        }
+                    });
+                }).detach();
             }
-            self.current_project_id = active_pid;
-            self.ai_history_open = false;
-            self.update_all_message_input_states(cx);
-            self.save_current_sessions_to_disk();
-            cx.notify();
         }
     }
 
-    /// 云端数据恢复/同步后，从 SQLite 数据库重新加载所有 AI 对话会话
+    /// 云端数据恢复/同步后，从 SQLite 数据库异步重新加载所有 AI 对话会话
     pub fn reload_from_db(&mut self, cx: &mut Context<Self>) {
-        self.project_chat_sessions.clear();
-        if let Some(db) = velowork_core::storage::database() {
-            let repo = velowork_workspace::repositories::AiRepository::new(db);
-            if let Ok(convs) = repo.list_conversations(None) {
-                for conv in convs {
-                    let pid = conv.project_id.unwrap_or_else(|| "default".into());
-                    if !self.project_chat_sessions.contains_key(&pid) {
-                        if let Some(sess) = load_single_project_session_from_db(&pid) {
-                            self.project_chat_sessions.insert(pid, sess);
-                        }
-                    }
-                }
-            }
-        }
-
         let key = self
             .current_project_id
             .as_deref()
             .unwrap_or("default")
             .to_string();
 
-        let new_session = if let Some(sess) = self.project_chat_sessions.remove(&key) {
-            Some(sess)
-        } else {
-            load_single_project_session_from_db(&key)
-        };
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let target_key = key.clone();
+            let (loaded_sessions, cur_session) = smol::unblock(move || {
+                let mut sessions = std::collections::HashMap::new();
+                if let Some(db) = velowork_core::storage::database() {
+                    let repo = velowork_workspace::repositories::AiRepository::new(db);
+                    if let Ok(convs) = repo.list_conversations(None) {
+                        for conv in convs {
+                            let pid = conv.project_id.unwrap_or_else(|| "default".into());
+                            if !sessions.contains_key(&pid) {
+                                if let Some(sess) = load_single_project_session_from_db(&pid) {
+                                    sessions.insert(pid, sess);
+                                }
+                            }
+                        }
+                    }
+                }
+                let cur = sessions.remove(&target_key).or_else(|| load_single_project_session_from_db(&target_key));
+                (sessions, cur)
+            }).await;
 
-        if let Some(sess) = new_session {
-            self.messages = sess.messages;
-            self.ai_history = sess.ai_history;
-            if let Some(model_id) = sess.selected_model_id {
-                self.ai_selected_model_id = Some(model_id);
-            }
-        } else {
-            self.messages = vec![ChatMessage {
-                is_user: false,
-                text: i18n!(cx, "ai_assistant.welcome"),
-                streaming: false,
-                document_views: std::cell::RefCell::new(Vec::new()),
-                tool_call: None,
-                thinking: None,
-                attachments: Vec::new(),
-                quote: None,
-            }];
-            self.ai_history = Vec::new();
-        }
-        self.ai_history_open = false;
-        self.update_all_message_input_states(cx);
-        cx.notify();
+            let _ = this.update(cx, |this, cx| {
+                this.project_chat_sessions = loaded_sessions;
+                let cur_key = this.current_project_id.as_deref().unwrap_or("default");
+                if cur_key == key {
+                    if let Some(sess) = cur_session {
+                        this.active_conversation_id = sess.active_conversation_id;
+                        if !sess.messages.is_empty() {
+                            this.messages = sess.messages;
+                            this.ai_history = sess.ai_history;
+                        }
+                        if let Some(m_id) = sess.selected_model_id {
+                            this.ai_selected_model_id = Some(m_id.clone());
+                            this.ai_model_select.update(cx, |s, cx| {
+                                s.set_selected_value(Some(m_id), cx);
+                            });
+                        }
+                    } else {
+                        this.messages = vec![ChatMessage {
+                            is_user: false,
+                            text: i18n!(cx, "ai_assistant.welcome"),
+                            streaming: false,
+                            document_views: std::cell::RefCell::new(Vec::new()),
+                            tool_call: None,
+                            thinking: None,
+                            attachments: Vec::new(),
+                            quote: None,
+                        }];
+                        this.ai_history = Vec::new();
+                    }
+                    this.refresh_conversation_list();
+                    this.ai_history_open = false;
+                    this.ai_sessions_popover_open = false;
+                    this.list_state.reset(this.messages.len());
+                    this.list_state.scroll_to_end();
+                    this.update_all_message_input_states(cx);
+                    cx.notify();
+                }
+            });
+        }).detach();
     }
 
     pub fn save_current_sessions_to_disk(&self) {
@@ -1018,6 +1341,7 @@ impl AiAssistantPanel {
             .to_string();
 
         let current_session = ProjectChatSession {
+            active_conversation_id: self.active_conversation_id.clone(),
             messages: self.messages.clone(),
             ai_history: self.ai_history.clone(),
             selected_model_id: self.ai_selected_model_id.clone(),
@@ -1036,19 +1360,41 @@ impl AiAssistantPanel {
             let now_iso = chrono::Utc::now().to_rfc3339();
 
             for (pid, sess) in all_sessions {
+                let conv_id = sess
+                    .active_conversation_id
+                    .clone()
+                    .unwrap_or_else(|| format!("conv_{}", pid));
+
                 if is_welcome(&sess) {
-                    if let Ok(msgs) = repo.list_messages(&format!("conv_{}", pid)) {
+                    if let Ok(msgs) = repo.list_messages(&conv_id) {
                         if msgs.iter().any(|m| m.role == "user") {
-                            log::info!("[AI Assistant] Skipping SQLite overwrite for project {} as DB has real messages", pid);
+                            log::info!("[AI Assistant] Skipping SQLite overwrite for conversation {} as DB has real messages", conv_id);
                             continue;
                         }
                     }
                 }
 
-                let conv_id = format!("conv_{}", pid);
-                let title = sess.messages.iter().find(|m| m.is_user).map(|m| m.text.clone());
                 let existing = repo.get_conversation(&conv_id).ok().flatten();
-                let created_at = existing.map(|c| c.created_at).unwrap_or_else(|| now_iso.clone());
+                let existing_title = existing.as_ref().and_then(|c| c.title.clone());
+
+                let auto_title = sess
+                    .messages
+                    .iter()
+                    .find(|m| m.is_user)
+                    .map(|m| {
+                        let t = m.text.trim();
+                        if t.chars().count() > 24 {
+                            format!("{}...", t.chars().take(24).collect::<String>())
+                        } else {
+                            t.to_string()
+                        }
+                    });
+
+                let title = existing_title.or(auto_title);
+                let created_at = existing
+                    .as_ref()
+                    .map(|c| c.created_at.clone())
+                    .unwrap_or_else(|| now_iso.clone());
                 let conv_row = velowork_workspace::repositories::AiConversationRow {
                     id: conv_id.clone(),
                     profile_id: Some("default".into()),
@@ -1130,11 +1476,11 @@ impl AiAssistantPanel {
     }
 
     fn scroll_to_bottom(&self) {
-        self.ai_scroll_handle.scroll_to_bottom();
+        self.list_state.scroll_to_end();
     }
 
     fn scroll_to_message(&self, message_index: usize, _cx: &mut Context<Self>) {
-        self.ai_scroll_handle.scroll_to_item(message_index);
+        self.list_state.scroll_to_reveal_item(message_index);
     }
 
     /// 是否仍有需要动画驱动的状态：AI 正在流式回复，或某条 AI 消息尚未完成逐行显示。
@@ -1184,91 +1530,250 @@ impl AiAssistantPanel {
         (1 + elapsed / rate).min(total as u64) as usize
     }
 
-    fn update_message_input_states(&self, msg_idx: usize, cx: &mut Context<Self>) {
-        if msg_idx >= self.messages.len() {
+    fn update_message_input_states(&self, _msg_idx: usize, _cx: &mut Context<Self>) {}
+
+    /// 向当前消息列表头部追加更早的历史消息（分页加载），并安全地重映射所有依赖消息索引的状态。
+    fn prepend_older_messages(&mut self, older_messages: Vec<ChatMessage>) {
+        let count = older_messages.len();
+        if count == 0 {
             return;
         }
-        let msg = &self.messages[msg_idx];
 
-        if !msg.is_user {
-            // AI message: split into ToolSegments
-            let segments = split_tool_calls(&msg.text);
-            // 仅统计非空文本片段，作为 markdown 视图数量。
-            let text_segment_count = segments
+        // 1. 插入消息
+        let mut new_messages = older_messages;
+        new_messages.extend(std::mem::take(&mut self.messages));
+        self.messages = new_messages;
+
+        // 2. 偏移所有基于索引的状态
+        if let Some(idx) = self.ai_streaming_index.as_mut() {
+            *idx += count;
+        }
+        if let Some(idx) = self.ai_editing_index.as_mut() {
+            *idx += count;
+        }
+        if let Some(sel) = self.ai_active_selection.as_mut() {
+            sel.msg_index += count;
+        }
+        if let Some(drag) = self.ai_selection_dragging.as_mut() {
+            drag.msg_index += count;
+        }
+        if let Some(s_idx) = self.ai_search_flat_index.as_mut() {
+            *s_idx += count;
+        }
+
+        // 3. 偏移 RefCell 内部向量
+        {
+            let mut copy_done = self.ai_copy_done_indices.borrow_mut();
+            for idx in copy_done.iter_mut() {
+                *idx += count;
+            }
+        }
+        {
+            let mut quotes = self.ai_expanded_quotes.borrow_mut();
+            for idx in quotes.iter_mut() {
+                *idx += count;
+            }
+        }
+        {
+            let mut tools = self.ai_expanded_tools.borrow_mut();
+            for idx in tools.iter_mut() {
+                *idx += count;
+            }
+        }
+        {
+            let mut starts = self.ai_reveal_start.borrow_mut();
+            let mut prepended_starts = vec![0u64; count];
+            prepended_starts.extend(starts.drain(..));
+            *starts = prepended_starts;
+
+            let mut revealed = self.ai_reveal_revealed.borrow_mut();
+            let mut prepended_revealed: Vec<usize> = self.messages[..count]
                 .iter()
-                .filter(|s| matches!(s, ToolSegment::Text(t) if !t.trim().is_empty()))
-                .count();
-            // 当前已揭示行数（含代码块 / 工具调用的消息直接完整渲染）。
-            let revealed = self.ai_revealed_lines(msg_idx, msg, self.animation_frame);
+                .map(|m| ai_text_line_count(&m.text))
+                .collect();
+            prepended_revealed.extend(revealed.drain(..));
+            *revealed = prepended_revealed;
+        }
 
-            let mut views = msg.document_views.borrow_mut();
-            while views.len() < text_segment_count {
-                let view = cx.new(|cx| velowork_markdown::widgets::DocumentView::new("", cx));
-
-                cx.subscribe(&view, move |this, _, event, cx| {
-                    match event {
-                        velowork_markdown::widgets::document_view::DocumentViewEvent::SelectionStarted => {
-                            this.clear_selections_except(msg_idx, cx);
-                        }
-                    }
-                }).detach();
-
-                views.push(view);
+        // 4. 重构历史记录索引
+        let mut new_history = Vec::new();
+        for (idx, msg) in self.messages.iter().enumerate() {
+            if msg.is_user {
+                new_history.push((idx, msg.text.clone()));
             }
-            views.truncate(text_segment_count);
+        }
+        self.ai_history = new_history;
 
-            // 逐行显示：每个文本片段只展示已揭示行，避免一次性铺满整段文本。
-            let mut text_seg_idx = 0usize;
-            let mut text_line_offset = 0usize;
-            for seg in &segments {
-                if let ToolSegment::Text(s) = seg {
-                    let seg_lines = s.split('\n').count();
-                    if !s.trim().is_empty() {
-                        let reveal_in_seg =
-                            revealed.saturating_sub(text_line_offset).min(seg_lines);
-                        let revealed_text: String = s
-                            .split('\n')
-                            .take(reveal_in_seg)
-                            .collect::<Vec<_>>()
-                            .join("\n");
-                        views[text_seg_idx].update(cx, |v, cx| {
-                            v.set_content(&revealed_text, cx);
+        // 5. 更新虚拟列表条目总数：在头部 splice
+        self.list_state.splice(0..0, count);
+    }
+
+    /// 用户向上滚动触发：异步加载更早的历史消息（分页每次 10 条）
+    fn load_more_history(&mut self, cx: &mut Context<Self>) {
+        if self.loading_history || self.loading_older || !self.has_more_history {
+            return;
+        }
+        // 当正在流式生成或处于编辑态时，暂不触发向上加载，避免索引并发错位
+        if self.ai_streaming_index.is_some() || self.ai_editing_index.is_some() {
+            return;
+        }
+
+        let pid = self
+            .current_project_id
+            .as_deref()
+            .unwrap_or("default")
+            .to_string();
+        let target_conv = self.active_conversation_id.clone();
+        let before_rowid = self.oldest_rowid;
+
+        self.loading_older = true;
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let res = smol::unblock(move || {
+                load_project_session_paged(&pid, target_conv.as_deref(), before_rowid, 10)
+            }).await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.loading_older = false;
+                if let Some(paged) = res {
+                    if !paged.messages.is_empty() {
+                        this.has_more_history = paged.has_more;
+                        this.oldest_rowid = paged.oldest_rowid;
+                        this.prepend_older_messages(paged.messages);
+                    } else {
+                        this.has_more_history = false;
+                    }
+                } else {
+                    this.has_more_history = false;
+                }
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    pub fn get_active_selection_text(&self, _cx: &App) -> Option<String> {
+        self.ai_active_selection.as_ref().map(|s| s.text.clone())
+    }
+
+    pub fn get_selection_for_segment(&self, msg_idx: usize, seg_idx: usize) -> Option<&AiChatSelection> {
+        self.ai_active_selection.as_ref().filter(|s| s.msg_index == msg_idx && s.seg_index == seg_idx)
+    }
+
+    pub fn get_selection_for_message(&self, msg_idx: usize) -> Option<String> {
+        self.ai_active_selection.as_ref().filter(|s| s.msg_index == msg_idx).map(|s| s.text.clone())
+    }
+
+    pub fn handle_ai_selection_event(
+        &mut self,
+        msg_idx: usize,
+        seg_idx: usize,
+        event: velowork_markdown::MarkdownSelectionEvent,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            velowork_markdown::MarkdownSelectionEvent::Start {
+                offset,
+                click_count,
+                plain_text,
+            } => {
+                if click_count == 2 {
+                    let (start, end) = velowork_markdown::find_word_boundaries(&plain_text, offset);
+                    if start < end {
+                        let selected_text: String =
+                            plain_text.chars().skip(start).take(end - start).collect();
+                        self.ai_active_selection = Some(AiChatSelection {
+                            msg_index: msg_idx,
+                            seg_index: seg_idx,
+                            start,
+                            end,
+                            text: selected_text,
                         });
-                        text_seg_idx += 1;
+                        self.ai_selection_dragging = None;
+                        cx.notify();
+                        return;
                     }
-                    text_line_offset += seg_lines;
+                } else if click_count >= 3 {
+                    let (start, end) = velowork_markdown::find_line_boundaries(&plain_text, offset);
+                    if start < end {
+                        let selected_text: String =
+                            plain_text.chars().skip(start).take(end - start).collect();
+                        self.ai_active_selection = Some(AiChatSelection {
+                            msg_index: msg_idx,
+                            seg_index: seg_idx,
+                            start,
+                            end,
+                            text: selected_text,
+                        });
+                        self.ai_selection_dragging = None;
+                        cx.notify();
+                        return;
+                    }
                 }
+
+                self.ai_selection_dragging = Some(AiSelectionDrag {
+                    msg_index: msg_idx,
+                    seg_index: seg_idx,
+                    anchor: offset,
+                    plain_text,
+                });
+                if self.ai_active_selection.is_some() {
+                    self.ai_active_selection = None;
+                    cx.notify();
+                }
+            }
+            velowork_markdown::MarkdownSelectionEvent::Update { offset } => {
+                let Some(ref drag) = self.ai_selection_dragging else {
+                    return;
+                };
+                if drag.msg_index != msg_idx || drag.seg_index != seg_idx {
+                    return;
+                }
+                let anchor = drag.anchor;
+                let start = anchor.min(offset);
+                let end = anchor.max(offset);
+                if start < end {
+                    let selected_text: String =
+                        drag.plain_text.chars().skip(start).take(end - start).collect();
+                    let changed = match &self.ai_active_selection {
+                        Some(current) => {
+                            current.msg_index != msg_idx
+                                || current.seg_index != seg_idx
+                                || current.start != start
+                                || current.end != end
+                                || current.text != selected_text
+                        }
+                        None => true,
+                    };
+                    if changed {
+                        self.ai_active_selection = Some(AiChatSelection {
+                            msg_index: msg_idx,
+                            seg_index: seg_idx,
+                            start,
+                            end,
+                            text: selected_text,
+                        });
+                        cx.notify();
+                    }
+                } else if self.ai_active_selection.is_some() {
+                    self.ai_active_selection = None;
+                    cx.notify();
+                }
+            }
+            velowork_markdown::MarkdownSelectionEvent::End => {
+                self.ai_selection_dragging = None;
             }
         }
     }
 
-    fn clear_selections_except(&self, msg_idx: usize, cx: &mut App) {
-        for (i, msg) in self.messages.iter().enumerate() {
-            if i != msg_idx {
-                let views = msg.document_views.borrow();
-                for v in views.iter() {
-                    v.update(cx, |view, cx| {
-                        view.clear_selection(cx);
-                    });
-                }
-            }
+    pub fn clear_ai_selection(&mut self, cx: &mut Context<Self>) {
+        if self.ai_active_selection.is_some() || self.ai_selection_dragging.is_some() {
+            self.ai_active_selection = None;
+            self.ai_selection_dragging = None;
+            cx.notify();
         }
     }
 
-    fn get_active_selection_text(&self, cx: &App) -> Option<String> {
-        for msg in &self.messages {
-            let views = msg.document_views.borrow();
-            for v in views.iter() {
-                let v_ref = v.read(cx);
-                if let Some(txt) = v_ref.get_selected_markdown() {
-                    if !txt.is_empty() {
-                        return Some(txt);
-                    }
-                }
-            }
-        }
-        None
-    }
 
     /// 打开系统文件选择框，将选中的本地文件 / 图片作为上下文附件加入输入框。
     fn attach_files(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1325,10 +1830,10 @@ impl AiAssistantPanel {
         }
     }
 
-    /// 点击历史列表中的某条消息：平滑滚动定位到聊天主区域该消息的原始位置。
+    /// 点击历史列表中的某条消息：定位到聊天主区域该消息的原始位置。
     fn scroll_to_history_message(&mut self, index: usize, cx: &mut Context<Self>) {
         self.ai_history_open = false;
-        self.ai_scroll_handle.scroll_to_item(index);
+        self.list_state.scroll_to_reveal_item(index);
         cx.notify();
     }
 
@@ -1345,7 +1850,60 @@ impl AiAssistantPanel {
         cx.notify();
     }
 
-    fn send_ai_message(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    /// Focus the chat input box.
+    pub fn focus_input(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(ref chat_input) = self.chat_input {
+            chat_input.update(cx, |inp, cx| inp.focus(window, cx));
+        }
+    }
+
+    /// Append a completed external conversation turn (from terminal inline AI popover)
+    /// and persist it to the active project session.
+    pub fn append_external_turn(
+        &mut self,
+        _project_id: &str,
+        user_text: &str,
+        quote: Option<&str>,
+        assistant_reply: &str,
+        cx: &mut Context<Self>,
+    ) {
+        if self.messages.len() == 1 && !self.messages[0].is_user {
+            self.messages.clear();
+            self.list_state.reset(0);
+        }
+
+        let user_msg = ChatMessage {
+            is_user: true,
+            text: user_text.to_string(),
+            streaming: false,
+            document_views: std::cell::RefCell::new(Vec::new()),
+            tool_call: None,
+            thinking: None,
+            quote: quote.map(|q| q.to_string()),
+            attachments: Vec::new(),
+        };
+
+        let assistant_doc_view =
+            cx.new(|cx| velowork_markdown::widgets::DocumentView::new(assistant_reply, cx));
+        let assistant_msg = ChatMessage {
+            is_user: false,
+            text: assistant_reply.to_string(),
+            streaming: false,
+            document_views: std::cell::RefCell::new(vec![assistant_doc_view]),
+            tool_call: None,
+            thinking: None,
+            quote: None,
+            attachments: Vec::new(),
+        };
+
+        self.push_message(user_msg);
+        self.push_message(assistant_msg);
+        self.save_current_sessions_to_disk();
+        self.scroll_to_bottom();
+        cx.notify();
+    }
+
+    fn send_ai_message(&mut self, cx: &mut Context<Self>) {
         let input_text = self
             .chat_input
             .as_ref()
@@ -1407,7 +1965,6 @@ impl AiAssistantPanel {
                 input.set_value("", cx);
             });
         }
-        self.ai_autoscroll.set(true);
         self.scroll_to_bottom();
         self.save_current_sessions_to_disk();
         self.generate_ai_reply(cx);
@@ -1417,7 +1974,7 @@ impl AiAssistantPanel {
 
     /// 发送按钮的统一入口：根据当前是否正在生成以及输入框是否有内容，
     /// 在「发送新消息 / 终止生成 / 加入待发送队列」三种行为间切换。
-    fn on_send_button(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn on_send_button(&mut self, cx: &mut Context<Self>) {
         let is_streaming = self.ai_streaming_index.is_some();
         let has_input = self.has_input_content(cx);
         if is_streaming && !has_input {
@@ -1425,10 +1982,10 @@ impl AiAssistantPanel {
             self.stop_generation(cx);
         } else if is_streaming && has_input {
             // 正在生成且已输入文字：当前消息入队，待生成结束后自动发送。
-            self.enqueue_current_input(window, cx);
+            self.enqueue_current_input(cx);
         } else {
             // 空闲：直接发送。
-            self.send_ai_message(window, cx);
+            self.send_ai_message(cx);
         }
     }
 
@@ -1468,7 +2025,7 @@ impl AiAssistantPanel {
 
     /// 将当前输入框内容（文本 / 引用 / 附件）克隆一份入队，清空输入框，
     /// 待当前生成结束后按序自动发送。
-    fn enqueue_current_input(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn enqueue_current_input(&mut self, cx: &mut Context<Self>) {
         let text = self
             .chat_input
             .as_ref()
@@ -1489,7 +2046,6 @@ impl AiAssistantPanel {
                 input.set_value("", cx);
             });
         }
-        self.ai_autoscroll.set(true);
         self.scroll_to_bottom();
         cx.notify();
     }
@@ -1524,7 +2080,6 @@ impl AiAssistantPanel {
         let new_idx = self.messages.len() - 1;
         self.ai_history.push((new_idx, final_text));
         self.update_message_input_states(new_idx, cx);
-        self.ai_autoscroll.set(true);
         self.scroll_to_bottom();
         self.save_current_sessions_to_disk();
         self.generate_ai_reply(cx);
@@ -1644,12 +2199,14 @@ impl AiAssistantPanel {
                                             if let Some(idx) = this.ai_streaming_index {
                                                 this.messages[idx].text.push_str(&text);
                                                 this.update_message_input_states(idx, cx);
+                                                this.list_state.remeasure_items(idx..idx + 1);
                                             }
                                         }
                                         StreamChunk::Done => {
                                             if let Some(idx) = this.ai_streaming_index {
                                                 this.messages[idx].streaming = false;
                                                 this.update_message_input_states(idx, cx);
+                                                this.list_state.remeasure_items(idx..idx + 1);
                                             }
                                             this.ai_streaming_index = None;
                                             this.save_current_sessions_to_disk();
@@ -1666,6 +2223,7 @@ impl AiAssistantPanel {
                                                 );
                                                 this.messages[idx].streaming = false;
                                                 this.update_message_input_states(idx, cx);
+                                                this.list_state.remeasure_items(idx..idx + 1);
                                             }
                                             this.ai_streaming_index = None;
                                             this.save_current_sessions_to_disk();
@@ -1914,6 +2472,7 @@ impl AiAssistantPanel {
                                             if let Some(idx) = this.ai_streaming_index {
                                                 this.messages[idx].text.push_str(&t);
                                                 this.update_message_input_states(idx, cx);
+                                                this.list_state.remeasure_items(idx..idx + 1);
                                             }
                                         }
                                         AgentEvent::ToolUse { name, arguments } => {
@@ -1927,6 +2486,7 @@ impl AiAssistantPanel {
                                                     if !accumulated.trim().is_empty() {
                                                         this.messages[idx].thinking =
                                                             Some(accumulated);
+                                                        this.list_state.remeasure_items(idx..idx + 1);
                                                     }
                                                 }
                                             }
@@ -1981,6 +2541,7 @@ impl AiAssistantPanel {
                                             if let Some(idx) = this.ai_streaming_index {
                                                 this.messages[idx].streaming = false;
                                                 this.update_message_input_states(idx, cx);
+                                                this.list_state.remeasure_items(idx..idx + 1);
                                             }
                                             this.ai_streaming_index = None;
                                             done = true;
@@ -1994,6 +2555,7 @@ impl AiAssistantPanel {
                                                 );
                                                 this.messages[idx].streaming = false;
                                                 this.update_message_input_states(idx, cx);
+                                                this.list_state.remeasure_items(idx..idx + 1);
                                             }
                                             this.ai_streaming_index = None;
                                             done = true;
@@ -2189,12 +2751,15 @@ impl AiAssistantPanel {
         if new_text.is_empty() {
             return;
         }
+        let old_len = self.messages.len();
         self.messages[idx].text = new_text;
         self.update_message_input_states(idx, cx);
         // Remove any AI replies that followed this user message, then regenerate.
         self.messages.truncate(idx + 1);
+        if old_len > idx + 1 {
+            self.list_state.splice(idx + 1..old_len, 0);
+        }
         self.ai_editing_index = None;
-        self.ai_autoscroll.set(true);
         self.scroll_to_bottom();
         self.generate_ai_reply(cx);
         cx.notify();
@@ -2202,6 +2767,41 @@ impl AiAssistantPanel {
 
     fn cancel_edit(&mut self, cx: &mut Context<Self>) {
         self.ai_editing_index = None;
+        cx.notify();
+    }
+
+    fn update_ai_search_matches(&mut self, cx: &mut Context<Self>) {
+        let q = self
+            .ai_search_input
+            .as_ref()
+            .map(|i| i.read(cx).text().to_string())
+            .unwrap_or_default();
+        if q.is_empty() {
+            self.ai_search_flat_index = None;
+            cx.notify();
+            return;
+        }
+
+        let mut matches = Vec::new();
+        for (mi, msg) in self.messages.iter().enumerate() {
+            for range in find_match_ranges(
+                &msg.text,
+                &q,
+                self.ai_search_case_sensitive,
+                self.ai_search_use_regex,
+            ) {
+                matches.push((mi, range));
+            }
+        }
+
+        if matches.is_empty() {
+            self.ai_search_flat_index = None;
+        } else {
+            self.ai_search_flat_index = Some(0);
+            if let Some((mi, _range)) = matches.first() {
+                self.scroll_to_message(*mi, cx);
+            }
+        }
         cx.notify();
     }
 
@@ -2799,6 +3399,7 @@ impl AiAssistantPanel {
 
         self.ai_model_select.update(cx, |state, cx| {
             state.set_options(options, cx);
+            state.set_text_size(Some(ui_text_md(cx)), cx);
             if state.selected_value() != selected.as_ref() {
                 state.set_selected_value(selected, cx);
             }
@@ -2810,6 +3411,7 @@ impl AiAssistantPanel {
     fn render_perm_dropdown(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let current_perm = self.ai_permission;
         self.ai_perm_select.update(cx, |state, cx| {
+            state.set_text_size(Some(ui_text_md(cx)), cx);
             if state.selected_value() != Some(&current_perm) {
                 state.set_selected_value(Some(current_perm), cx);
             }
@@ -2980,20 +3582,154 @@ impl AiAssistantPanel {
             })
     }
 
+    fn refresh_conversation_list(&mut self) {
+        let pid = self.current_project_id.as_deref().unwrap_or("default");
+        if let Some(db) = velowork_core::storage::database() {
+            let repo = velowork_workspace::repositories::AiRepository::new(db);
+            let convs = if pid == "default" {
+                repo.list_conversations(None).unwrap_or_default()
+            } else {
+                repo.list_conversations(Some(pid)).unwrap_or_default()
+            };
+            self.ai_conversation_list = convs;
+        }
+    }
+
+    fn toggle_sessions_popover(&mut self, cx: &mut Context<Self>) {
+        if self.ai_sessions_popover_open {
+            self.close_sessions_popover(cx);
+        } else {
+            self.ai_sessions_popover_open = true;
+            self.cancel_rename_conversation(cx);
+            self.init_sessions_search_input(cx);
+            self.refresh_conversation_list();
+            let reg = self.overlay_manager.read(cx).overlay_registry();
+            let weak = cx.entity().downgrade();
+            let close = std::sync::Arc::new(move |_: &mut Window, cx: &mut App| {
+                if let Some(panel) = weak.upgrade() {
+                    panel.update(cx, |this, cx| {
+                        this.close_sessions_popover(cx);
+                    });
+                }
+            });
+            reg.update(cx, |r, _| {
+                r.register(
+                    OverlayInfo {
+                        id: "ai-sessions-popover".into(),
+                        bounds: Bounds::default(),
+                        secondary_bounds: None,
+                        close_policy: ClosePolicy::ClickOutside,
+                        z_index: 2000,
+                    },
+                    close,
+                );
+            });
+            cx.notify();
+        }
+    }
+
+    fn init_sessions_search_input(&mut self, cx: &mut Context<Self>) {
+        if self.ai_sessions_search_input.is_none() {
+            let input = cx.new(|cx| {
+                InputState::new(cx)
+                    .placeholder(i18n!(cx, "ai_assistant.search_sessions_placeholder"))
+            });
+            let input_clone = input.clone();
+            cx.subscribe(
+                &input_clone,
+                |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                    if *event == velowork_ui::input::InputEvent::Change {
+                        this.refresh_sessions_search(cx);
+                    }
+                },
+            )
+            .detach();
+            self.ai_sessions_search_input = Some(input);
+        }
+    }
+
+    fn refresh_sessions_search(&mut self, cx: &mut Context<Self>) {
+        let q = self
+            .ai_sessions_search_input
+            .as_ref()
+            .map(|i| i.read(cx).text().trim().to_string())
+            .unwrap_or_default();
+        self.ai_sessions_search_query = q.clone();
+
+        if q.is_empty() {
+            self.ai_sessions_search_results = None;
+            self.ai_sessions_searching = false;
+            cx.notify();
+            return;
+        }
+
+        self.ai_sessions_search_generation = self.ai_sessions_search_generation.wrapping_add(1);
+        let current_gen = self.ai_sessions_search_generation;
+        let search_content = self.ai_sessions_search_content;
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+
+        self.ai_sessions_searching = true;
+        cx.notify();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let results = smol::unblock(move || {
+                let db = velowork_core::storage::database()?;
+                let repo = velowork_workspace::repositories::AiRepository::new(db);
+                let p = if pid == "default" { None } else { Some(pid.as_str()) };
+                repo.search_conversations(p, &q, search_content).ok()
+            })
+            .await;
+
+            let _ = this.update(cx, |this, cx| {
+                if this.ai_sessions_search_generation != current_gen {
+                    return;
+                }
+                this.ai_sessions_searching = false;
+                this.ai_sessions_search_results = results;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    fn close_sessions_popover(&mut self, cx: &mut Context<Self>) {
+        if self.ai_sessions_popover_open {
+            self.ai_sessions_popover_open = false;
+            self.cancel_rename_conversation(cx);
+            self.ai_sessions_search_query.clear();
+            self.ai_sessions_search_results = None;
+            self.ai_sessions_searching = false;
+            if let Some(ref inp) = self.ai_sessions_search_input {
+                inp.update(cx, |i, cx| i.set_value("", cx));
+            }
+            let reg = self.overlay_manager.read(cx).overlay_registry();
+            reg.update(cx, |r, _| {
+                r.unregister(&"ai-sessions-popover".into());
+            });
+            cx.notify();
+        }
+    }
+
     fn new_ai_chat(&mut self, cx: &mut Context<Self>) {
-        self.ai_stream_rx = None;
-        self.ai_streaming_index = None;
-        self._ai_stream_task = None;
-        self.ai_agent_rx = None;
-        self.ai_tool_rx = None;
-        self.ai_agent_registry = None;
-        self._ai_agent_task = None;
-        self._ai_consume_task = None;
-        self.ai_current_request_id = None;
+        let has_user_msg = self.messages.iter().any(|m| m.is_user);
+        if !has_user_msg {
+            self.close_sessions_popover(cx);
+            return;
+        }
+
+        self.stop_generation(cx);
         self.ai_pending_queue.clear();
+        self.save_current_sessions_to_disk();
+
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+        let new_conv_id = format!("conv_{}_{}", pid, chrono::Utc::now().timestamp_millis());
+        self.active_conversation_id = Some(new_conv_id);
+
         self.messages.clear();
+        self.list_state.reset(0);
         self.attachments.clear();
         self.ai_history_open = false;
+        self.close_sessions_popover(cx);
         self.ai_history.clear();
         self.push_message(ChatMessage {
             is_user: false,
@@ -3003,13 +3739,899 @@ impl AiAssistantPanel {
             tool_call: None,
             thinking: None,
             attachments: Vec::new(),
-
             quote: None,
         });
         let idx = self.messages.len() - 1;
         self.update_message_input_states(idx, cx);
         self.save_current_sessions_to_disk();
+        self.refresh_conversation_list();
         cx.notify();
+    }
+
+    fn switch_to_conversation(&mut self, target_id: &str, cx: &mut Context<Self>) {
+        if self.active_conversation_id.as_deref() == Some(target_id) {
+            self.close_sessions_popover(cx);
+            return;
+        }
+
+        self.stop_generation(cx);
+        self.ai_pending_queue.clear();
+        self.save_current_sessions_to_disk();
+
+        let target_conv_id = target_id.to_string();
+        self.active_conversation_id = Some(target_conv_id.clone());
+        self.close_sessions_popover(cx);
+        self.loading_history = true;
+        self.messages.clear();
+        self.list_state.reset(0);
+        cx.notify();
+
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+        let cid = target_conv_id.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let paged = smol::unblock(move || {
+                load_project_session_paged(&pid, Some(&cid), None, 50)
+            }).await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.loading_history = false;
+                if let Some(paged) = paged {
+                    this.messages = paged.messages;
+                    this.ai_history = paged.ai_history;
+                    this.has_more_history = paged.has_more;
+                    this.oldest_rowid = paged.oldest_rowid;
+                    if let Some(m_id) = paged.selected_model_id {
+                        this.ai_selected_model_id = Some(m_id.clone());
+                        this.ai_model_select.update(cx, |s, cx| {
+                            s.set_selected_value(Some(m_id), cx);
+                        });
+                    }
+                }
+                this.list_state.reset(this.messages.len());
+                this.list_state.scroll_to_end();
+                this.update_all_message_input_states(cx);
+                this.refresh_conversation_list();
+                if this.ai_search_open {
+                    this.update_ai_search_matches(cx);
+                }
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    fn switch_to_conversation_with_search(
+        &mut self,
+        target_id: &str,
+        search_query: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let has_query = search_query.as_ref().map(|q| !q.trim().is_empty()).unwrap_or(false);
+        let q = search_query.unwrap_or_default();
+        self.switch_to_conversation(target_id, cx);
+        if has_query {
+            self.ai_search_open = true;
+            if let Some(ref input) = self.ai_search_input {
+                input.update(cx, |inp, cx| {
+                    inp.set_value(&q, cx);
+                });
+            }
+            self.update_ai_search_matches(cx);
+        }
+    }
+
+    fn delete_conversation(&mut self, target_id: &str, cx: &mut Context<Self>) {
+        if let Some(db) = velowork_core::storage::database() {
+            let repo = velowork_workspace::repositories::AiRepository::new(db);
+            let _ = repo.delete_messages(target_id);
+            let _ = repo.delete_conversation(target_id);
+        }
+
+        self.ai_conversation_list.retain(|c| c.id != target_id);
+
+        if self.active_conversation_id.as_deref() == Some(target_id) {
+            if let Some(first_remaining) = self.ai_conversation_list.first() {
+                let next_id = first_remaining.id.clone();
+                self.switch_to_conversation(&next_id, cx);
+            } else {
+                self.messages.clear();
+                self.list_state.reset(0);
+                self.attachments.clear();
+                self.ai_history.clear();
+                let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+                let new_id = format!("conv_{}_{}", pid, chrono::Utc::now().timestamp_millis());
+                self.active_conversation_id = Some(new_id);
+                self.push_message(ChatMessage {
+                    is_user: false,
+                    text: i18n!(cx, "ai_assistant.welcome"),
+                    streaming: false,
+                    document_views: std::cell::RefCell::new(Vec::new()),
+                    tool_call: None,
+                    thinking: None,
+                    attachments: Vec::new(),
+                    quote: None,
+                });
+                let idx = self.messages.len() - 1;
+                self.update_message_input_states(idx, cx);
+                self.save_current_sessions_to_disk();
+                self.refresh_conversation_list();
+            }
+        }
+        cx.notify();
+    }
+
+    fn confirm_clear_all_conversations(&mut self, cx: &mut Context<Self>) {
+        let title = i18n!(cx, "ai_assistant.clear_all_history");
+        let msg = i18n!(cx, "ai_assistant.clear_all_history_confirm");
+
+        let dialog = cx.new(|cx| {
+            ConfirmDialog::new(
+                cx,
+                title,
+                msg,
+                i18n!(cx, "common.confirm"),
+                i18n!(cx, "common.cancel"),
+                true,
+                None,
+                "ai-clear-all-sessions-confirm",
+            )
+        });
+
+        cx.subscribe(&dialog, move |this, _dialog, event, cx| {
+            if matches!(event, ConfirmDialogEvent::Confirmed) {
+                this.clear_all_conversations(cx);
+            }
+            this.overlay_manager.update(cx, |om, cx| om.close_modal(cx));
+        })
+        .detach();
+
+        self.overlay_manager.update(cx, |om, cx| {
+            om.open_modal(dialog, cx);
+        });
+    }
+
+    fn clear_all_conversations(&mut self, cx: &mut Context<Self>) {
+        self.stop_generation(cx);
+        self.ai_pending_queue.clear();
+        let pid = self.current_project_id.as_deref().unwrap_or("default").to_string();
+
+        if let Some(db) = velowork_core::storage::database() {
+            let repo = velowork_workspace::repositories::AiRepository::new(db);
+            for c in &self.ai_conversation_list {
+                let _ = repo.delete_messages(&c.id);
+                let _ = repo.delete_conversation(&c.id);
+            }
+        }
+
+        self.ai_conversation_list.clear();
+        self.messages.clear();
+        self.list_state.reset(0);
+        self.attachments.clear();
+        self.ai_history.clear();
+        let new_id = format!("conv_{}_{}", pid, chrono::Utc::now().timestamp_millis());
+        self.active_conversation_id = Some(new_id);
+        self.push_message(ChatMessage {
+            is_user: false,
+            text: i18n!(cx, "ai_assistant.welcome"),
+            streaming: false,
+            document_views: std::cell::RefCell::new(Vec::new()),
+            tool_call: None,
+            thinking: None,
+            attachments: Vec::new(),
+            quote: None,
+        });
+        let idx = self.messages.len() - 1;
+        self.update_message_input_states(idx, cx);
+        self.save_current_sessions_to_disk();
+        self.close_sessions_popover(cx);
+    }
+
+    fn start_renaming_conversation(&mut self, conv_id: &str, current_title: &str, cx: &mut Context<Self>) {
+        self.renaming_conversation_id = Some(conv_id.to_string());
+        let val = current_title.to_string();
+        let state = cx.new(|cx| {
+            SimpleInputState::new(cx)
+                .default_value(&val)
+                .submit_on_enter(true)
+        });
+        let state_clone = state.clone();
+        cx.subscribe(
+            &state_clone,
+            |this: &mut Self, _, event: &InputEvent, cx| {
+                match event {
+                    InputEvent::PressEnter => {
+                        this.submit_rename_conversation(cx);
+                    }
+                    InputEvent::Blur => {
+                        this.submit_rename_conversation(cx);
+                    }
+                    _ => {}
+                }
+            },
+        )
+        .detach();
+        self.rename_input_state = Some(state);
+        cx.notify();
+    }
+
+    fn submit_rename_conversation(&mut self, cx: &mut Context<Self>) {
+        if let (Some(conv_id), Some(ref input)) = (self.renaming_conversation_id.take(), self.rename_input_state.take()) {
+            let new_title = input.read(cx).value().trim().to_string();
+            if !new_title.is_empty() {
+                if let Some(db) = velowork_core::storage::database() {
+                    let repo = velowork_workspace::repositories::AiRepository::new(db);
+                    if let Ok(Some(mut conv)) = repo.get_conversation(&conv_id) {
+                        conv.title = Some(new_title.clone());
+                        conv.updated_at = chrono::Utc::now().to_rfc3339();
+                        let _ = repo.save_conversation(&conv);
+                    }
+                }
+                if let Some(item) = self.ai_conversation_list.iter_mut().find(|c| c.id == conv_id) {
+                    item.title = Some(new_title);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn cancel_rename_conversation(&mut self, cx: &mut Context<Self>) {
+        self.renaming_conversation_id = None;
+        self.rename_input_state = None;
+        cx.notify();
+    }
+
+    fn render_sessions_popover(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let p = SemanticPalette::from_context(cx);
+        let t = theme(cx);
+        let active_id = self.active_conversation_id.clone();
+        let renaming_id = self.renaming_conversation_id.clone();
+        let conv_count = self.ai_conversation_list.len();
+        let panel_weak = cx.entity().downgrade();
+
+        let backdrop = div()
+            .id("ai-sessions-backdrop")
+            .absolute()
+            .inset_0()
+            .on_mouse_down(MouseButton::Left, {
+                let panel_weak = panel_weak.clone();
+                move |_, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(panel) = panel_weak.upgrade() {
+                        panel.update(cx, |this, cx| {
+                            this.close_sessions_popover(cx);
+                        });
+                    }
+                }
+            })
+            .on_mouse_down(MouseButton::Right, {
+                let panel_weak = panel_weak.clone();
+                move |_, _, cx| {
+                    cx.stop_propagation();
+                    if let Some(panel) = panel_weak.upgrade() {
+                        panel.update(cx, |this, cx| {
+                            this.close_sessions_popover(cx);
+                        });
+                    }
+                }
+            });
+
+        let list_items: Vec<AnyElement> = if let Some(ref search_results) = self.ai_sessions_search_results {
+            if search_results.is_empty() {
+                vec![
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .justify_center()
+                        .py(SPACE_LG)
+                        .gap(SPACE_XS)
+                        .child(AppIcon::Search.svg().size(ICON_MD).text_color(p.text_muted))
+                        .child(
+                            div()
+                                .text_size(ui_text_md(cx))
+                                .text_color(p.text_muted)
+                                .child(i18n!(cx, "ai_assistant.no_sessions_found")),
+                        )
+                        .into_any_element(),
+                ]
+            } else {
+                search_results
+                    .iter()
+                    .map(|res| {
+                        let is_active = active_id.as_deref() == Some(&res.conversation.id);
+                        let conv_id = res.conversation.id.clone();
+                        let default_title = i18n!(cx, "ai_assistant.new_chat_title");
+                        let title = res.conversation.title.as_deref().unwrap_or(&default_title);
+                        let rel_time = format_relative_time(&res.conversation.updated_at, cx);
+                        let title_str = title.to_string();
+                        let snippet = res.matched_snippet.clone();
+                        let group_name = SharedString::from(format!("session-search-row-{}", conv_id));
+                        let row_id = SharedString::from(format!("ai-session-search-row-{}", conv_id));
+                        let search_q = self.ai_sessions_search_query.clone();
+                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.delete_chat").into_boxed_str());
+
+                        v_flex()
+                            .id(row_id)
+                            .group(group_name.clone())
+                            .w_full()
+                            .px(SPACE_XS)
+                            .py(px(4.0))
+                            .rounded(RADIUS_SM)
+                            .cursor_pointer()
+                            .gap(px(2.0))
+                            .bg(if is_active { p.surface_hover } else { gpui::transparent_black() })
+                            .hover(|s| s.bg(p.surface_hover))
+                            .on_click({
+                                let panel_weak = panel_weak.clone();
+                                let cid = conv_id.clone();
+                                let sq = search_q.clone();
+                                move |_, _, cx| {
+                                    if let Some(panel) = panel_weak.upgrade() {
+                                        panel.update(cx, |this, cx| {
+                                            this.switch_to_conversation_with_search(&cid, Some(sq.clone()), cx);
+                                        });
+                                    }
+                                }
+                            })
+                            .child(
+                                h_flex()
+                                    .w_full()
+                                    .items_center()
+                                    .justify_between()
+                                    .child(
+                                        h_flex()
+                                            .flex_1()
+                                            .min_w_0()
+                                            .items_center()
+                                            .gap(SPACE_SM)
+                                            .child(
+                                                div()
+                                                    .size(px(6.0))
+                                                    .rounded_full()
+                                                    .bg(if is_active { p.surface_accent } else { gpui::transparent_black() })
+                                                    .flex_shrink_0(),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .truncate()
+                                                    .text_size(ui_text_md(cx))
+                                                    .text_color(if is_active { p.text_primary } else { p.text_secondary })
+                                                    .font_weight(if is_active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                                                    .child(title_str.clone()),
+                                            )
+                                            .when(!rel_time.is_empty(), |d| {
+                                                d.child(
+                                                    div()
+                                                        .flex_shrink_0()
+                                                        .text_size(ui_text_sm(cx))
+                                                        .text_color(p.text_muted)
+                                                        .child(rel_time),
+                                                )
+                                            }),
+                                    )
+                                    .child(
+                                        h_flex()
+                                            .items_center()
+                                            .gap(px(2.0))
+                                            .opacity(0.0)
+                                            .group_hover(group_name.clone(), |s| s.opacity(1.0))
+                                            .child(
+                                                div()
+                                                    .id(SharedString::from(format!("session-search-delete-icon-{}", conv_id)))
+                                                    .cursor_pointer()
+                                                    .p(px(2.0))
+                                                    .rounded(RADIUS_XS)
+                                                    .hover(|s| s.bg(p.surface_hover))
+                                                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(delete_tip)).into())
+                                                    .child(AppIcon::Trash.svg().size(ICON_MICRO).text_color(p.status_error))
+                                                    .on_click({
+                                                        let panel_weak = panel_weak.clone();
+                                                        let cid = conv_id.clone();
+                                                        move |_, _, cx| {
+                                                            cx.stop_propagation();
+                                                            if let Some(panel) = panel_weak.upgrade() {
+                                                                panel.update(cx, |this, cx| {
+                                                                    this.delete_conversation(&cid, cx);
+                                                                    this.refresh_sessions_search(cx);
+                                                                });
+                                                            }
+                                                        }
+                                                    }),
+                                            ),
+                                    ),
+                            )
+                            .when_some(snippet, |d, snip| {
+                                let snippet_prefix = i18n!(cx, "ai_assistant.snippet_prefix");
+                                d.child(
+                                    div()
+                                        .w_full()
+                                        .ml(px(14.0))
+                                        .px(px(4.0))
+                                        .py(px(2.0))
+                                        .rounded(RADIUS_XS)
+                                        .bg(p.surface_base)
+                                        .text_size(ui_text_xs(cx))
+                                        .text_color(p.text_muted)
+                                        .child(format!("{}: {}", snippet_prefix, snip.trim())),
+                                )
+                            })
+                            .into_any_element()
+                    })
+                    .collect()
+            }
+        } else if conv_count == 0 {
+            vec![
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .py(SPACE_MD)
+                    .gap(SPACE_XS)
+                    .child(AppIcon::History.svg().size(ICON_MD).text_color(p.text_muted))
+                    .child(
+                        div()
+                            .text_size(ui_text_md(cx))
+                            .text_color(p.text_muted)
+                            .child(i18n!(cx, "ai_assistant.no_chat_history")),
+                    )
+                    .into_any_element(),
+            ]
+        } else {
+            self.ai_conversation_list
+                .iter()
+                .map(|conv| {
+                    let is_active = active_id.as_deref() == Some(&conv.id);
+                    let is_renaming = renaming_id.as_deref() == Some(&conv.id);
+                    let conv_id = conv.id.clone();
+                    let default_title = i18n!(cx, "ai_assistant.new_chat_title");
+                    let title = conv.title.as_deref().unwrap_or(&default_title);
+                    let rel_time = format_relative_time(&conv.updated_at, cx);
+                    let title_str = title.to_string();
+
+                    if is_renaming {
+                        h_flex()
+                            .id(SharedString::from(format!("ai-session-renaming-{}", conv_id)))
+                            .w_full()
+                            .px(SPACE_XS)
+                            .py(px(4.0))
+                            .gap(px(2.0))
+                            .items_center()
+                            .when_some(self.rename_input_state.clone(), |d, input_st| {
+                                d.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(
+                                            SimpleInput::new(&input_st)
+                                                .size(ControlSize::Compact)
+                                                .text_size(ui_text_md(cx)),
+                                        ),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .id("session-rename-confirm-btn")
+                                    .cursor_pointer()
+                                    .p(px(2.0))
+                                    .rounded(RADIUS_XS)
+                                    .hover(|s| s.bg(p.surface_hover))
+                                    .child(AppIcon::Check.svg().size(ICON_MICRO).text_color(p.status_success))
+                                    .on_click({
+                                        let panel_weak = panel_weak.clone();
+                                        move |_, _, cx| {
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    this.submit_rename_conversation(cx);
+                                                });
+                                            }
+                                        }
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .id("session-rename-cancel-btn")
+                                    .cursor_pointer()
+                                    .p(px(2.0))
+                                    .rounded(RADIUS_XS)
+                                    .hover(|s| s.bg(p.surface_hover))
+                                    .child(AppIcon::Close.svg().size(ICON_MICRO).text_color(p.text_muted))
+                                    .on_click({
+                                        let panel_weak = panel_weak.clone();
+                                        move |_, _, cx| {
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    this.cancel_rename_conversation(cx);
+                                                });
+                                            }
+                                        }
+                                    }),
+                            )
+                            .into_any_element()
+                    } else {
+                        let group_name = SharedString::from(format!("session-row-{}", conv_id));
+                        let row_id = SharedString::from(format!("ai-session-row-{}", conv_id));
+                        let rename_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.rename_chat").into_boxed_str());
+                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.delete_chat").into_boxed_str());
+
+                        h_flex()
+                            .id(row_id)
+                            .group(group_name.clone())
+                            .w_full()
+                            .px(SPACE_XS)
+                            .py(px(4.0))
+                            .rounded(RADIUS_SM)
+                            .cursor_pointer()
+                            .items_center()
+                            .justify_between()
+                            .bg(if is_active { p.surface_hover } else { gpui::transparent_black() })
+                            .hover(|s| s.bg(p.surface_hover))
+                            .on_click({
+                                let panel_weak = panel_weak.clone();
+                                let cid = conv_id.clone();
+                                move |_, _, cx| {
+                                    if let Some(panel) = panel_weak.upgrade() {
+                                        panel.update(cx, |this, cx| {
+                                            this.switch_to_conversation(&cid, cx);
+                                        });
+                                    }
+                                }
+                            })
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .items_center()
+                                    .gap(SPACE_SM)
+                                    .child(
+                                        div()
+                                            .size(px(6.0))
+                                            .rounded_full()
+                                            .bg(if is_active { p.surface_accent } else { gpui::transparent_black() })
+                                            .flex_shrink_0(),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex_1()
+                                            .truncate()
+                                            .text_size(ui_text_md(cx))
+                                            .text_color(if is_active { p.text_primary } else { p.text_secondary })
+                                            .font_weight(if is_active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                                            .child(title_str.clone()),
+                                    )
+                                    .when(!rel_time.is_empty(), |d| {
+                                        d.child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .text_size(ui_text_sm(cx))
+                                                .text_color(p.text_muted)
+                                                .child(rel_time),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                h_flex()
+                                    .items_center()
+                                    .gap(px(2.0))
+                                    .opacity(0.0)
+                                    .group_hover(group_name.clone(), |s| s.opacity(1.0))
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!("session-rename-icon-{}", conv_id)))
+                                            .cursor_pointer()
+                                            .p(px(2.0))
+                                            .rounded(RADIUS_XS)
+                                            .hover(|s| s.bg(p.surface_hover))
+                                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(rename_tip)).into())
+                                            .child(AppIcon::Edit.svg().size(ICON_MICRO).text_color(p.text_muted))
+                                            .on_click({
+                                                let panel_weak = panel_weak.clone();
+                                                let cid = conv_id.clone();
+                                                let t = title_str.clone();
+                                                move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    if let Some(panel) = panel_weak.upgrade() {
+                                                        panel.update(cx, |this, cx| {
+                                                            this.start_renaming_conversation(&cid, &t, cx);
+                                                        });
+                                                    }
+                                                }
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!("session-delete-icon-{}", conv_id)))
+                                            .cursor_pointer()
+                                            .p(px(2.0))
+                                            .rounded(RADIUS_XS)
+                                            .hover(|s| s.bg(p.surface_hover))
+                                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(delete_tip)).into())
+                                            .child(AppIcon::Trash.svg().size(ICON_MICRO).text_color(p.status_error))
+                                            .on_click({
+                                                let panel_weak = panel_weak.clone();
+                                                let cid = conv_id.clone();
+                                                move |_, _, cx| {
+                                                    cx.stop_propagation();
+                                                    if let Some(panel) = panel_weak.upgrade() {
+                                                        panel.update(cx, |this, cx| {
+                                                            this.delete_conversation(&cid, cx);
+                                                        });
+                                                    }
+                                                }
+                                            }),
+                                    ),
+                            )
+                            .into_any_element()
+                    }
+                })
+                .collect()
+        };
+
+        let reg = self.overlay_manager.read(cx).overlay_registry();
+        let card = div()
+            .id("ai-sessions-popover-card")
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .child(
+                canvas(
+                    move |bounds: Bounds<Pixels>, _window: &mut Window, cx: &mut App| {
+                        reg.update(cx, |r, _| {
+                            r.set_bounds(&"ai-sessions-popover".into(), bounds);
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .absolute()
+            .top(px(velowork_ui::tab_height(cx) + 4.0))
+            .left(px(8.0))
+            .right(px(8.0))
+            .max_h(px(380.0))
+            .flex()
+            .flex_col()
+            .bg(p.surface_raised)
+            .border_1()
+            .border_color(p.border_subtle)
+            .rounded(RADIUS_MD)
+            .shadow(elevation_menu_shadow())
+            // Header
+            .child(
+                h_flex()
+                    .h(px(34.0))
+                    .px(SPACE_SM)
+                    .border_b_1()
+                    .border_color(p.border_subtle)
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .child(
+                                AppIcon::History
+                                    .svg()
+                                    .size(ICON_SM)
+                                    .text_color(p.text_secondary),
+                            )
+                            .child(
+                                div()
+                                    .text_size(ui_text_md(cx))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(p.text_primary)
+                                    .child(if let Some(ref search_results) = self.ai_sessions_search_results {
+                                        format!("{} ({})", i18n!(cx, "ai_assistant.chat_history"), search_results.len())
+                                    } else {
+                                        format!("{} ({})", i18n!(cx, "ai_assistant.chat_history"), conv_count)
+                                    }),
+                            ),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .when(conv_count > 0, |d| {
+                                d.child(
+                                    div()
+                                        .id("ai-clear-all-sessions-btn")
+                                        .cursor_pointer()
+                                        .px(SPACE_XS)
+                                        .py(px(2.0))
+                                        .rounded(RADIUS_SM)
+                                        .text_size(ui_text_md(cx))
+                                        .text_color(p.text_muted)
+                                        .hover(|s| s.text_color(p.status_error).bg(p.surface_hover))
+                                        .child(i18n!(cx, "ai_assistant.clear_all_history"))
+                                        .on_click({
+                                            let panel_weak = panel_weak.clone();
+                                            move |_, _, cx| {
+                                                if let Some(panel) = panel_weak.upgrade() {
+                                                    panel.update(cx, |this, cx| {
+                                                        this.confirm_clear_all_conversations(cx);
+                                                    });
+                                                }
+                                            }
+                                        }),
+                                )
+                            })
+                            .child(
+                                div()
+                                    .id("ai-popover-close-btn")
+                                    .cursor_pointer()
+                                    .p(px(2.0))
+                                    .rounded(RADIUS_XS)
+                                    .hover(|s| s.bg(p.surface_hover))
+                                    .child(
+                                        AppIcon::Close
+                                            .svg()
+                                            .size(ICON_MICRO)
+                                            .text_color(p.text_muted),
+                                    )
+                                    .on_click({
+                                        let panel_weak = panel_weak.clone();
+                                        move |_, _, cx| {
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    this.close_sessions_popover(cx);
+                                                });
+                                            }
+                                        }
+                                    }),
+                            ),
+                    ),
+            )
+            // Sessions Search Bar
+            .child({
+                let has_search_query = !self.ai_sessions_search_query.is_empty();
+                let search_content = self.ai_sessions_search_content;
+                let scope_title_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.search_scope_title").into_boxed_str());
+                let scope_content_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.search_scope_content").into_boxed_str());
+                let current_scope_tip = if search_content { scope_content_tip } else { scope_title_tip };
+                let panel_weak_search = panel_weak.clone();
+
+                h_flex()
+                    .h(px(32.0))
+                    .px(SPACE_SM)
+                    .py(px(2.0))
+                    .gap(SPACE_XS)
+                    .items_center()
+                    .border_b_1()
+                    .border_color(p.border_subtle)
+                    .child(
+                        h_flex()
+                            .flex_1()
+                            .h(px(26.0))
+                            .px(SPACE_XS)
+                            .bg(p.surface_base)
+                            .border_1()
+                            .border_color(p.border_subtle)
+                            .rounded(RADIUS_SM)
+                            .items_center()
+                            .gap(px(4.0))
+                            .child(AppIcon::Search.svg().size(ICON_MICRO).text_color(p.text_muted))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .h_full()
+                                    .flex()
+                                    .items_center()
+                                    .child(if let Some(ref s_input) = self.ai_sessions_search_input {
+                                        Input::new(s_input).borderless(true).into_any_element()
+                                    } else {
+                                        div().into_any_element()
+                                    })
+                            )
+                            .when(has_search_query, |d| {
+                                let panel_weak = panel_weak_search.clone();
+                                d.child(
+                                    div()
+                                        .id("ai-sessions-search-clear")
+                                        .cursor_pointer()
+                                        .p(px(2.0))
+                                        .rounded(RADIUS_XS)
+                                        .hover(|s| s.bg(p.surface_hover))
+                                        .child(AppIcon::Close.svg().size(ICON_MICRO).text_color(p.text_muted))
+                                        .on_click(move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            if let Some(panel) = panel_weak.upgrade() {
+                                                panel.update(cx, |this, cx| {
+                                                    if let Some(ref inp) = this.ai_sessions_search_input {
+                                                        inp.update(cx, |i, cx| i.set_value("", cx));
+                                                    }
+                                                    this.refresh_sessions_search(cx);
+                                                });
+                                            }
+                                        })
+                                )
+                            })
+                    )
+                    .child({
+                        let panel_weak = panel_weak_search.clone();
+                        div()
+                            .id("ai-sessions-search-scope-toggle")
+                            .cursor_pointer()
+                            .px(px(6.0))
+                            .h(px(26.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(2.0))
+                            .rounded(RADIUS_SM)
+                            .border_1()
+                            .border_color(if search_content { p.surface_accent } else { p.border_subtle })
+                            .bg(if search_content { p.surface_accent.opacity(0.12) } else { gpui::transparent_black() })
+                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(current_scope_tip)).into())
+                            .on_click(move |_, _, cx| {
+                                cx.stop_propagation();
+                                if let Some(panel) = panel_weak.upgrade() {
+                                    panel.update(cx, |this, cx| {
+                                        this.ai_sessions_search_content = !this.ai_sessions_search_content;
+                                        this.refresh_sessions_search(cx);
+                                    });
+                                }
+                            })
+                            .child(
+                                AppIcon::File
+                                    .svg()
+                                    .size(ICON_MICRO)
+                                    .text_color(if search_content { p.surface_accent } else { p.text_muted })
+                            )
+                            .child(
+                                div()
+                                    .text_size(ui_text_xs(cx))
+                                    .font_weight(if search_content { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                                    .text_color(if search_content { p.surface_accent } else { p.text_muted })
+                                    .child(if search_content {
+                                        i18n!(cx, "ai_assistant.search_scope_content")
+                                    } else {
+                                        i18n!(cx, "ai_assistant.search_scope_title")
+                                    })
+                            )
+                    })
+            })
+            // Scrollable List
+            .child(
+                div()
+                    .id("ai-sessions-scroll-list")
+                    .flex_1()
+                    .overflow_y_scroll()
+                    .p(px(2.0))
+                    .children(list_items),
+            )
+            // Footer
+            .child(
+                h_flex()
+                    .p(SPACE_XS)
+                    .border_t_1()
+                    .border_color(p.border_subtle)
+                    .child(
+                        Button::new("ai-popover-footer-new-chat-btn", &t)
+                            .label(format!("+ {}", i18n!(cx, "ai_assistant.new_chat")))
+                            .small()
+                            .text_size(ui_text_md(cx))
+                            .variant(ControlVariant::Secondary)
+                            .full_width(true)
+                            .on_click({
+                                let panel_weak = panel_weak.clone();
+                                move |_, _, cx| {
+                                    if let Some(panel) = panel_weak.upgrade() {
+                                        panel.update(cx, |this, cx| {
+                                            this.new_ai_chat(cx);
+                                        });
+                                    }
+                                }
+                            }),
+                    ),
+            );
+
+        div()
+            .id("ai-sessions-overlay-root")
+            .absolute()
+            .inset_0()
+            .child(backdrop)
+            .child(card)
     }
 
     fn clear_ai_chat(&mut self, cx: &mut Context<Self>) {
@@ -3024,6 +4646,7 @@ impl AiAssistantPanel {
         self.ai_current_request_id = None;
         self.ai_pending_queue.clear();
         self.messages.clear();
+        self.list_state.reset(0);
         self.attachments.clear();
         self.ai_history_open = false;
         self.ai_history.clear();
@@ -3073,9 +4696,12 @@ impl AiAssistantPanel {
                 let input_clone = input.clone();
                 cx.subscribe(
                     &input_clone,
-                    |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
-                        this.ai_search_flat_index = None;
-                        cx.notify();
+                    |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                        if *event == velowork_ui::input::InputEvent::PressEnter {
+                            this.search_next(cx);
+                        } else {
+                            this.update_ai_search_matches(cx);
+                        }
                     },
                 )
                 .detach();
@@ -3085,6 +4711,7 @@ impl AiAssistantPanel {
                 input.focus(window, cx);
                 input.select_all(cx);
             });
+            self.update_ai_search_matches(cx);
         } else if let Some(ref input) = self.ai_search_input {
             input.update(cx, |input, cx| input.set_value("", cx));
         }
@@ -3108,14 +4735,21 @@ impl AiAssistantPanel {
                 let input = cx.new(|cx| {
                     InputState::new(cx)
                         .multiline()
+                        .submit_on_enter(true)
                         .wrap(true)
                         .fill_height(true)
-                        .placeholder(i18n!(cx, "ai_assistant.title"))
+                        .placeholder(i18n!(cx, "terminal.inline_ai_follow_up_placeholder"))
                 });
                 let input_clone = input.clone();
                 cx.subscribe(
                     &input_clone,
-                    |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
+                    |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                        if *event == velowork_ui::input::InputEvent::PressEnter {
+                            if this.has_input_content(cx) {
+                                this.on_send_button(cx);
+                            }
+                            return;
+                        }
                         let val = this
                             .chat_input
                             .as_ref()
@@ -3151,9 +4785,12 @@ impl AiAssistantPanel {
             let input_clone = input.clone();
             cx.subscribe(
                 &input_clone,
-                |this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
-                    this.ai_search_flat_index = None;
-                    cx.notify();
+                |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                    if *event == velowork_ui::input::InputEvent::PressEnter {
+                        this.search_next(cx);
+                    } else {
+                        this.update_ai_search_matches(cx);
+                    }
                 },
             )
             .detach();
@@ -3269,7 +4906,17 @@ impl AiAssistantPanel {
             .when(has_rounded_corners, |d| d.rounded_br(radius))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
+                    if let Some(text) = this.get_active_selection_text(cx) {
+                        if !text.is_empty() {
+                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            cx.stop_propagation();
+                            return;
+                        }
+                    }
+                }
                 if cmd_or_ctrl && event.keystroke.key.as_str() == "f" {
+
                     this.ai_search_open = true;
                     let input = this.ai_search_input.get_or_insert_with(|| {
                         let input = cx.new(|cx| {
@@ -3295,18 +4942,33 @@ impl AiAssistantPanel {
                     cx.notify();
                     return;
                 }
-                if event.keystroke.key.as_str() == "escape" && this.ai_search_open {
-                    this.ai_search_open = false;
-                    if let Some(ref input) = this.ai_search_input {
-                        input.update(cx, |inp, cx| inp.set_value("", cx));
+                if event.keystroke.key.as_str() == "escape" {
+                    if this.renaming_conversation_id.is_some() {
+                        this.cancel_rename_conversation(cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
                     }
-                    if let Some(ref chat_input) = this.chat_input {
-                        chat_input.update(cx, |inp, cx| inp.focus(window, cx));
-                    } else {
-                        window.focus(&this.focus_handle, cx);
+                    if this.ai_sessions_popover_open {
+                        this.close_sessions_popover(cx);
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
                     }
-                    cx.stop_propagation();
-                    cx.notify();
+                    if this.ai_search_open {
+                        this.ai_search_open = false;
+                        if let Some(ref input) = this.ai_search_input {
+                            input.update(cx, |inp, cx| inp.set_value("", cx));
+                        }
+                        if let Some(ref chat_input) = this.chat_input {
+                            chat_input.update(cx, |inp, cx| inp.focus(window, cx));
+                        } else {
+                            window.focus(&this.focus_handle, cx);
+                        }
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
+                    }
                 }
             }))
             .child(
@@ -3324,6 +4986,14 @@ impl AiAssistantPanel {
                         &t,
                         cx,
                         |this, _, cx| this.new_ai_chat(cx),
+                    ))
+                    .child(self.ai_icon_btn(
+                        "ai-history-btn",
+                        AppIcon::History,
+                        i18n!(cx, "ai_assistant.chat_history"),
+                        &t,
+                        cx,
+                        |this, _, cx| this.toggle_sessions_popover(cx),
                     ))
                     .child(self.ai_icon_btn(
                         "ai-clear-chat",
@@ -3353,20 +5023,30 @@ impl AiAssistantPanel {
                     .child(div().flex_1())
                     .child({
                         let used_tokens = self.current_session_tokens();
-                        let max_tokens = settings_entity(cx).read(cx).settings.ai_max_context_tokens;
-                        let token_text = format!("{} / {} T", used_tokens, max_tokens);
-                        let tooltip_text = i18n!(cx, "ai_assistant.token_usage_hint");
+                        let max_tokens = settings_entity(cx).read(cx).settings.ai_max_context_tokens.max(1);
+                        let ratio = (used_tokens as f32 / max_tokens as f32).clamp(0.0, 1.0);
+                        let pct = format!("{:.1}%", (used_tokens as f64 / max_tokens as f64) * 100.0);
+                        let used_str = format_token_count(used_tokens);
+                        let max_str = format_token_count(max_tokens);
+                        let tooltip_text = format!(
+                            "{} {}/{} {}",
+                            pct,
+                            used_str,
+                            max_str,
+                            i18n!(cx, "ai_assistant.context_used")
+                        );
                         div()
-                            .id("ai-token-usage-badge")
-                            .px(SPACE_XS)
-                            .py(px(2.0))
+                            .id("ai-token-usage-ring")
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .rounded(RADIUS_STD)
-                            .bg(surface_bg(t.bg_hover, cx))
+                            .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                             .child(
-                                div()
-                                    .text_size(ui_text_xs(cx))
-                                    .text_color(rgb(t.text_muted))
-                                    .child(token_text),
+                                ProgressRing::new(ratio)
+                                    .size(px(16.0))
+                                    .stroke_width(px(2.0)),
                             )
                             .tooltip(move |_, cx| cx.new(|_| Tooltip::new(tooltip_text.clone())).into())
                     }),
@@ -3388,165 +5068,230 @@ impl AiAssistantPanel {
                             }
                         });
                     })
-                    .child(
-                        div()
-                            .id("ai-messages-container")
-                            .size_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&self.ai_scroll_handle)
-                            .flex()
-                            .flex_col()
-                            .px(ui_space_md(cx))
-                            .py(ui_space_md(cx))
-                            .gap(ui_space_sm(cx))
-                            .children({
-                                let panel_entity = cx.entity().clone();
-                                // 预提取已复制索引，避免在 render_ai_message 中调用 entity.read()
-                                // 触发 GPUI 实体借出冲突（entity_map.rs:164）。
-                                let copied_indices: Vec<usize> =
-                                    self.ai_copy_done_indices.borrow().clone();
-                                let mut msg_elements: Vec<AnyElement> = Vec::new();
-                                let mut flat = 0usize;
-                                let total_msgs = messages.len();
-                                let frame = self.animation_frame;
-                                // 保证逐行显示动画状态向量与消息数对齐：新消息以当前帧为起始。
-                                {
-                                    let mut starts = self.ai_reveal_start.borrow_mut();
-                                    let mut revealed = self.ai_reveal_revealed.borrow_mut();
-                                    while starts.len() < total_msgs {
-                                        starts.push(frame);
-                                        revealed.push(0);
-                                    }
-                                }
-                                // 归并同一轮 AI 回复中的多次工具调用：工具调用消息不再单独成气泡，
-                                // 而是挂到最近的 AI 回复消息（`current_ai_idx`）下，渲染为可折叠的工具组。
-                                let mut current_ai_idx: Option<usize> = None;
-                                let mut tool_calls_by_ai: std::collections::HashMap<
-                                    usize,
-                                    Vec<ToolCallCardData>,
-                                > = std::collections::HashMap::new();
-                                let expanded_tools = self.ai_expanded_tools.borrow();
-                                for (mi, msg) in messages.iter().enumerate() {
-                                    // 独立的工具调用消息（来自 Agent 事件流）：收集到归属 AI 消息，跳过单独渲染。
-                                    if !msg.is_user && msg.tool_call.is_some() && msg.text.trim().is_empty() {
-                                        let owner = current_ai_idx.unwrap_or(mi);
-                                        if let Some(tc) = &msg.tool_call {
-                                            tool_calls_by_ai
-                                                .entry(owner)
-                                                .or_default()
-                                                .push(tc.clone());
-                                        }
-                                        continue;
-                                    }
-                                    if msg.is_user {
-                                        current_ai_idx = None;
-                                    } else {
-                                        current_ai_idx = Some(mi);
-                                    }
-                                    let attached_tool_calls =
-                                        tool_calls_by_ai.remove(&mi).unwrap_or_default();
-                                    let copied = copied_indices.contains(&mi);
-                                    // 计算本条 AI 消息已显示的文本行数（逐行显示动画）：
-                                    // 含代码块或工具调用的消息直接完整渲染（跳过逐行动画）。
-                                    let revealed_lines = if !msg.is_user {
-                                        self.ai_revealed_lines(mi, msg, frame)
-                                    } else {
-                                        0usize
-                                    };
-                                    // 记录已显示行数，供 update_message_input_states 与动画判断复用。
-                                    let reveal_changed = {
-                                        let mut revealed = self.ai_reveal_revealed.borrow_mut();
-                                        let changed =
-                                            revealed.get(mi).copied().unwrap_or(0) < revealed_lines;
-                                        if changed {
-                                            revealed[mi] = revealed_lines;
-                                        }
-                                        changed
-                                    };
-                                    let (el, cnt) = render_ai_message(
-                                        msg,
-                                        &t,
-                                        window,
-                                        cx,
-                                        &self.focus_manager,
-                                        &self.workspace,
-                                        &self.terminals,
-                                        &search_query,
-                                        case_sensitive,
-                                        use_regex,
-                                        mi,
-                                        flat,
-                                        current_match,
-                                        &self.ai_expanded_quotes.borrow(),
-                                        &expanded_tools,
-                                        &attached_tool_calls,
-                                        &panel_entity,
-                                        self.ai_editing_index,
-                                        self.ai_edit_input.clone(),
-                                        copied,
-                                        frame,
-                                        revealed_lines,
-                                        reveal_changed,
-                                    );
-                                    flat += cnt;
-                                    // 用户消息发送后即刻完整渲染（无逐字 / 渐入动画）；
-                                    // AI 消息整体直接显示，内容行由逐行动画控制节奏。
-                                    msg_elements.push(el);
-                                }
-                                // ── 智能自动滚动 ──
-                                // 动画 / 流式期间平滑跟随最新内容；用户上滚查看历史时立即暂停，
-                                // 重新滚动至底部后恢复自动跟随。
-                                {
-                                    let max = self.ai_scroll_handle.max_offset();
-                                    let cur = self.ai_scroll_handle.offset();
-                                    let prev = self.ai_prev_scroll_offset.get();
-                                    let at_bottom = (cur.y + max.y).abs() <= px(4.0);
+                    .when(self.loading_history, |d| {
+                        d.child(
+                            div()
+                                .id("ai-loading-container")
+                                .size_full()
+                                .flex()
+                                .flex_col()
+                                .items_center()
+                                .justify_center()
+                                .gap(ui_space_sm(cx))
+                                .child(
+                                    velowork_ui::spinner::loading_spinner(
+                                        "ai-history-loading-spinner",
+                                        px(24.0),
+                                        rgb(t.accent),
+                                    ),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(ui_text_sm(cx))
+                                        .text_color(rgb(t.text_muted))
+                                        .child(i18n!(cx, "common.loading")),
+                                ),
+                        )
+                    })
+                    .when(!self.loading_history, |d| {
+                        let panel_entity = cx.entity().clone();
+                        let copied_indices: Vec<usize> =
+                            self.ai_copy_done_indices.borrow().clone();
+                        let active_selection = self.ai_active_selection.clone();
+                        let total_msgs = messages.len();
+                        let frame = self.animation_frame;
 
-                                    if self.ai_autoscroll.get() {
-                                        // 偏移量增大（向上）且已离开底部区域，说明用户主动上滚查看历史，立即暂停自动跟随。
-                                        if cur.y > prev.y + px(0.5) && !at_bottom {
-                                            self.ai_autoscroll.set(false);
-                                        }
-                                    } else if at_bottom {
-                                        // 用户重新滚动至底部，恢复自动跟随。
-                                        self.ai_autoscroll.set(true);
-                                    }
+                        // 保证逐行显示动画状态向量与消息数对齐：新消息以当前帧为起始。
+                        {
+                            let mut starts = self.ai_reveal_start.borrow_mut();
+                            let mut revealed = self.ai_reveal_revealed.borrow_mut();
+                            while starts.len() < total_msgs {
+                                starts.push(frame);
+                                revealed.push(0);
+                            }
+                        }
 
-                                    if self.ai_autoscroll.get() {
-                                        let bottom = -max.y;
-                                        let dist = bottom - cur.y;
-                                        if dist.abs() > px(0.5) {
-                                            // 平滑插值跟随最新内容，避免新消息被遮挡。
-                                            let new_y = cur.y + dist * 0.35;
-                                            self.ai_scroll_handle.set_offset(Point {
-                                                x: px(0.0),
-                                                y: new_y,
-                                            });
-                                        }
-                                    }
-                                    self.ai_prev_scroll_offset
-                                        .set(self.ai_scroll_handle.offset());
+                        // 预计算逐行显示信息
+                        let mut reveal_info: Vec<(usize, bool)> = Vec::with_capacity(total_msgs);
+                        {
+                            let mut revealed = self.ai_reveal_revealed.borrow_mut();
+                            for (mi, msg) in messages.iter().enumerate() {
+                                let rev_lines = if !msg.is_user {
+                                    self.ai_revealed_lines(mi, msg, frame)
+                                } else {
+                                    0usize
+                                };
+                                let changed = revealed.get(mi).copied().unwrap_or(0) < rev_lines;
+                                if changed {
+                                    revealed[mi] = rev_lines;
                                 }
-                                msg_elements
-                            }),
-                    )
-                    .child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .bottom_0()
-                            .right_0()
-                            .left_0()
-                            .child(
-                                Scrollbar::new(&self.ai_scroll_handle)
-                                    .axis(ScrollbarAxis::Vertical)
-                                    .scrollbar_show(if self.ai_scrollbar_hovered.get() {
-                                        ScrollbarShow::Always
-                                    } else {
-                                        ScrollbarShow::Never
-                                    }),
-                            ),
-                    )
+                                reveal_info.push((rev_lines, changed));
+                            }
+                        }
+
+                        // 预计算搜索命中起始偏移
+                        let mut msg_flat_offsets = Vec::with_capacity(total_msgs);
+                        let mut running_flat = 0usize;
+                        for msg in &messages {
+                            msg_flat_offsets.push(running_flat);
+                            if !search_query.is_empty() {
+                                let cnt = find_match_ranges(&msg.text, &search_query, case_sensitive, use_regex).len();
+                                running_flat += cnt;
+                            }
+                        }
+
+                        // 归并同一轮 AI 回复中的多次工具调用
+                        let mut current_ai_idx: Option<usize> = None;
+                        let mut tool_calls_by_ai: std::collections::HashMap<
+                            usize,
+                            Vec<ToolCallCardData>,
+                        > = std::collections::HashMap::new();
+                        for (mi, msg) in messages.iter().enumerate() {
+                            if !msg.is_user && msg.tool_call.is_some() && msg.text.trim().is_empty() {
+                                let owner = current_ai_idx.unwrap_or(mi);
+                                if let Some(tc) = &msg.tool_call {
+                                    tool_calls_by_ai
+                                        .entry(owner)
+                                        .or_default()
+                                        .push(tc.clone());
+                                }
+                                continue;
+                            }
+                            if msg.is_user {
+                                current_ai_idx = None;
+                            } else {
+                                current_ai_idx = Some(mi);
+                            }
+                        }
+
+                        let expanded_quotes: Vec<usize> = self.ai_expanded_quotes.borrow().clone();
+                        let expanded_tools: Vec<usize> = self.ai_expanded_tools.borrow().clone();
+                        let focus_manager = self.focus_manager.clone();
+                        let workspace = self.workspace.clone();
+                        let terminals = self.terminals.clone();
+                        let search_query_str = search_query.clone();
+                        let editing_idx = self.ai_editing_index;
+                        let edit_input = self.ai_edit_input.clone();
+                        let t_theme = t;
+
+                        let list_state = self.list_state.clone();
+                        let messages_for_list = messages.clone();
+
+                        let top_indicator = if self.loading_older {
+                            Some(
+                                h_flex()
+                                    .w_full()
+                                    .py(ui_space_xs(cx))
+                                    .items_center()
+                                    .justify_center()
+                                    .gap(ui_space_xs(cx))
+                                    .child(velowork_ui::spinner::loading_spinner(
+                                        "ai-loading-older-spinner",
+                                        px(14.0),
+                                        rgb(t.accent),
+                                    ))
+                                    .child(
+                                        div()
+                                            .text_size(ui_text_xs(cx))
+                                            .text_color(rgb(t.text_muted))
+                                            .child(i18n!(cx, "common.loading")),
+                                    ),
+                            )
+                        } else {
+                            None
+                        };
+
+                        d.child(
+                            div()
+                                .id("ai-messages-container")
+                                .size_full()
+                                .px(ui_space_sm(cx))
+                                .flex()
+                                .flex_col()
+                                .on_mouse_down(MouseButton::Left, {
+                                    let panel_entity = panel_entity.clone();
+                                    move |_ev, window, cx| {
+                                        panel_entity.update(cx, |this, cx| {
+                                            window.focus(&this.focus_handle, cx);
+                                        });
+                                    }
+                                })
+                                .children(top_indicator)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_h_0()
+                                        .w_full()
+                                        .child(
+                                            list(list_state, move |ix, window, cx| {
+                                                if ix >= messages_for_list.len() {
+                                                    return div().into_any_element();
+                                                }
+                                                let msg = &messages_for_list[ix];
+                                                if !msg.is_user && msg.tool_call.is_some() && msg.text.trim().is_empty() {
+                                                    return div().h_0().overflow_hidden().into_any_element();
+                                                }
+                                                let copied = copied_indices.contains(&ix);
+                                                let (revealed_lines, reveal_changed) = reveal_info.get(ix).copied().unwrap_or((0, false));
+                                                let flat = msg_flat_offsets.get(ix).copied().unwrap_or(0);
+                                                let empty_tools = Vec::new();
+                                                let attached_tool_calls = tool_calls_by_ai.get(&ix).unwrap_or(&empty_tools);
+
+                                                let (el, _cnt) = render_ai_message(
+                                                    msg,
+                                                    &t_theme,
+                                                    window,
+                                                    cx,
+                                                    &focus_manager,
+                                                    &workspace,
+                                                    &terminals,
+                                                    &search_query_str,
+                                                    case_sensitive,
+                                                    use_regex,
+                                                    ix,
+                                                    flat,
+                                                    current_match,
+                                                    &expanded_quotes,
+                                                    &expanded_tools,
+                                                    attached_tool_calls,
+                                                    &panel_entity,
+                                                    editing_idx,
+                                                    edit_input.clone(),
+                                                    copied,
+                                                    &active_selection,
+                                                    frame,
+                                                    revealed_lines,
+                                                    reveal_changed,
+                                                );
+
+                                                div()
+                                                    .w_full()
+                                                    .pb(ui_space_sm(cx))
+                                                    .child(el)
+                                                    .into_any_element()
+                                            })
+                                            .size_full()
+                                            .py(ui_space_sm(cx)),
+                                        ),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .bottom_0()
+                                .right_0()
+                                .left_0()
+                                .child(
+                                    Scrollbar::vertical(&self.list_state)
+                                        .scrollbar_show(if self.ai_scrollbar_hovered.get() {
+                                            ScrollbarShow::Always
+                                        } else {
+                                            ScrollbarShow::Never
+                                        }),
+                                ),
+                        )
+                    })
             })
             // 统一圆角容器：拖拽手柄 + 输入框（无边框）+ 底部工具栏（模型 / 权限 / 发送）
             .child({
@@ -3656,12 +5401,26 @@ impl AiAssistantPanel {
                             .flex_1()
                             .min_h_0()
                             .key_context("AiChatInput")
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if event.keystroke.key.as_str() == "enter"
-                                    && event.keystroke.modifiers.control
-                                {
-                                    this.on_send_button(window, cx);
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                                let is_newline = event.keystroke.modifiers.control
+                                    || event.keystroke.modifiers.platform
+                                    || event.keystroke.modifiers.shift;
+                                if event.keystroke.key.as_str() == "enter" && !is_newline {
+                                    if this.has_input_content(cx) {
+                                        this.on_send_button(cx);
+                                    }
                                     cx.stop_propagation();
+                                    return;
+                                }
+                                let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
+                                    if let Some(text) = this.get_active_selection_text(cx) {
+                                        if !text.is_empty() {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                            cx.stop_propagation();
+                                            return;
+                                        }
+                                    }
                                 }
                             }))
                             .child(
@@ -3708,8 +5467,8 @@ impl AiAssistantPanel {
                                     }
                                 })
                                 .on_click(cx.listener(
-                                    |this, _, window, cx| {
-                                        this.on_send_button(window, cx);
+                                    |this, _, _window, cx| {
+                                        this.on_send_button(cx);
                                     },
                                 )),
                             ),
@@ -3762,6 +5521,9 @@ impl AiAssistantPanel {
                         .right_0()
                         .h(SPACE_XS),
                     )
+            })
+            .when(self.ai_sessions_popover_open, |d| {
+                d.child(self.render_sessions_popover(window, cx))
             })
             .when(
                 self.ai_history_open && self.ai_input_area_bounds.is_some(),
@@ -3948,7 +5710,7 @@ impl AiAssistantPanel {
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.ai_search_case_sensitive =
                                                 !this.ai_search_case_sensitive;
-                                            cx.notify();
+                                            this.update_ai_search_matches(cx);
                                         }))
                                         .child(
                                             div()
@@ -3990,7 +5752,7 @@ impl AiAssistantPanel {
                                         })
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.ai_search_use_regex = !this.ai_search_use_regex;
-                                            cx.notify();
+                                            this.update_ai_search_matches(cx);
                                         }))
                                         .child(
                                             div()
@@ -4243,12 +6005,13 @@ fn render_ai_message(
     ai_editing_index: Option<usize>,
     ai_edit_input: Option<Entity<InputState>>,
     copied: bool,
+    active_selection: &Option<AiChatSelection>,
     // 当前动画帧，用于加载动画与头像呼吸效果。
     frame: u64,
     // 本条 AI 消息已显示的文本行数（逐行显示动画）。
     revealed_lines: usize,
     // 已显示行数本帧是否增加（决定是否重写 markdown 视图内容）。
-    reveal_changed: bool,
+    _reveal_changed: bool,
 ) -> (AnyElement, usize) {
     let is_user = msg.is_user;
 
@@ -4260,7 +6023,7 @@ fn render_ai_message(
     } else {
         Vec::new()
     };
-    let is_highlighted = matches
+    let _is_highlighted = matches
         .iter()
         .enumerate()
         .any(|(i, _)| current_match == Some(flat_idx + i));
@@ -4330,9 +6093,9 @@ fn render_ai_message(
                 out.push(
                     div()
                         .rounded(px(6.0))
-                        .border_1()
-                        .border_color(with_alpha(t.text_muted, 0.3))
-                        .bg(with_alpha(t.bg_secondary, 0.4))
+                        .border_l_2()
+                        .border_color(rgb(t.accent))
+                        .bg(with_alpha(t.bg_secondary, 0.6))
                         .overflow_hidden()
                         .child(
                             div()
@@ -4341,8 +6104,8 @@ fn render_ai_message(
                                 .items_center()
                                 .justify_between()
                                 .gap(SPACE_SM)
-                                .px(px(10.0))
-                                .py(SPACE_SM)
+                                .px(px(8.0))
+                                .py(SPACE_XS)
                                 .cursor_pointer()
                                 .on_click({
                                     let entity = entity.clone();
@@ -4361,17 +6124,26 @@ fn render_ai_message(
                                     }
                                 })
                                 .child(
-                                    div()
+                                    h_flex()
+                                        .items_center()
+                                        .gap(SPACE_XS)
                                         .flex_1()
                                         .min_w(px(0.0))
-                                        .text_size(ui_text_md(cx))
-                                        .text_color(rgb(t.text_muted))
-                                        .when(!expanded, |d| {
-                                            d.truncate().whitespace_nowrap().child(
-                                                quote_text.lines().collect::<Vec<_>>().join(" "),
-                                            )
-                                        })
-                                        .when(expanded, |d| d.child(quote_text.clone())),
+                                        .child(AppIcon::Terminal.size(px(12.0)).text_color(rgb(t.text_muted)))
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w(px(0.0))
+                                                .font_family(mono_font_family(cx))
+                                                .text_size(px(11.0))
+                                                .text_color(rgb(t.text_muted))
+                                                .when(!expanded, |d| {
+                                                    d.truncate().whitespace_nowrap().child(
+                                                        quote_text.lines().collect::<Vec<_>>().join(" "),
+                                                    )
+                                                })
+                                                .when(expanded, |d| d.child(quote_text.clone())),
+                                        ),
                                 )
                                 .child(
                                     div()
@@ -4528,22 +6300,44 @@ fn render_ai_message(
                                     .take(reveal_in_seg)
                                     .collect::<Vec<_>>()
                                     .join("\n");
-                                let views = msg.document_views.borrow();
-                                if let Some(doc_view) = views.get(text_seg_idx) {
-                                    // 非流式历史消息或揭示行数变化时更新 markdown 内容
-                                    if !msg.streaming || reveal_changed {
-                                        doc_view.update(cx, |v, cx| {
-                                            v.set_content(&revealed_text, cx);
-                                        });
-                                    }
-                                    children.push(doc_view.clone().into_any_element());
-                                } else {
-                                    let fallback_el = div()
-                                        .text_size(ui_text_md(cx))
-                                        .text_color(rgb(t.text_primary))
-                                        .child(revealed_text.clone());
-                                    children.push(fallback_el.into_any_element());
+                                let active_sel = active_selection
+                                    .as_ref()
+                                    .filter(|s| s.msg_index == msg_index && s.seg_index == text_seg_idx);
+                                let sel_range = active_sel.map(|s| (s.start, s.end));
+                                let panel_for_sel = panel_entity.clone();
+                                let mut md_el = velowork_markdown::MarkdownElement::new(
+                                    ElementId::from(format!("ai-md-{}-{}", msg_index, text_seg_idx)),
+                                    &revealed_text,
+                                )
+                                .selection(sel_range)
+                                .on_selection_event(move |ev, window, cx| {
+                                    panel_for_sel.update(cx, |this, cx| {
+                                        if let velowork_markdown::MarkdownSelectionEvent::Start { .. } = &ev {
+                                            window.focus(&this.focus_handle, cx);
+                                            if let Some(ref chat_input) = this.chat_input {
+                                                chat_input.update(cx, |inp, cx| inp.clear_selection(cx));
+                                            }
+                                        }
+                                        this.handle_ai_selection_event(msg_index, text_seg_idx, ev, cx);
+                                    });
+                                })
+                                .on_url_click(move |url, _window, cx| {
+                                    cx.open_url(url);
+                                });
+
+                                if !search_query.is_empty() {
+                                    md_el = md_el.search(
+                                        search_query,
+                                        case_sensitive,
+                                        use_regex,
+                                        current_match,
+                                        flat_idx,
+                                    );
+                                    let seg_cnt = find_match_ranges(&revealed_text, search_query, case_sensitive, use_regex).len();
+                                    flat_idx += seg_cnt;
                                 }
+
+                                children.push(md_el.into_any_element());
                             }
                             text_line_offset += seg_lines;
                             text_seg_idx += 1;
@@ -4571,13 +6365,22 @@ fn render_ai_message(
         }
 
         if children.is_empty() && !msg.text.is_empty() {
-            children.push(
-                div()
-                    .text_size(ui_text_md(cx))
-                    .text_color(rgb(t.text_primary))
-                    .child(msg.text.clone())
-                    .into_any_element(),
+            let (el, cnt) = text_bubble(
+                &msg.text,
+                false,
+                t,
+                window,
+                cx,
+                search_query,
+                case_sensitive,
+                use_regex,
+                msg_index,
+                flat_idx,
+                current_match,
+                panel_entity,
             );
+            let _ = cnt;
+            children.push(el);
         }
 
         // 归并到本气泡的多次工具调用：默认折叠显示摘要，点击展开查看每个详情卡片。
@@ -4679,22 +6482,19 @@ fn render_ai_message(
 
         let bubble = div()
             .relative()
-            .max_w(relative(1.0))
-            .min_w(px(20.0))
-            .px(SPACE_LG)
-            .py(SPACE_MD)
-            .rounded(RADIUS_LG)
-            .bg(with_alpha(t.bg_secondary, 0.4))
-            .border_1()
-            .border_color(rgb(t.border))
-            .when(is_highlighted, |s| s.border_color(rgb(t.border_active)))
+            .w_full()
+            .py(SPACE_XS)
             .child(v_flex().gap(SPACE_XS).children(children))
             .on_mouse_down(
                 MouseButton::Right,
                 move |event: &MouseDownEvent, window, cx| {
                     let panel = panel_entity_clone.clone();
-                    let selection = panel.read(cx).get_active_selection_text(cx);
+                    let selection = panel
+                        .read(cx)
+                        .get_selection_for_message(msg_index)
+                        .or_else(|| panel.read(cx).get_active_selection_text(cx));
                     let registry = panel.read(cx).overlay_manager.read(cx).overlay_registry();
+
                     let menu = open_ai_context_menu(
                         panel,
                         event.position,
@@ -4806,11 +6606,15 @@ fn render_ai_message(
                     div()
                         .self_end()
                         .w_full()
-                        .max_w(relative(0.8))
-                        .mr(SPACE_MD)
+                        .max_w(relative(0.92))
+                        .p(SPACE_MD)
+                        .rounded(RADIUS_LG)
+                        .bg(surface_bg(t.bg_hover, cx))
+                        .border_1()
+                        .border_color(rgb(t.border))
                         .flex()
                         .flex_col()
-                        .gap(px(10.0))
+                        .gap(SPACE_SM)
                         .children(out),
                 )
                 .child(
@@ -4860,7 +6664,7 @@ fn render_ai_message(
                 )
                 .child(
                     div()
-                        .max_w(relative(0.8))
+                        .w_full()
                         .flex()
                         .flex_col()
                         .gap(px(10.0))
@@ -5029,7 +6833,7 @@ fn text_bubble(
     current_match: Option<usize>,
     panel_entity: &Entity<AiAssistantPanel>,
 ) -> (AnyElement, usize) {
-    let bg_color = surface_bg(t.bg_hover, cx);
+    let _bg_color = surface_bg(t.bg_hover, cx);
     let text_color = if is_user {
         rgb(0xffffff)
     } else {
@@ -5042,7 +6846,7 @@ fn text_bubble(
         Vec::new()
     };
 
-    let is_highlighted = matches
+    let _is_highlighted = matches
         .iter()
         .enumerate()
         .any(|(i, _)| current_match == Some(flat_idx + i));
@@ -5057,10 +6861,20 @@ fn text_bubble(
             range.clone(),
             HighlightStyle {
                 background_color: Some(if is_current {
-                    rgb(t.bg_selection).into()
+                    rgb(t.accent).into()
                 } else {
-                    rgb(t.bg_hover).into()
+                    rgb(t.accent).opacity(0.28).into()
                 }),
+                color: if is_current {
+                    Some(rgb(0xffffff).into())
+                } else {
+                    None
+                },
+                font_weight: if is_current {
+                    Some(FontWeight::BOLD)
+                } else {
+                    None
+                },
                 ..Default::default()
             },
         ));
@@ -5070,15 +6884,7 @@ fn text_bubble(
     let text_clone = text.to_string();
     let bubble = div()
         .relative()
-        .max_w(relative(1.0))
-        .min_w(px(20.0))
-        .px(SPACE_LG)
-        .py(SPACE_MD)
-        .rounded(RADIUS_LG)
-        .bg(bg_color)
-        .border_1()
-        .border_color(rgb(t.border))
-        .when(is_highlighted, |s| s.border_color(rgb(t.border_active)))
+        .w_full()
         .when(use_custom_markdown_font(cx), |s| {
             s.font_family(markdown_font_family(cx))
         })
@@ -5612,4 +7418,5 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
         }),
     });
 }
+
 

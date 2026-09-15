@@ -246,7 +246,7 @@ fn stream_api_raw(
     tools: &[ToolSpec],
     http_timeout: std::time::Duration,
 ) -> mpsc::Receiver<StreamChunk> {
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+    let url = build_chat_completions_url(base_url);
     let api_key = api_key.to_string();
     let model_id = model_id.to_string();
 
@@ -470,16 +470,48 @@ pub fn stream_complete(
     Ok(out)
 }
 
+/// 构造规范的 `/chat/completions` 请求 URL。
+///
+/// 兼容用户填写的各种 Base URL 格式：
+/// - `https://api.openai.com/v1` -> `https://api.openai.com/v1/chat/completions`
+/// - `https://api.openai.com/v1/` -> `https://api.openai.com/v1/chat/completions`
+/// - `https://api.openai.com/v1/chat/completions` -> `https://api.openai.com/v1/chat/completions`
+/// - `https://api.openai.com/v1/chat/completions/` -> `https://api.openai.com/v1/chat/completions`
+pub fn build_chat_completions_url(base_url: &str) -> String {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else {
+        format!("{}/chat/completions", trimmed)
+    }
+}
+
 /// 测试 LLM 端点连通性。
-pub fn test_llm_connection(base_url: &str, api_key: &str, timeout_secs: u64) -> Result<(), String> {
-    let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
+///
+/// `base_url`: API Base URL（支持带或不带 `/chat/completions`）
+/// `api_key`: API 密钥
+/// `model_id`: 待测试的模型 ID（如 `gemini-1.5-flash`, `gpt-4o` 等，若为空则回退至 `gpt-3.5-turbo`）
+/// `timeout_secs`: 请求超时秒数
+pub fn test_llm_connection(
+    base_url: &str,
+    api_key: &str,
+    model_id: &str,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let url = build_chat_completions_url(base_url);
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .build()
         .map_err(|e| e.to_string())?;
 
+    let model = if model_id.trim().is_empty() {
+        "gpt-3.5-turbo"
+    } else {
+        model_id.trim()
+    };
+
     let body = json!({
-        "model": "gpt-3.5-turbo",
+        "model": model,
         "messages": [{"role": "user", "content": "hi"}],
         "max_tokens": 1,
     });
@@ -504,5 +536,38 @@ pub fn test_llm_connection(base_url: &str, api_key: &str, timeout_secs: u64) -> 
             }
         }
         Err(e) => Err(e.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_chat_completions_url() {
+        assert_eq!(
+            build_chat_completions_url("https://generativelanguage.googleapis.com/v1beta/openai"),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        assert_eq!(
+            build_chat_completions_url("https://generativelanguage.googleapis.com/v1beta/openai/"),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        assert_eq!(
+            build_chat_completions_url(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        assert_eq!(
+            build_chat_completions_url(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions/"
+            ),
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        );
+        assert_eq!(
+            build_chat_completions_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
     }
 }

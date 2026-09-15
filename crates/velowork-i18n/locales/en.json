@@ -2,6 +2,10 @@
   "app": {
     "name": "Velowork"
   },
+  "button": {
+    "close": "Close",
+    "refresh": "Refresh"
+  },
   "profile_manager": {
     "title": "Profiles",
     "subtitle": "Switch, create, or delete profiles",
@@ -39,6 +43,7 @@
     "apply": "Apply",
     "rename": "Rename",
     "close": "Close",
+    "just_now": "Just now",
     "loading": "Loading…",
     "preview": "Preview",
     "filter": "filter",
@@ -474,7 +479,10 @@
       "max_context_tokens": "Context Token Limit",
       "max_context_tokens_desc": "Token threshold to trigger context compression (e.g. 8192)",
       "max_history_messages": "Max Retained Messages",
-      "max_history_messages_desc": "Number of recent history messages retained during sliding window or summary"
+      "max_history_messages_desc": "Number of recent history messages retained during sliding window or summary",
+      "floating_toolbar": "Selection AI Floating Toolbar",
+      "floating_toolbar_desc": "Automatically show AI quick capsule toolbar upon text selection in terminal",
+      "terminal_interaction": "Terminal Interaction"
     },
     "search_engines": {
       "desc": "Configure the search engines available for the terminal's \"Search Online\" context action. Multiple engines are supported.",
@@ -860,7 +868,28 @@
     "clear_screen": "Clear Screen",
     "clear_all": "Clear All",
     "edit_config": "Session Settings",
-    "search_online": "Web Search"
+    "search_online": "Web Search",
+    "ai_toolbar_explain": "Explain",
+    "ai_toolbar_explain_tip": "Explain selection or diagnose error",
+    "ai_toolbar_gen_command": "Command",
+    "ai_toolbar_gen_command_tip": "Generate shell command from selection",
+    "ai_toolbar_send_to_side_panel": "To Side Panel",
+    "ai_toolbar_send_to_side_panel_tip": "Open in right AI assistant panel",
+    "ai_toolbar_ask_placeholder": "Ask AI...",
+    "inline_ai_title": "Terminal Inline Assistant",
+    "inline_ai_insert_terminal": "Insert",
+    "inline_ai_insert_terminal_tip": "Insert command to terminal without executing",
+    "inline_ai_run_terminal": "Run",
+    "inline_ai_run_terminal_tip": "Run command in terminal immediately",
+    "inline_ai_copy_command": "Copy Command",
+    "inline_ai_continue_in_side_panel": "Continue in Side Panel",
+    "inline_ai_no_model_configured": "No AI model configured yet",
+    "inline_ai_open_settings": "Open Settings",
+    "inline_ai_follow_up_placeholder": "Ask (Enter to send, Ctrl+Enter for newline)...",
+    "inline_ai_thinking": "Thinking",
+    "inline_ai_send": "Send",
+    "inline_ai_stop": "Stop generating",
+    "inline_ai_close": "Close"
   },
   "session": {
     "delete_title": "Delete Session",
@@ -2306,8 +2335,20 @@
   "ai_assistant": {
     "title": "AI Assistant",
     "new_chat": "New Chat",
+    "chat_history": "Chat History",
+    "clear_all_history": "Clear All History",
+    "clear_all_history_confirm": "Are you sure you want to clear all chat history for this project? This action cannot be undone.",
+    "new_chat_title": "New Chat",
+    "rename_chat": "Rename",
+    "delete_chat": "Delete",
+    "no_chat_history": "No chat history",
     "search": "Search",
     "search_placeholder": "Search conversations…",
+    "search_sessions_placeholder": "Search history sessions…",
+    "search_scope_title": "Search title only",
+    "search_scope_content": "Search message content",
+    "no_sessions_found": "No matching history sessions",
+    "snippet_prefix": "Matched: ",
     "agent_mode": "Agent mode (tool calling)",
     "skills": "Skills",
     "thinking": "Thinking...",
@@ -2376,6 +2417,7 @@
     "pending_remove": "Remove from queue",
     "pending_send_now": "Send now",
     "clear_tooltip": "Clear chat history",
-    "token_usage_hint": "Estimated token usage for the current session. Context is automatically compressed when approaching the limit."
+    "token_usage_hint": "Estimated token usage for the current session. Context is automatically compressed when approaching the limit.",
+    "context_used": "context used"
   }
 }

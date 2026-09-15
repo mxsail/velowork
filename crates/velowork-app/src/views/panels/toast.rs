@@ -3,7 +3,7 @@ pub use crate::workspace::toast::{Toast, ToastAction, ToastActionStyle, ToastLev
 use crate::theme::theme;
 use crate::ui::tokens::{
     ICON_SM, RADIUS_LG, RADIUS_MD, RADIUS_STD, SPACE_MD, SPACE_SM, SPACE_XS,
-    ui_height_status_bar, ui_space_card_gap, ui_text_ms, ui_text_sm, ui_text_xs,
+    ui_height_status_bar, ui_space_card_gap, ui_text_md, ui_text_sm,
 };
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -146,8 +146,8 @@ impl Render for ToastOverlay {
 
         let t = theme(cx);
         let p = SemanticPalette::from_context(cx);
-        let text_size = ui_text_ms(cx);
-        let detail_size = ui_text_xs(cx);
+        let text_size = ui_text_md(cx);
+        let detail_size = ui_text_sm(cx);
         let toasts = self.toasts.clone();
         let total_count = toasts.len();
         let is_stacked = !self.expanded && total_count > 3;
@@ -212,7 +212,7 @@ impl Render for ToastOverlay {
                                         .flex_row()
                                         .items_center()
                                         .gap(SPACE_XS)
-                                        .text_size(ui_text_sm(cx))
+                                        .text_size(ui_text_md(cx))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(p.text_primary)
                                         .child(i18n!(cx, "toast.title"))
@@ -222,7 +222,7 @@ impl Render for ToastOverlay {
                                                 .py(px(1.0))
                                                 .rounded_full()
                                                 .bg(p.surface_selection)
-                                                .text_size(ui_text_xs(cx))
+                                                .text_size(ui_text_sm(cx))
                                                 .text_color(p.text_secondary)
                                                 .child(total_count.to_string()),
                                         ),
@@ -241,7 +241,7 @@ impl Render for ToastOverlay {
                                                 .px(SPACE_XS)
                                                 .py(px(2.0))
                                                 .rounded(RADIUS_STD)
-                                                .text_size(ui_text_xs(cx))
+                                                .text_size(ui_text_md(cx))
                                                 .text_color(p.text_muted)
                                                 .hover(|s| s.text_color(p.status_error).bg(p.surface_hover))
                                                 .child(clear_tip)
@@ -545,7 +545,7 @@ fn render_single_toast(
                                             .rounded_full()
                                             .bg(p.surface_selection)
                                             .hover(move |s| s.bg(p.surface_card))
-                                            .text_size(ui_text_xs(cx))
+                                            .text_size(ui_text_sm(cx))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(rgb(t.accent))
                                             .child(format!("+{}", extra_count))

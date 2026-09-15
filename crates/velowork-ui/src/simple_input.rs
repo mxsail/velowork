@@ -33,7 +33,7 @@ pub enum InputEvent {
 }
 
 /// Result of key handling
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum KeyHandled {
     /// Key was handled, stop propagation
     Handled,
@@ -135,6 +135,8 @@ pub struct SimpleInputState {
     digits_only: bool,
     max_length: Option<usize>,
     max_number: Option<u64>,
+    content_padding: Option<Pixels>,
+    auto_height: bool,
 }
 
 impl SimpleInputState {
@@ -147,6 +149,9 @@ impl SimpleInputState {
                 smol::Timer::after(Duration::from_millis(530)).await;
                 let done = this
                     .update(&mut *cx, |state, cx| {
+                        if state.read_only {
+                            return;
+                        }
                         state.cursor_visible = !state.cursor_visible;
                         cx.notify();
                     })
@@ -202,7 +207,27 @@ impl SimpleInputState {
             digits_only: false,
             max_length: None,
             max_number: None,
+            content_padding: None,
+            auto_height: false,
         }
+    }
+
+    pub fn auto_height(mut self, auto: bool) -> Self {
+        self.auto_height = auto;
+        self
+    }
+
+    pub fn set_auto_height(&mut self, auto: bool) {
+        self.auto_height = auto;
+    }
+
+    pub fn content_padding(mut self, pad: impl Into<Pixels>) -> Self {
+        self.content_padding = Some(pad.into());
+        self
+    }
+
+    pub fn set_content_padding(&mut self, pad: impl Into<Pixels>) {
+        self.content_padding = Some(pad.into());
     }
 
     pub fn digits_only(mut self, val: bool) -> Self {
@@ -492,7 +517,9 @@ impl SimpleInputState {
 
     pub fn set_value(&mut self, value: impl Into<String>, cx: &mut Context<Self>) {
         let v = self.sanitize_input_text(&value.into());
-        let changed = v != self.value;
+        if v == self.value {
+            return;
+        }
         self.value = v;
         self.cursor_position = self.value.len();
         self.selection = None;
@@ -503,9 +530,8 @@ impl SimpleInputState {
         self.redo_stack.clear();
         self.last_undo_value = self.value.clone();
         self.last_undo_time = None;
-        if changed {
-            self.emit_change(cx);
-        }
+        self.layout_cache.borrow_mut().row_ranges.clear();
+        self.emit_change(cx);
         cx.notify();
     }
 
@@ -1421,21 +1447,27 @@ impl SimpleInputState {
                 self.redo(cx);
                 return KeyHandled::Handled;
             }
-            "a" if modifiers.platform || modifiers.control => {
+            "a" | "A" if modifiers.platform || modifiers.control => {
                 self.select_all(cx);
                 return KeyHandled::Handled;
             }
-            "c" if modifiers.platform || modifiers.control => {
-                self.copy_to_clipboard(cx);
-                return KeyHandled::Handled;
+            "c" | "C" if modifiers.platform || modifiers.control => {
+                if self.selection.is_some() {
+                    self.copy_to_clipboard(cx);
+                    return KeyHandled::Handled;
+                }
+                return KeyHandled::NotHandled;
             }
-            "v" if modifiers.platform || modifiers.control => {
+            "v" | "V" if modifiers.platform || modifiers.control => {
                 self.paste_from_clipboard(cx);
                 return KeyHandled::Handled;
             }
-            "x" if modifiers.platform || modifiers.control => {
-                self.cut_to_clipboard(cx);
-                return KeyHandled::Handled;
+            "x" | "X" if modifiers.platform || modifiers.control => {
+                if self.selection.is_some() {
+                    self.cut_to_clipboard(cx);
+                    return KeyHandled::Handled;
+                }
+                return KeyHandled::NotHandled;
             }
             "escape" => {
                 if self.selection.is_some() {
@@ -1446,14 +1478,17 @@ impl SimpleInputState {
                 return KeyHandled::NotHandled;
             }
             "enter" => {
-                if self.submit_on_enter && !modifiers.control {
-                    return KeyHandled::NotHandled;
-                }
                 if self.multiline {
+                    let is_newline_chord = modifiers.control || modifiers.platform || modifiers.shift;
+                    if self.submit_on_enter && !is_newline_chord {
+                        cx.emit(InputEvent::PressEnter);
+                        return KeyHandled::Handled;
+                    }
                     self.insert_text("\n", cx);
                     return KeyHandled::Handled;
                 }
-                return KeyHandled::NotHandled;
+                cx.emit(InputEvent::PressEnter);
+                return KeyHandled::Handled;
             }
             "tab" => {
                 return KeyHandled::NotHandled;
@@ -2038,7 +2073,7 @@ impl Element for TextInputElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
-        let (value, placeholder, is_focused, cursor_offset, marked_range, selection, highlight_vars, syntax_language, multiline, wrap, follow_cursor, scroll_offset, scroll_offset_y, password, search_highlights, search_current_match) = {
+        let (value, placeholder, is_focused, cursor_offset, marked_range, selection, highlight_vars, syntax_language, multiline, auto_height, read_only, wrap, follow_cursor, scroll_offset, scroll_offset_y, password, search_highlights, search_current_match) = {
             let input = self.state.read(cx);
             let is_focused = input.focus_handle.is_focused(window);
             let cache = input.layout_cache.borrow();
@@ -2052,6 +2087,8 @@ impl Element for TextInputElement {
                 input.highlight_vars,
                 input.syntax_language.clone(),
                 input.multiline,
+                input.auto_height,
+                input.read_only,
                 input.wrap,
                 input.follow_cursor,
                 cache.scroll_offset,
@@ -2182,9 +2219,6 @@ impl Element for TextInputElement {
                             }
 
                             let mut break_at = if overflow { i } else { n };
-                            if break_at <= s {
-                                break_at = s + 1;
-                            }
                             if overflow {
                                 if let Some(ls) = last_space {
                                     if ls > s {
@@ -2192,6 +2226,13 @@ impl Element for TextInputElement {
                                     }
                                 }
                             }
+                            let break_at = clamp_to_char_boundary(line_str, break_at);
+                            let break_at = if break_at <= s {
+                                let next_char = line_str[s..].chars().next().map(|c| s + c.len_utf8()).unwrap_or(s + 1);
+                                clamp_to_char_boundary(line_str, next_char)
+                            } else {
+                                break_at
+                            };
 
                             let sub = &line_str[s..break_at];
                             let sub_start = line_start_byte + s;
@@ -2211,9 +2252,7 @@ impl Element for TextInputElement {
                             shaped_lines.push(sub_line);
                             row_ranges.push(sub_start..sub_start + sub.len());
                             s = break_at;
-                            if i < s {
-                                i = s;
-                            }
+                            i = s;
                         }
                     }
                 } else {
@@ -2246,7 +2285,9 @@ impl Element for TextInputElement {
         } else if multiline {
             let visible_h = bounds.size.height;
             let total_h = line_height * (shaped_lines.len() as f32);
-            if follow_cursor {
+            if auto_height || read_only || total_h <= visible_h + px(1.5) {
+                vscroll = px(0.0);
+            } else if follow_cursor {
                 let mut cursor_row = 0usize;
                 for (i, r) in row_ranges.iter().enumerate() {
                     if cursor_offset <= r.end {
@@ -2259,10 +2300,14 @@ impl Element for TextInputElement {
                 if cursor_y - vscroll < px(0.0) {
                     vscroll = cursor_y;
                 } else if cursor_y + line_height - vscroll > visible_h {
-                    vscroll = cursor_y + line_height - visible_h;
+                    vscroll = (cursor_y + line_height - visible_h).min(cursor_y);
                 }
             }
-            let max_scroll_y = (total_h - visible_h).max(px(0.0));
+            let max_scroll_y = if auto_height || read_only {
+                px(0.0)
+            } else {
+                (total_h - visible_h).max(px(0.0))
+            };
             vscroll = vscroll.clamp(px(0.0), max_scroll_y);
         }
         
@@ -2550,7 +2595,7 @@ impl Element for TextInputElement {
 }
 
 impl Render for SimpleInputState {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         let focus_handle = self.focus_handle.clone();
@@ -2572,21 +2617,25 @@ impl Render for SimpleInputState {
         // *content* box (what the inner text element fills via `relative(1.0)`)
         // equals exactly `rows * line_height`. Omitting the padding here is what
         // previously clipped the last visible row.
-        let pad = px(4.0);
-        // IMPORTANT: size the box from the *exact* line height used when the text
-        // is painted (`last_line_height`), not from `window.line_height()` here.
-        // Those two values can differ (the text size override applied on the
-        // wrapping element may or may not be in effect at this point), and when
-        // the painted line height is taller than the one used for the box, the
-        // content area becomes shorter than `visible_rows` rows — clipping the
-        // last (4th) row entirely. `last_line_height` is set in `prepaint` from
-        // `window.line_height()` (the value painting actually uses), so the box
-        // content always fits exactly `visible_rows` rows.
-        let line_height = self.layout_cache.borrow().line_height.max(px(1.0));
+        let effective_rows = if self.auto_height {
+            let shaped_rows = self.layout_cache.borrow().row_ranges.len();
+            if shaped_rows > 0 {
+                shaped_rows
+            } else {
+                self.value.lines().count().max(1)
+            }
+        } else {
+            self.multiline_visible_rows
+        };
+        let pad = self.content_padding.unwrap_or(px(4.0));
+        let line_height = if self.layout_cache.borrow().line_height > px(1.0) {
+            self.layout_cache.borrow().line_height
+        } else {
+            window.line_height()
+        };
         let multiline_height = if multiline && !self.fill_height {
-            // +px(2.0) gives a tiny bottom slack so the last visible row's
-            // descender is never clipped by the overflow-hidden content box.
-            Some(line_height * (self.multiline_visible_rows as f32) + pad * 2.0 + px(2.0))
+            let slack = if self.auto_height || pad > px(0.0) { px(2.0) } else { px(0.0) };
+            Some(line_height * (effective_rows as f32) + pad * 2.0 + slack)
         } else {
             None
         };
@@ -2604,9 +2653,12 @@ impl Render for SimpleInputState {
             .w_full()
             .when_some(multiline_height, |d, h| d.h(h).py(pad).overflow_hidden())
             .when(multiline && self.fill_height, |d| d.flex_1().h_full().min_h(px(0.0)).overflow_hidden())
-            .when(self.show_gutter, |d| d.pr(px(8.0)))
-            .when(!self.show_gutter && !show_clear, |d| d.px(px(8.0)))
-            .when(!self.show_gutter && show_clear, |d| d.pl(px(8.0)).pr(px(4.0)))
+            .when_some(self.content_padding, |d, p| d.px(p))
+            .when(self.content_padding.is_none(), |d| {
+                d.when(self.show_gutter, |d| d.pr(px(8.0)))
+                    .when(!self.show_gutter && !show_clear, |d| d.px(px(8.0)))
+                    .when(!self.show_gutter && show_clear, |d| d.pl(px(8.0)).pr(px(4.0)))
+            })
             .cursor_text()
             .when(multiline, |d| {
                 d.on_scroll_wheel(cx.listener(move |this, event: &ScrollWheelEvent, _window, cx| {
@@ -2823,7 +2875,7 @@ impl Render for SimpleInputState {
             // (the input fills its height, so the track grows/shrinks with it).
             // Clicking / dragging anywhere on the track jumps + drags the thumb
             // (jump-and-drag), matching the rest of the app's scrollbars.
-            .when(multiline, |d| {
+            .when(multiline && !self.auto_height, |d| {
                 let this_entity = cx.entity();
                 let sb = t.text_muted;
                 let sbh = t.text_secondary;
@@ -3318,13 +3370,14 @@ impl RenderOnce for SimpleInput {
                 .when(self.custom_width.is_none(), |d| d.w_full())
                 .when(self.fill_height, |d| d.flex_1().h_full().min_h(px(0.0)))
                 .when_some(self.custom_height, |d, h| d.h(h))
+                .text_color(text_col)
                 .when_some(self.text_size, |d, size| d.text_size(size))
                 .when_some(self.line_height, |d, lh| d.line_height(lh))
                 .when_some(prefix_element, |d, pfx| d.child(pfx))
                 .child(
                     div()
                         .flex_1()
-                        .h_full()
+                        .when(self.fill_height, |d| d.h_full())
                         .flex()
                         .child(self.state),
                 )
@@ -3419,4 +3472,87 @@ mod tests {
         });
         assert_eq!(input.read_with(cx, |this, _| this.value().to_string()), "12345");
     }
+
+    #[gpui::test]
+    fn test_auto_height_and_read_only_flags(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        let input = cx.new(|cx| {
+            SimpleInputState::new(cx)
+                .multiline()
+                .auto_height(true)
+                .read_only(true)
+                .default_value("sudo du -xhd 1 / | sort -hr")
+        });
+        input.read_with(cx, |this, _| {
+            assert!(this.auto_height);
+            assert!(this.read_only);
+            assert_eq!(this.layout_cache.borrow().scroll_offset_y, gpui::px(0.0));
+        });
+    }
+
+    #[gpui::test]
+    fn test_copy_key_handled_only_when_selection_exists(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use super::KeyHandled;
+        let input = cx.new(|cx| SimpleInputState::new(cx).default_value("hello world"));
+
+        // Without selection, Ctrl+C should be NotHandled so parent elements can handle it
+        let not_handled = input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("ctrl-c").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev, cx)
+        });
+        assert_eq!(not_handled, KeyHandled::NotHandled);
+
+        // With selection, Ctrl+C should be Handled
+        let handled = input.update(cx, |this, cx| {
+            this.select_all(cx);
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("ctrl-c").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev, cx)
+        });
+        assert_eq!(handled, KeyHandled::Handled);
+    }
+
+    #[gpui::test]
+    fn test_multiline_enter_and_ctrl_enter(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use super::KeyHandled;
+        let input = cx.new(|cx| {
+            SimpleInputState::new(cx)
+                .multiline()
+                .submit_on_enter(true)
+                .default_value("line1")
+        });
+
+        // 1. Ctrl+Enter should insert newline '\n' and NOT emit PressEnter
+        input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("ctrl-enter").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
+            assert_eq!(this.value(), "line1\n");
+        });
+
+        // 2. Plain Enter should emit PressEnter (for direct submit) and NOT insert newline
+        input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("enter").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
+            // Text should remain "line1\n", without another newline
+            assert_eq!(this.value(), "line1\n");
+        });
+    }
 }
+

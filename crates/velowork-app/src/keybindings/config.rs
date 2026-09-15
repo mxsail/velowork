@@ -131,6 +131,13 @@ impl KeybindingConfig {
             ],
         );
         bindings.insert(
+            "TerminalInlineAi".to_string(),
+            vec![
+                KeybindingEntry::new("cmd-k", None),
+                KeybindingEntry::new("ctrl-k", None),
+            ],
+        );
+        bindings.insert(
             "ShowHistoryPanel".to_string(),
             vec![
                 KeybindingEntry::new("cmd-shift-h", None),

@@ -15,6 +15,7 @@ use velowork_ui::h_flex;
 use velowork_ui::button;
 use velowork_ui::button_primary;
 use velowork_ui::ControlSize;
+use velowork_ui::Tooltip;
 use velowork_i18n::i18n;
 
 use super::components::*;
@@ -249,6 +250,19 @@ impl SettingsPanel {
                                         .child(Input::new(&self.ai_max_history_messages_input)),
                                 )
                             )
+                    })
+                    // Terminal Interaction section
+                    .child(section_header(&i18n!(cx, "settings.ai_assistant.terminal_interaction"), &t, cx))
+                    .child({
+                        section_container(&t).child(self.render_toggle_with_desc(
+                            "terminal-ai-floating-toolbar",
+                            &i18n!(cx, "settings.ai_assistant.floating_toolbar"),
+                            &i18n!(cx, "settings.ai_assistant.floating_toolbar_desc"),
+                            s.terminal_ai_floating_toolbar_enabled,
+                            false,
+                            |state, val, cx| state.set_terminal_ai_floating_toolbar_enabled(val, cx),
+                            cx,
+                        ))
                     })
             })
     }
@@ -508,6 +522,7 @@ impl SettingsPanel {
                                     .items_center()
                                     .gap(SPACE_MD)
                                     .flex_1()
+                                    .min_w_0()
                                     .child(focusable_action_button(
                                         "dialog-test-btn",
                                         test_label_for_btn,
@@ -522,35 +537,50 @@ impl SettingsPanel {
                                         &self.ai_dialog_test_focus,
                                         &t,
                                     ))
-                                    // Test result text
+                                    // Test result text (truncate on overflow with full hover tooltip)
                                     .children(test_status_text.map(|(msg, is_success)| {
+                                        let tip_msg = msg.clone();
                                         div()
+                                            .id("dialog-test-result-text")
+                                            .flex_1()
+                                            .min_w_0()
+                                            .overflow_hidden()
+                                            .truncate()
                                             .text_size(ui_text_sm(cx))
                                             .text_color(rgb(if is_success { t.success } else { t.error }))
                                             .child(msg)
+                                            .when(!test_in_progress, |d| {
+                                                d.tooltip(move |_, cx| {
+                                                    cx.new(|_| Tooltip::new(tip_msg.clone())).into()
+                                                })
+                                            })
                                     }))
                             )
-                            // Cancel + Save
+                            // Cancel + Save (flex_shrink_0 prevents being squeezed)
                             .child(
-                                dialog_actions(
-                                    cancel_label,
-                                    move |_, window, cx| {
-                                        weak_cancel.update(cx, |this, cx| {
-                                            this.close_add_model_dialog(Some(window), cx)
-                                        })
-                                        .ok();
-                                    },
-                                    save_label,
-                                    move |_, window, cx| {
-                                        weak_save.update(cx, |this, cx| {
-                                            this.save_model_from_dialog(Some(window), cx)
-                                        })
-                                        .ok();
-                                    },
-                                    &self.ai_dialog_cancel_focus,
-                                    &self.ai_dialog_save_focus,
-                                    &t,
-                                ),
+                                div()
+                                    .flex_shrink_0()
+                                    .child(
+                                        dialog_actions(
+                                            cancel_label,
+                                            move |_, window, cx| {
+                                                weak_cancel.update(cx, |this, cx| {
+                                                    this.close_add_model_dialog(Some(window), cx)
+                                                })
+                                                .ok();
+                                            },
+                                            save_label,
+                                            move |_, window, cx| {
+                                                weak_save.update(cx, |this, cx| {
+                                                    this.save_model_from_dialog(Some(window), cx)
+                                                })
+                                                .ok();
+                                            },
+                                            &self.ai_dialog_cancel_focus,
+                                            &self.ai_dialog_save_focus,
+                                            &t,
+                                        ),
+                                    )
                             )
                     }),
             )
@@ -713,7 +743,12 @@ impl SettingsPanel {
         let api_key = self.ai_model_api_key_input.read(cx).text().to_string();
         let model_id = self.ai_model_id_input.read(cx).text().to_string();
 
-        if base_url.is_empty() || model_id.is_empty() {
+        if base_url.trim().is_empty() || model_id.trim().is_empty() {
+            log::warn!(
+                "[AI Model Test] Validation failed: base_url or model_id is empty (base_url: '{}', model_id: '{}')",
+                base_url,
+                model_id
+            );
             self.ai_test_result = Some(Err(i18n!(cx, "status.test_failed")));
             cx.notify();
             return;
@@ -723,16 +758,31 @@ impl SettingsPanel {
         self.ai_test_result = None;
         cx.notify();
 
-        // Build the test request URL: {base_url}/chat/completions
-        let url = format!(
-            "{}/chat/completions",
-            base_url.trim_end_matches('/')
-        );
+        let log_base_url = base_url.clone();
+        let log_model_id = model_id.clone();
 
         cx.spawn(async move |this, cx| {
             let test_result = smol::unblock(move || {
-                velowork_ai::provider::test_llm_connection(&url, &api_key, 15)
+                velowork_ai::provider::test_llm_connection(&base_url, &api_key, &model_id, 15)
             }).await;
+
+            match &test_result {
+                Ok(()) => {
+                    log::info!(
+                        "[AI Model Test] Successfully connected to model '{}' via '{}'",
+                        log_model_id,
+                        log_base_url
+                    );
+                }
+                Err(err) => {
+                    log::error!(
+                        "[AI Model Test] Failed to connect to model '{}' via '{}': {}",
+                        log_model_id,
+                        log_base_url,
+                        err
+                    );
+                }
+            }
 
             this.update(cx, |this, cx| {
                 this.ai_test_in_progress = false;

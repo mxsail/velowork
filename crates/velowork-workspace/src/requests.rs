@@ -33,6 +33,12 @@ pub enum ProjectOverlayKind {
         position: gpui::Point<gpui::Pixels>,
     },
     ToggleSftpPanel,
+    ShowAiFloatingToolbar {
+        terminal_id: String,
+        position: gpui::Point<gpui::Pixels>,
+        selection_text: String,
+    },
+    DismissAiFloatingToolbar,
 }
 
 /// Folder-scoped overlay request. Carries a `folder_id` once;

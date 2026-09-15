@@ -81,6 +81,8 @@ mod tests {
                             bracketed_paste: s.settings.bracketed_paste,
                             osc52_clipboard: s.settings.osc52_clipboard,
                             true_color: s.settings.true_color,
+                            ai_enabled: s.settings.ai_enabled,
+                            terminal_ai_floating_toolbar_enabled: s.settings.terminal_ai_floating_toolbar_enabled,
                         }).ok(),
                         _ => s.settings.extension_settings.get(namespace).cloned(),
                     }

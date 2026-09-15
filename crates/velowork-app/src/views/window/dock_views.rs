@@ -241,11 +241,21 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.right_dock.is_none() || self.right_toolbar_active.as_deref() != Some(panel_id) {
+        if self.right_dock.is_none() {
             let panel = self.create_right_panel(panel_id, window, cx);
             self.right_dock = Some(panel);
             self.right_toolbar_active = Some(panel_id.to_string());
             self.right_toolbar_last_panel = Some(panel_id.to_string());
+        } else if self.right_toolbar_last_panel.as_deref() != Some(panel_id) {
+            if let Some(dock) = self.right_dock.as_ref() {
+                dock.update(cx, |d, cx| {
+                    d.activate_or_add_panel(panel_id, window, cx);
+                });
+            }
+            self.right_toolbar_active = Some(panel_id.to_string());
+            self.right_toolbar_last_panel = Some(panel_id.to_string());
+        } else {
+            self.right_toolbar_active = Some(panel_id.to_string());
         }
         self.right_dock_ctrl.set_open(true);
         if let Some(dock) = self.right_dock.as_ref() {
@@ -491,12 +501,7 @@ impl WindowView {
                     DockPosition::Right => {
                         this.right_dock_ctrl.set_animation(target);
                         this.right_dock_anim_task = None;
-                        // 关闭动画真正归零后才清空面板实体：此时容器宽度已为 0，
-                        // 清空不会残留空白；动画期间保留实体则让面板随容器一起收起，
-                        // 避免内容为空、背景透明而在中间帧闪烁。
-                        if target <= 0.01 {
-                            this.right_dock = None;
-                        }
+                        // 保留右侧 dock 实体（保活缓存），避免下次点击展开时在主线程重新构建面板导致卡顿
                     }
                     DockPosition::Bottom => {
                         this.bottom_dock_ctrl.set_animation(target);

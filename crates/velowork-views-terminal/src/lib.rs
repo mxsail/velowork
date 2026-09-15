@@ -171,6 +171,10 @@ pub struct TerminalViewSettings {
     pub command_history_ignored_commands: Vec<String>,
     #[serde(default = "default_command_history_ignore_space")]
     pub command_history_ignore_space: bool,
+    #[serde(default = "default_true")]
+    pub ai_enabled: bool,
+    #[serde(default = "default_true")]
+    pub terminal_ai_floating_toolbar_enabled: bool,
 }
 
 impl TerminalViewSettings {
@@ -317,6 +321,8 @@ pub fn terminal_view_settings(cx: &gpui::App) -> TerminalViewSettings {
             bracketed_paste: true,
             osc52_clipboard: true,
             true_color: true,
+            ai_enabled: true,
+            terminal_ai_floating_toolbar_enabled: true,
         })
 }
 

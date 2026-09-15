@@ -113,6 +113,7 @@ declare_icons! {
     Globe => ("globe", "icons/globe.svg", "../../../../assets/icons/globe.svg"),
     HardDrive => ("hard-drive", "icons/hard-drive.svg", "../../../../assets/icons/hard-drive.svg"),
     Help => ("help", "icons/help.svg", "../../../../assets/icons/help.svg"),
+    History => ("history", "icons/history.svg", "../../../../assets/icons/history.svg"),
     Image => ("image", "icons/image.svg", "../../../../assets/icons/image.svg"),
     Info => ("info", "icons/info.svg", "../../../../assets/icons/info.svg"),
     Keyboard => ("keyboard", "icons/keyboard.svg", "../../../../assets/icons/keyboard.svg"),
