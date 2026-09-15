@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.5] - 2026-09-16
+
+### Added / 新增
+- **终端内联 AI 交互与快捷键触发**：
+  - 支持在终端窗口内直接唤起内嵌式 AI（Terminal Inline AI），实现就地上下文提问与交互。  
+  *(Support in-situ Terminal Inline AI interaction with dedicated shortcut triggers).*
+- **AI 助手面板与会话管理全面增强**：
+  - 新增历史会话查看与管理浮层，支持一键清空会话与便捷切换。
+  - 会话搜索能力升级：支持关键词多重高亮、实时平滑滚动定位及全文检索。
+  - 新增 Token 环状进度指示条组件，悬浮展示详尽的上下文用量与配额 Tooltip。  
+  *(Comprehensive AI assistant panel enhancements: session management overlay, real-time keyword highlight & smooth search navigation, token usage progress ring with detail tooltips).*
+- **Markdown 划选与原生复制**：
+  - AI 回复支持纯文本与格式化 Markdown 的划选高亮及原生 `Ctrl+C` 剪贴板复制。  
+  *(Support text selection and native Ctrl+C clipboard copy within rendered AI Markdown responses).*
+
+### Improved / 优化
+- **AI 性能与流畅度优化**：
+  - 引入 `gpui::list` 虚拟化渲染与 SQLite 分页加载机制，极大优化长会话滚动帧率与内存开销。
+  - 优化右侧 Dock 实例保活与展开流体微动效，消除展开瞬间的卡顿与残影。  
+  *(Adopt gpui::list virtualization and SQLite pagination for long chat history; optimize right dock instance keep-alive and fluid expansion motion).*
+
 ## [0.1.0-beta.4] - 2026-09-16
 
 ### Fixed / 修复
