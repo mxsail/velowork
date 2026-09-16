@@ -2,7 +2,9 @@ use crate::keybindings::Cancel;
 use crate::logging::{self, LogLine};
 use crate::theme::theme;
 use crate::ui::tokens::{mono_font_family, ui_text, ui_text_ms};
-use velowork_ui::tokens::{SPACE_XS, SPACE_SM, SPACE_MD, SPACE_XL, RADIUS_STD, ICON_MD, RADIUS_MD};
+use velowork_ui::button::Button;
+use velowork_ui::design::appearance::ControlSize;
+use velowork_ui::tokens::{SPACE_XS, SPACE_SM, SPACE_MD, SPACE_XL, ICON_MD, RADIUS_MD};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::icon::AppIcon;
 use velowork_ui::tooltip::Tooltip;
@@ -12,7 +14,6 @@ use velowork_ui::{h_flex, v_flex};
 use velowork_ui::badge::keyboard_hints_footer;
 use velowork_ui::input::InputState;
 use velowork_core::theme::ThemeColors;
-use velowork_ui::overlay::{modal_content, modal_header};
 use std::time::Duration;
 use velowork_i18n::i18n;
 
@@ -249,9 +250,15 @@ impl Render for LogConsole {
             self.pending_scroll = false;
         }
 
-        modal_content("log-console-modal", cx)
-            .w(px(900.0))
-            .h(px(620.0))
+        let p = SemanticPalette::from_theme(&t);
+
+        div()
+            .id("log-console-window-root")
+            .size_full()
+            .flex()
+            .flex_col()
+            .bg(p.surface_base)
+            .text_color(p.text_primary)
             .track_focus(&focus_handle)
             .key_context("LogConsole")
             .on_action(cx.listener(|this, _: &Cancel, _window, cx| this.close(cx)))
@@ -277,14 +284,38 @@ impl Render for LogConsole {
                     cx.notify();
                 }
             }))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(modal_header(
-                i18n!(cx, "log.title"),
-                Some(velowork_i18n::t_fmt(&*cx, "log.shown_buffered", &[("shown", &shown.to_string()), ("total", &total.to_string())])),
-                &t,
-                cx,
-                cx.listener(|this, _, _window, cx| this.close(cx)),
-            ))
+            .child(
+                h_flex()
+                    .w_full()
+                    .px(SPACE_XL)
+                    .py(px(12.0))
+                    .justify_between()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(p.border_subtle)
+                    .child(
+                        h_flex()
+                            .gap(SPACE_SM)
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_size(ui_text(15.0, cx))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .text_color(p.text_primary)
+                                    .child(i18n!(cx, "log.title")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(ui_text_ms(cx))
+                                    .text_color(p.text_muted)
+                                    .child(velowork_i18n::t_fmt(
+                                        &*cx,
+                                        "log.shown_buffered",
+                                        &[("shown", &shown.to_string()), ("total", &total.to_string())],
+                                    )),
+                            ),
+                    ),
+            )
             .child(self.render_toolbar(&t, cx))
             .child(self.render_list(visible, &t, cx))
             .child({
@@ -362,64 +393,63 @@ impl LogConsole {
                             .iter()
                             .map(|&level| {
                                 let active = level <= self.min_level;
-                                let color = level_color(level, t);
-                                div()
-                                    .id(ElementId::Name(format!("log-level-chip-{:?}", level).into()))
-                                    .cursor_pointer()
-                                    .px(SPACE_SM)
+                                let color = hsla_from_rgb(level_color(level, t));
+                                let mut btn = Button::new(format!("log-level-chip-{:?}", level), t)
+                                    .size(ControlSize::Compact)
+                                    .accent_color(color)
+                                    .label(level_label(level))
+                                    .px(px(8.0))
                                     .py(px(2.0))
-                                    .rounded(RADIUS_STD)
-                                    .text_size(ui_text_ms(cx))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .bg(if active { rgb(color) } else { rgb(t.bg_secondary) })
-                                    .text_color(if active { rgb(t.bg_panel) } else { rgb(t.text_muted) })
-                                    .child(level_label(level))
-                                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                    .on_click(cx.listener(move |this, _, _window, cx| this.set_level(level, cx)))
+                                    .on_click(cx.listener(move |this, _, _window, cx| this.set_level(level, cx)));
+                                if active {
+                                    btn = btn.primary();
+                                } else {
+                                    btn = btn.default();
+                                }
+                                btn
                             })),
                     )
-                    .child(toggle_chip(
-                        "autoscroll",
-                        self.auto_scroll,
-                        t,
-                        cx,
-                        cx.listener(|this, _, _w, cx| {
-                            this.auto_scroll = !this.auto_scroll;
-                            this.pending_scroll = this.auto_scroll;
-                            cx.notify();
-                        }),
-                    ))
-                    .child(toggle_chip(
-                        "copy",
-                        false,
-                        t,
-                        cx,
-                        cx.listener(|this, _, _w, cx| {
-                            let text = this
-                                .visible(cx)
-                                .iter()
-                                .map(format_line_for_copy)
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            cx.write_to_clipboard(ClipboardItem::new_string(text));
-                        }),
-                    ))
-                    .child(toggle_chip(
-                        "clear",
-                        false,
-                        t,
-                        cx,
-                        cx.listener(|this, _, _w, cx| {
-                            if let Some(hub) = logging::hub() {
-                                hub.clear();
-                            }
-                            this.lines.clear();
-                            if let Some(hub) = logging::hub() {
-                                this.cursor = hub.next_seq();
-                            }
-                            cx.notify();
-                        }),
-                    )),
+                    .child(
+                        Button::new("log-autoscroll", t)
+                            .size(ControlSize::Compact)
+                            .label(i18n!(cx, "log.autoscroll"))
+                            .selected(self.auto_scroll)
+                            .on_click(cx.listener(|this, _, _w, cx| {
+                                this.auto_scroll = !this.auto_scroll;
+                                this.pending_scroll = this.auto_scroll;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("log-copy", t)
+                            .size(ControlSize::Compact)
+                            .label(i18n!(cx, "common.copy"))
+                            .on_click(cx.listener(|this, _, _w, cx| {
+                                let text = this
+                                    .visible(cx)
+                                    .iter()
+                                    .map(format_line_for_copy)
+                                    .collect::<Vec<_>>()
+                                    .join("\n");
+                                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                            })),
+                    )
+                    .child(
+                        Button::new("log-clear", t)
+                            .size(ControlSize::Compact)
+                            .danger(true)
+                            .label(i18n!(cx, "common.clear"))
+                            .on_click(cx.listener(|this, _, _w, cx| {
+                                if let Some(hub) = logging::hub() {
+                                    hub.clear();
+                                }
+                                this.lines.clear();
+                                if let Some(hub) = logging::hub() {
+                                    this.cursor = hub.next_seq();
+                                }
+                                cx.notify();
+                            })),
+                    ),
             )
     }
 
@@ -578,30 +608,11 @@ fn field_label(label: &str, t: &ThemeColors, cx: &App) -> impl IntoElement {
         .child(label.to_string())
 }
 
-fn toggle_chip<F>(
-    label: &'static str,
-    on: bool,
-    t: &ThemeColors,
-    cx: &App,
-    handler: F,
-) -> impl IntoElement
-where
-    F: Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-{
-    div()
-        .id(ElementId::Name(label.into()))
-        .px(SPACE_SM)
-        .py(px(2.0))
-        .rounded(RADIUS_STD)
-        .cursor_pointer()
-        .flex_shrink_0()
-        .text_size(ui_text_ms(cx))
-        .text_color(rgb(if on { t.text_primary } else { t.text_muted }))
-        .bg(rgb(if on { t.bg_hover } else { t.bg_secondary }))
-        .border_1()
-        .border_color(rgb(if on { t.border_active } else { t.border }))
-        .child(label)
-        .on_click(handler)
+fn hsla_from_rgb(rgb_val: u32) -> Hsla {
+    let r = ((rgb_val >> 16) & 0xff) as f32 / 255.0;
+    let g = ((rgb_val >> 8) & 0xff) as f32 / 255.0;
+    let b = (rgb_val & 0xff) as f32 / 255.0;
+    Rgba { r, g, b, a: 1.0 }.into()
 }
 
 velowork_ui::impl_focusable!(LogConsole);

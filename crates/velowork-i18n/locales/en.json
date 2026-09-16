@@ -1412,6 +1412,7 @@
   },
   "log": {
     "title": "Log Console",
+    "autoscroll": "Auto-scroll",
     "shown_buffered": "{shown} shown / {total} buffered",
     "no_matches": "No log lines match the current filters.",
     "capture": "capture",

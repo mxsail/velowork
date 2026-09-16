@@ -1412,6 +1412,7 @@
   },
   "log": {
     "title": "日志控制台",
+    "autoscroll": "自动滚动",
     "shown_buffered": "已显示 {shown} / 缓冲 {total}",
     "no_matches": "没有日志行匹配当前筛选条件。",
     "capture": "捕获",

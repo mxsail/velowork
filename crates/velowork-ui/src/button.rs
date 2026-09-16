@@ -66,6 +66,7 @@ pub struct Button {
     icon_right: Option<ButtonIcon>,
     tooltip: Option<SharedString>,
     focus_handle: Option<FocusHandle>,
+    custom_accent_color: Option<Hsla>,
     on_click: Option<Arc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
 }
 
@@ -94,6 +95,7 @@ impl Button {
             icon_right: None,
             tooltip: None,
             focus_handle: None,
+            custom_accent_color: None,
             on_click: None,
         }
     }
@@ -108,6 +110,12 @@ impl Button {
     /// Set whether the button is selected/focused.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Override the accent color used for hover borders/text and filled primary background.
+    pub fn accent_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.custom_accent_color = Some(color.into());
         self
     }
 
@@ -291,6 +299,11 @@ impl Button {
     pub fn is_disabled(&self) -> bool {
         self.disabled
     }
+
+    #[cfg(test)]
+    pub fn get_accent_color(&self) -> Option<Hsla> {
+        self.custom_accent_color
+    }
 }
 
 impl RenderOnce for Button {
@@ -329,28 +342,99 @@ impl RenderOnce for Button {
         // prototype's `--hover-*` treatment and the other unified controls.
         let transparent = gpui::hsla(0.0, 0.0, 0.0, 0.0);
 
-        let mut final_bg = geom.bg;
-        let mut final_border = geom.border_color;
-        let mut final_fg = geom.text_color;
-        let mut hover_bg = geom.bg_hover;
+        let accent = self.custom_accent_color.unwrap_or(p.surface_accent);
+        let accent_hover = self.custom_accent_color
+            .map(|c| Hsla { l: (c.l * 1.15).min(0.92), s: (c.s * 0.95), ..c })
+            .unwrap_or(p.surface_accent_hover);
+        let danger_color = p.surface_danger;
+        let danger_hover = Hsla {
+            l: (danger_color.l * 1.15).min(0.92),
+            s: danger_color.s * 0.95,
+            ..danger_color
+        };
 
-        if self.danger {
+        let (
+            mut final_bg,
+            mut final_border,
+            mut final_fg,
+            mut hover_bg,
+            mut hover_border,
+            mut hover_fg,
+        ) = if self.danger {
             match self.variant {
-                ControlVariant::Primary | ControlVariant::Danger => {
-                    final_bg = p.surface_danger;
-                    final_border = transparent;
-                    final_fg = p.text_on_accent;
-                    hover_bg = p.surface_danger;
-                }
-                _ => {
-                    // Secondary / Outline / Ghost / Link + danger → red text on the
-                    // base background with a danger hover overlay (prototype `--danger`).
-                    final_border = p.surface_danger;
-                    final_fg = p.surface_danger;
-                    hover_bg = Hsla { a: 0.12, ..p.surface_danger };
-                }
+                ControlVariant::Primary | ControlVariant::Danger => (
+                    danger_color,
+                    transparent,
+                    p.text_on_accent,
+                    danger_hover,
+                    None,
+                    Some(p.text_on_accent),
+                ),
+                ControlVariant::Secondary | ControlVariant::Outline => (
+                    geom.bg,
+                    danger_color,
+                    danger_color,
+                    Hsla { a: 0.08, ..danger_color },
+                    Some(danger_hover),
+                    Some(danger_hover),
+                ),
+                ControlVariant::Ghost | ControlVariant::Link => (
+                    transparent,
+                    transparent,
+                    danger_color,
+                    Hsla { a: 0.08, ..danger_color },
+                    None,
+                    Some(danger_hover),
+                ),
             }
-        }
+        } else {
+            match self.variant {
+                ControlVariant::Primary => (
+                    if self.custom_accent_color.is_some() { accent } else { geom.bg },
+                    transparent,
+                    p.text_on_accent,
+                    accent_hover,
+                    None,
+                    Some(p.text_on_accent),
+                ),
+                ControlVariant::Secondary | ControlVariant::Outline => {
+                    let border = if is_active_or_selected { accent } else { geom.border_color };
+                    let fg = if is_active_or_selected { accent } else { geom.text_color };
+                    let h_bg = if self.custom_accent_color.is_some() {
+                        Hsla { a: 0.08, ..accent }
+                    } else {
+                        p.surface_hover
+                    };
+                    (geom.bg, border, fg, h_bg, Some(accent_hover), Some(accent_hover))
+                }
+                ControlVariant::Ghost => {
+                    let fg = if is_active_or_selected { accent } else { geom.text_color };
+                    let h_bg = if self.custom_accent_color.is_some() {
+                        Hsla { a: 0.08, ..accent }
+                    } else {
+                        p.surface_hover
+                    };
+                    let h_fg = if is_active_or_selected { Some(accent_hover) } else { None };
+                    (transparent, transparent, fg, h_bg, None, h_fg)
+                }
+                ControlVariant::Link => (
+                    transparent,
+                    transparent,
+                    accent,
+                    transparent,
+                    None,
+                    Some(accent_hover),
+                ),
+                ControlVariant::Danger => (
+                    danger_color,
+                    transparent,
+                    p.text_on_accent,
+                    danger_hover,
+                    None,
+                    Some(p.text_on_accent),
+                ),
+            }
+        };
 
         // Disabled / loading adjustments.
         let computed_opacity = if self.disabled {
@@ -365,6 +449,8 @@ impl RenderOnce for Button {
                 _ => transparent,
             };
             hover_bg = transparent;
+            hover_border = None;
+            hover_fg = None;
             0.65
         } else if self.loading {
             0.50
@@ -376,11 +462,14 @@ impl RenderOnce for Button {
 
         if is_active_or_selected {
             if self.danger {
-                final_border = p.surface_danger;
+                final_border = danger_color;
+                if self.variant == ControlVariant::Secondary || self.variant == ControlVariant::Outline {
+                    final_bg = Hsla { a: 0.08, ..danger_color };
+                }
             } else {
-                final_border = p.border_active;
-                if self.variant == ControlVariant::Secondary {
-                    final_bg = p.surface_raised;
+                final_border = accent;
+                if self.variant == ControlVariant::Secondary || self.variant == ControlVariant::Outline {
+                    final_bg = Hsla { a: 0.08, ..accent };
                 }
             }
         }
@@ -418,9 +507,9 @@ impl RenderOnce for Button {
 
         if is_active_or_selected {
             let ring_color = if self.danger {
-                Hsla { a: 0.35, ..p.surface_danger }
+                Hsla { a: 0.35, ..danger_color }
             } else {
-                Hsla { a: 0.35, ..p.border_active }
+                Hsla { a: 0.35, ..accent }
             };
             container = container.shadow(vec![BoxShadow {
                 color: ring_color,
@@ -447,7 +536,8 @@ impl RenderOnce for Button {
         } else if let Some(icon) = self.icon_left {
             match icon {
                 ButtonIcon::Icon(icon) => {
-                    let icon_elem = icon.size(geom.icon_size).text_color(final_fg);
+                    // Inherits parent text_color so hover_fg automatically applies to both text and icon
+                    let icon_elem = icon.size(geom.icon_size);
                     container = container.child(icon_elem);
                 }
                 ButtonIcon::Element(render) => {
@@ -466,7 +556,8 @@ impl RenderOnce for Button {
             if let Some(icon) = self.icon_right {
                 match icon {
                     ButtonIcon::Icon(icon) => {
-                        let icon_elem = icon.size(geom.icon_size).text_color(final_fg);
+                        // Inherits parent text_color so hover_fg automatically applies to both text and icon
+                        let icon_elem = icon.size(geom.icon_size);
                         container = container.child(icon_elem);
                     }
                     ButtonIcon::Element(render) => {
@@ -479,16 +570,9 @@ impl RenderOnce for Button {
         if is_interactive {
             container = container.cursor_pointer();
             container = container.stateful_behavior(HoverBehavior {
-                hover_bg: if self.variant == ControlVariant::Link {
-                    transparent
-                } else {
-                    hover_bg
-                },
-                hover_fg: if self.variant == ControlVariant::Link {
-                    Some(p.surface_accent_hover)
-                } else {
-                    None
-                },
+                hover_bg,
+                hover_fg,
+                hover_border,
                 underline: self.variant == ControlVariant::Link,
                 ..Default::default()
             });
@@ -570,5 +654,15 @@ mod tests {
         assert_eq!(btn_dash.get_variant(), ControlVariant::Outline);
         assert_eq!(btn_txt.get_variant(), ControlVariant::Ghost);
         assert_eq!(btn_link.get_variant(), ControlVariant::Link);
+    }
+
+    #[test]
+    fn test_button_accent_color() {
+        let t = DARK_THEME;
+        let color = gpui::hsla(0.5, 0.8, 0.4, 1.0);
+        let btn = Button::new("b-accent", &t)
+            .accent_color(color);
+
+        assert_eq!(btn.get_accent_color(), Some(color));
     }
 }

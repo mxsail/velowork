@@ -73,6 +73,8 @@ pub struct HoverBehavior {
     pub hover_bg: Hsla,
     /// Foreground (text) color shown on hover. `None` keeps the base color.
     pub hover_fg: Option<Hsla>,
+    /// Border color shown on hover. `None` keeps the base border color.
+    pub hover_border: Option<Hsla>,
     /// Whether to underline text on hover.
     pub underline: bool,
     /// Optional opacity applied on hover (e.g. color-swatch feedback).
@@ -84,6 +86,7 @@ impl Default for HoverBehavior {
         Self {
             hover_bg: transparent(),
             hover_fg: None,
+            hover_border: None,
             underline: false,
             hover_opacity: None,
         }
@@ -94,6 +97,7 @@ impl Behavior for HoverBehavior {
     fn apply(self, element: Div) -> Div {
         let bg = self.hover_bg;
         let fg = self.hover_fg;
+        let border = self.hover_border;
         let ul = self.underline;
         let opacity = self.hover_opacity;
         element
@@ -104,6 +108,9 @@ impl Behavior for HoverBehavior {
                 }
                 if let Some(color) = fg {
                     style = style.text_color(color);
+                }
+                if let Some(bc) = border {
+                    style = style.border_color(bc);
                 }
                 if ul {
                     style = style.underline();

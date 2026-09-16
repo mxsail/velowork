@@ -319,6 +319,10 @@ pub struct OverlayManager {
     settings_window_handle: Option<AnyWindowHandle>,
     settings_panel_entity: Option<Entity<SettingsPanel>>,
 
+    /// OS window handle of the detached log console window (if open).
+    log_console_window_handle: Option<AnyWindowHandle>,
+    log_console_entity: Option<Entity<LogConsole>>,
+
     pub(crate) on_qc_create_folder: Option<std::sync::Arc<dyn Fn(Option<String>, &mut Context<OverlayManager>) + Send + Sync>>,
     pub(crate) on_qc_rename_folder: Option<std::sync::Arc<dyn Fn(String, String, &mut Context<OverlayManager>) + Send + Sync>>,
     pub(crate) on_qc_rename_command: Option<std::sync::Arc<dyn Fn(String, String, &mut Context<OverlayManager>) + Send + Sync>>,
@@ -380,6 +384,8 @@ impl OverlayManager {
             terminal_ai_inline: OverlaySlot::new(),
             settings_window_handle: None,
             settings_panel_entity: None,
+            log_console_window_handle: None,
+            log_console_entity: None,
         }
     }
 
@@ -1072,9 +1078,41 @@ impl OverlayManager {
         );
     }
 
-    /// Toggle the log console overlay (live in-app log viewer).
+    /// Toggle the log console overlay (live in-app log viewer as a detached window).
     pub fn toggle_log_console(&mut self, cx: &mut Context<Self>) {
-        toggle_overlay!(self, cx, LogConsole, LogConsoleEvent, LogConsole::new);
+        if let Some(handle) = self.log_console_window_handle {
+            let alive = handle.update(cx, |_, window, _cx| {
+                window.activate_window();
+                window.refresh();
+            });
+            if alive.is_ok() {
+                return;
+            }
+            self.log_console_window_handle = None;
+            self.log_console_entity = None;
+        }
+
+        let title = i18n!(cx, "log.title");
+        let panel_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let panel_slot_capture = panel_slot.clone();
+
+        let handle = crate::app::open_detached_overlay::<LogConsole, LogConsoleEvent>(
+            title,
+            move |_window, _registry, cx| {
+                let entity = cx.new(LogConsole::new);
+                *panel_slot_capture.borrow_mut() = Some(entity.clone());
+                entity
+            },
+            crate::app::DetachedOverlayOptions {
+                size: gpui::size(gpui::px(1000.0), gpui::px(680.0)),
+                min_size: gpui::size(gpui::px(600.0), gpui::px(420.0)),
+                on_close: None,
+                hide_titlebar: false,
+            },
+            cx,
+        );
+        self.log_console_entity = panel_slot.borrow().clone();
+        self.log_console_window_handle = handle;
     }
 
 
