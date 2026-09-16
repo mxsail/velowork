@@ -25,7 +25,7 @@ use crate::settings::settings_entity;
 use crate::views::overlays::dialogs::terminal_color_scheme_dialog::{
     TerminalColorSchemeDialog, TerminalColorSchemeDialogEvent,
 };
-use crate::terminal::shell_config::{AvailableShell, available_shells};
+use crate::terminal::available_shell_select_options;
 use crate::theme::theme;
 use crate::ui::tokens::{ui_font_family, use_custom_ui_font};
 use crate::views::components::{PathAutoCompleteState, dropdown_anchored_below};
@@ -85,7 +85,6 @@ pub struct SettingsPanel {
     pub(super) ai_max_context_tokens_input: Entity<InputState>,
     pub(super) ai_max_history_messages_input: Entity<InputState>,
     pub(super) overlay_registry: Option<Entity<OverlayRegistry>>,
-    pub(super) _available_shells: Vec<AvailableShell>,
     // File opener input
     pub(super) file_opener_input: Entity<InputState>,
     // SFTP default permission inputs
@@ -902,13 +901,7 @@ impl SettingsPanel {
         let cur_shell = s.default_shell.clone();
         let shell_select = cx.new(|cx| {
             SelectState::new(cx)
-                .options(
-                    available_shells()
-                        .into_iter()
-                        .filter(|sh| sh.available)
-                        .map(|sh| SelectOption::new(sh.shell_type.clone(), sh.name.clone()))
-                        .collect(),
-                )
+                .options(available_shell_select_options(cx))
                 .selected(Some(cur_shell))
                 .placement(SelectPlacement::Below)
         });
@@ -1179,7 +1172,6 @@ impl SettingsPanel {
             ai_max_context_tokens_input,
             ai_max_history_messages_input,
             overlay_registry: None,
-            _available_shells: available_shells(),
             file_opener_input,
             sftp_file_mode_input,
             sftp_dir_mode_input,

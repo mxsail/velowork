@@ -2965,27 +2965,26 @@ pub(crate) fn dropdown_option_list(
                 .collect()
         }
         "local_shell" => {
-            let mut opts: Vec<(String, String, bool)> = vec![(
-                i18n!(cx, "ssh.local.default_shell"),
-                String::new(),
-                model.config.local_shell.is_none(),
-            )];
-            let detected_shells = velowork_terminal::shell_config::available_shells();
-            for shell in detected_shells {
-                if !shell.available {
-                    continue;
-                }
-                if matches!(
-                    shell.shell_type,
-                    velowork_terminal::shell_config::ShellType::Default
-                ) {
-                    continue;
-                }
-                let json_val = serde_json::to_string(&shell.shell_type).unwrap_or_default();
-                let is_selected = model.config.local_shell.as_deref() == Some(&json_val);
-                opts.push((shell.name, json_val, is_selected));
+            if model.config.protocol != velowork_state::SessionProtocol::Local {
+                return Vec::new();
             }
-            opts
+            crate::terminal::available_shell_items(cx)
+                .into_iter()
+                .map(|(label, shell_type)| {
+                    let is_default = matches!(shell_type, velowork_terminal::shell_config::ShellType::Default);
+                    let val = if is_default {
+                        String::new()
+                    } else {
+                        serde_json::to_string(&shell_type).unwrap_or_default()
+                    };
+                    let is_selected = if is_default {
+                        model.config.local_shell.is_none()
+                    } else {
+                        model.config.local_shell.as_deref() == Some(&val)
+                    };
+                    (label, val, is_selected)
+                })
+                .collect()
         }
         _ => Vec::new(),
     }
