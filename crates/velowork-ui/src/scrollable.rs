@@ -15,18 +15,26 @@ use gpui::prelude::FluentBuilder;
 
 use crate::design::semantic::SemanticPalette;
 use crate::theme::{ThemeColors, theme, with_alpha};
+use crate::tokens::{
+    SCROLLBAR_ALPHA_DRAG, SCROLLBAR_ALPHA_HOVER, SCROLLBAR_ALPHA_NORMAL,
+    SCROLLBAR_MIN_THUMB_SIZE, SCROLLBAR_THUMB_ACTIVE_RADIUS, SCROLLBAR_THUMB_ACTIVE_WIDTH,
+    SCROLLBAR_THUMB_INSET, SCROLLBAR_THUMB_RADIUS, SCROLLBAR_THUMB_WIDTH,
+    SCROLLBAR_TRACK_HEIGHT_HORIZONTAL, SCROLLBAR_TRACK_WIDTH,
+};
 
-/// 滚动条总宽度（THUMB_ACTIVE_INSET * 2 + THUMB_ACTIVE_WIDTH）
-const WIDTH: Pixels = px(4. * 2. + 8.);
-const MIN_THUMB_SIZE: f32 = 48.;
+/// 滚动条纵向总宽度
+const WIDTH: Pixels = SCROLLBAR_TRACK_WIDTH;
+/// 滚动条横向总高度
+const HORIZ_HEIGHT: Pixels = SCROLLBAR_TRACK_HEIGHT_HORIZONTAL;
+const MIN_THUMB_SIZE: f32 = SCROLLBAR_MIN_THUMB_SIZE;
 
-const THUMB_WIDTH: Pixels = px(6.);
-const THUMB_RADIUS: Pixels = px(6. / 2.);
-const THUMB_INSET: Pixels = px(4.);
+const THUMB_WIDTH: Pixels = SCROLLBAR_THUMB_WIDTH;
+const THUMB_RADIUS: Pixels = SCROLLBAR_THUMB_RADIUS;
+const THUMB_INSET: Pixels = SCROLLBAR_THUMB_INSET;
 
-const THUMB_ACTIVE_WIDTH: Pixels = px(8.);
-const THUMB_ACTIVE_RADIUS: Pixels = px(8. / 2.);
-const THUMB_ACTIVE_INSET: Pixels = px(4.);
+const THUMB_ACTIVE_WIDTH: Pixels = SCROLLBAR_THUMB_ACTIVE_WIDTH;
+const THUMB_ACTIVE_RADIUS: Pixels = SCROLLBAR_THUMB_ACTIVE_RADIUS;
+const THUMB_ACTIVE_INSET: Pixels = SCROLLBAR_THUMB_INSET;
 
 const FADE_OUT_DURATION: f32 = 0.45;
 const FADE_OUT_DELAY: f32 = 0.15;
@@ -376,7 +384,7 @@ impl Scrollbar {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         (
-            Hsla { a: 0.7, ..p.text_primary },
+            Hsla { a: SCROLLBAR_ALPHA_DRAG, ..p.text_primary },
             gpui::transparent_black(),
             gpui::transparent_black(),
             THUMB_ACTIVE_WIDTH,
@@ -389,7 +397,7 @@ impl Scrollbar {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         (
-            Hsla { a: 0.6, ..p.text_primary },
+            Hsla { a: SCROLLBAR_ALPHA_HOVER, ..p.text_primary },
             gpui::transparent_black(),
             gpui::transparent_black(),
             THUMB_ACTIVE_WIDTH,
@@ -402,7 +410,7 @@ impl Scrollbar {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         (
-            Hsla { a: 0.45, ..p.text_muted },
+            Hsla { a: SCROLLBAR_ALPHA_HOVER, ..p.text_muted },
             gpui::transparent_black(),
             gpui::transparent_black(),
             THUMB_ACTIVE_WIDTH,
@@ -412,21 +420,15 @@ impl Scrollbar {
     }
 
     fn style_for_normal(&self, cx: &App) -> (Hsla, Hsla, Hsla, Pixels, Pixels, Pixels) {
-        let scrollbar_show = self.scrollbar_show.unwrap_or(ScrollbarShow::Hover);
-        let (width, inset, radius) = match scrollbar_show {
-            ScrollbarShow::Scrolling => (THUMB_WIDTH, THUMB_INSET, THUMB_RADIUS),
-            _ => (THUMB_ACTIVE_WIDTH, THUMB_ACTIVE_INSET, THUMB_ACTIVE_RADIUS),
-        };
-
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         (
-            Hsla { a: 0.35, ..p.text_muted },
+            Hsla { a: SCROLLBAR_ALPHA_NORMAL, ..p.text_muted },
             gpui::transparent_black(),
             gpui::transparent_black(),
-            width,
-            inset,
-            radius,
+            THUMB_WIDTH,
+            THUMB_INSET,
+            THUMB_RADIUS,
         )
     }
 
@@ -575,8 +577,7 @@ impl Element for Scrollbar {
                 * track_travel_range);
             let thumb_end = (thumb_start + raw_thumb_length).min(container_size - margin_end);
 
-            let horiz_bar_h = px(6.0);
-            let horiz_thumb_h = px(4.0);
+            let horiz_bar_h = HORIZ_HEIGHT;
 
             let bounds = Bounds {
                 origin: if is_vertical {
@@ -710,7 +711,7 @@ impl Element for Scrollbar {
                 Bounds::from_anchor_and_size(
                     Anchor::BottomLeft,
                     bounds.bottom_left() + point(inset + thumb_start, -px(1.0)),
-                    size(thumb_length, horiz_thumb_h),
+                    size(thumb_length, thumb_width),
                 )
             };
 
@@ -1185,7 +1186,7 @@ fn render_scrollbar<H: ScrollbarHandle + Clone>(
             .top_0()
             .right_0()
             .bottom_0()
-            .w(px(12.0))
+            .w(WIDTH)
             .child(
                 Scrollbar::new(scroll_handle)
                     .id(id)
@@ -1197,7 +1198,7 @@ fn render_scrollbar<H: ScrollbarHandle + Clone>(
             .left_0()
             .right_0()
             .bottom_0()
-            .h(px(12.0))
+            .h(HORIZ_HEIGHT)
             .child(
                 Scrollbar::new(scroll_handle)
                     .id(id)

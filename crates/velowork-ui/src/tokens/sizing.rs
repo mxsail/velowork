@@ -133,11 +133,37 @@ pub const POPOVER_LIST_HEADER_H: Pixels = HEIGHT_STATUS_BAR;
 pub const POPOVER_LIST_MIN_H: Pixels = CONTROL_HEIGHT_LG;
 /// Popover list max height (280px)
 pub const POPOVER_LIST_MAX_H: Pixels = px(280.0);
-/// Popover scrollbar container width (12px)
-pub const POPOVER_SCROLLBAR_W: Pixels = px(12.0);
 /// Base menu offset for CSD titlebar
 pub const TITLEBAR_MENU_OFFSET: Pixels = px(48.0);
 
 /// Bottom spacer for categorized long-scroll containers (settings panel, session dialog),
 /// ensuring the last category card can always scroll fully to the top of the viewport.
 pub const SCROLL_BOTTOM_SPACER_H: Pixels = px(480.0);
+
+// ─── Scrollbar Tokens (macOS / Zed 精致微浮动风) ───
+
+/// 滚动条纵向容器热区宽度 (10px)
+pub const SCROLLBAR_TRACK_WIDTH: Pixels = px(10.0);
+/// 滚动条横向容器热区高度 (8px)
+pub const SCROLLBAR_TRACK_HEIGHT_HORIZONTAL: Pixels = px(8.0);
+/// Popover scrollbar container width
+pub const POPOVER_SCROLLBAR_W: Pixels = SCROLLBAR_TRACK_WIDTH;
+/// 滑块常态厚度 (4px)
+pub const SCROLLBAR_THUMB_WIDTH: Pixels = px(4.0);
+/// 滑块交互/悬停态厚度 (6px)
+pub const SCROLLBAR_THUMB_ACTIVE_WIDTH: Pixels = px(6.0);
+/// 滑块常态圆角 (2px)
+pub const SCROLLBAR_THUMB_RADIUS: Pixels = px(2.0);
+/// 滑块交互态圆角 (3px)
+pub const SCROLLBAR_THUMB_ACTIVE_RADIUS: Pixels = px(3.0);
+/// 滑块外边缘留白边距 (2px)
+pub const SCROLLBAR_THUMB_INSET: Pixels = px(2.0);
+/// 滑块最小视觉长度 (32px)
+pub const SCROLLBAR_MIN_THUMB_SIZE: f32 = 32.0;
+
+/// 滚动条常态透明度 (0.35)
+pub const SCROLLBAR_ALPHA_NORMAL: f32 = 0.35;
+/// 滚动条悬停透明度 (0.60)
+pub const SCROLLBAR_ALPHA_HOVER: f32 = 0.60;
+/// 滚动条拖拽透明度 (0.80)
+pub const SCROLLBAR_ALPHA_DRAG: f32 = 0.80;

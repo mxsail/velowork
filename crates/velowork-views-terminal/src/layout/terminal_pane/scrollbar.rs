@@ -3,6 +3,12 @@
 use velowork_terminal::terminal::Terminal;
 use velowork_ui::theme::theme;
 use velowork_ui::theme::with_alpha;
+use velowork_ui::tokens::{
+    SCROLLBAR_ALPHA_DRAG, SCROLLBAR_ALPHA_HOVER, SCROLLBAR_ALPHA_NORMAL,
+    SCROLLBAR_MIN_THUMB_SIZE, SCROLLBAR_THUMB_ACTIVE_RADIUS, SCROLLBAR_THUMB_ACTIVE_WIDTH,
+    SCROLLBAR_THUMB_INSET, SCROLLBAR_THUMB_RADIUS, SCROLLBAR_THUMB_WIDTH,
+    SCROLLBAR_TRACK_WIDTH,
+};
 use gpui::*;
 use std::sync::Arc;
 use std::time::Instant;
@@ -111,7 +117,7 @@ impl Scrollbar {
         }
 
         let scrollable_lines = total_lines - visible_lines;
-        let thumb_height = (visible_lines as f32 / total_lines as f32 * track_height).max(20.0);
+        let thumb_height = (visible_lines as f32 / total_lines as f32 * track_height).max(SCROLLBAR_MIN_THUMB_SIZE);
         let available_space = track_height - thumb_height;
         let scroll_ratio = display_offset as f32 / scrollable_lines as f32;
         let thumb_y = (1.0 - scroll_ratio) * available_space;
@@ -143,7 +149,7 @@ impl Scrollbar {
             }
 
             let scrollable_lines = total_lines - visible_lines;
-            let thumb_height = (visible_lines as f32 / total_lines as f32 * content_height).max(20.0);
+            let thumb_height = (visible_lines as f32 / total_lines as f32 * content_height).max(SCROLLBAR_MIN_THUMB_SIZE);
             let available_space = (content_height - thumb_height).max(1.0);
             let delta_y = y - start_y;
             let lines_per_pixel = scrollable_lines as f32 / available_space;
@@ -173,7 +179,7 @@ impl Scrollbar {
             }
 
             let scrollable_lines = total_lines - visible_lines;
-            let thumb_height = (visible_lines as f32 / total_lines as f32 * content_height).max(20.0);
+            let thumb_height = (visible_lines as f32 / total_lines as f32 * content_height).max(SCROLLBAR_MIN_THUMB_SIZE);
             let available_space = (content_height - thumb_height).max(1.0);
             let centered_y = (y - thumb_height / 2.0).clamp(0.0, available_space);
             let ratio = 1.0 - (centered_y / available_space);
@@ -262,28 +268,26 @@ impl Render for Scrollbar {
         let dragging = self.dragging;
         let hovered = self.hovered;
 
-        let (thumb_color, thumb_width, thumb_inset, thumb_radius) = if dragging {
+        let (thumb_color, thumb_width, thumb_radius) = if dragging {
             (
-                with_alpha(t.text_primary, 0.7),
-                8.0,
-                1.0,
-                4.0,
+                with_alpha(t.text_primary, SCROLLBAR_ALPHA_DRAG),
+                f32::from(SCROLLBAR_THUMB_ACTIVE_WIDTH),
+                f32::from(SCROLLBAR_THUMB_ACTIVE_RADIUS),
             )
         } else if hovered {
             (
-                with_alpha(t.text_primary, 0.6),
-                8.0,
-                1.0,
-                4.0,
+                with_alpha(t.text_primary, SCROLLBAR_ALPHA_HOVER),
+                f32::from(SCROLLBAR_THUMB_ACTIVE_WIDTH),
+                f32::from(SCROLLBAR_THUMB_ACTIVE_RADIUS),
             )
         } else {
             (
-                with_alpha(t.text_muted, 0.35),
-                6.0,
-                2.0,
-                3.0,
+                with_alpha(t.text_muted, SCROLLBAR_ALPHA_NORMAL),
+                f32::from(SCROLLBAR_THUMB_WIDTH),
+                f32::from(SCROLLBAR_THUMB_RADIUS),
             )
         };
+        let thumb_inset = f32::from(SCROLLBAR_THUMB_INSET);
 
         div()
             .id("scrollbar")
@@ -291,7 +295,7 @@ impl Render for Scrollbar {
             .top_0()
             .bottom_0()
             .right_0()
-            .w(px(10.0))
+            .w(SCROLLBAR_TRACK_WIDTH)
             .opacity(opacity)
             .cursor(CursorStyle::Arrow)
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
@@ -345,13 +349,14 @@ impl Render for Scrollbar {
                                     let track_height = f32::from(bounds.size.height);
                                     let scrollable_lines = total_lines - visible_lines;
                                     let thumb_height =
-                                        (visible_lines as f32 / total_lines as f32 * track_height).max(20.0);
+                                        (visible_lines as f32 / total_lines as f32 * track_height).max(SCROLLBAR_MIN_THUMB_SIZE);
                                     let available_scroll_space = track_height - thumb_height;
                                     let scroll_ratio = display_offset as f32 / scrollable_lines as f32;
                                     let thumb_y = (1.0 - scroll_ratio) * available_scroll_space;
 
+                                    let thumb_x = bounds.size.width - px(thumb_inset) - px(thumb_width);
                                     let thumb_bounds = Bounds {
-                                        origin: point(bounds.origin.x + px(thumb_inset), bounds.origin.y + px(thumb_y)),
+                                        origin: point(bounds.origin.x + thumb_x, bounds.origin.y + px(thumb_y)),
                                         size: size(px(thumb_width), px(thumb_height)),
                                     };
                                     window.paint_quad(fill(thumb_bounds, thumb_color).corner_radii(px(thumb_radius)));
