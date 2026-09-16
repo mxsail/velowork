@@ -3,7 +3,7 @@ pub use crate::workspace::toast::{Toast, ToastAction, ToastActionStyle, ToastLev
 use crate::theme::theme;
 use crate::ui::tokens::{
     ICON_SM, RADIUS_LG, RADIUS_MD, RADIUS_STD, SPACE_MD, SPACE_SM, SPACE_XS,
-    ui_height_status_bar, ui_space_card_gap, ui_text_md, ui_text_sm,
+    ui_height_status_bar, ui_space_card_gap, ui_space_window_padding, ui_text_md, ui_text_sm,
 };
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -168,7 +168,7 @@ impl Render for ToastOverlay {
                 .id("toast-overlay-container")
                 .absolute()
                 .bottom(px(bottom_offset)) // aligned with right toolbar above status bar
-                .right(ui_space_card_gap(cx))
+                .right(ui_space_window_padding(cx))
                 .w(px(TOAST_WIDTH))
                 .flex()
                 .flex_col()

@@ -11,7 +11,7 @@ use crate::keybindings::{
 use crate::settings::{open_settings_file, settings_entity};
 use crate::theme::{surface_bg, theme};
 use crate::ui::tokens::{
-    RADIUS_CARD, ui_right_toolbar_width, ui_space_card_gap, ui_space_md, ui_text_md, ui_text_xl,
+    RADIUS_CARD, ui_right_toolbar_width, ui_space_card_gap, ui_space_window_padding, ui_space_md, ui_text_md, ui_text_xl,
 };
 use crate::views::layout::navigation::{get_pane_map, prune_pane_map};
 use crate::views::layout::split_pane::{DragState, compute_resize, render_project_divider};
@@ -405,6 +405,7 @@ impl WindowView {
         let dynamic_container_size = {
             let window_bounds = window.window_bounds().get_bounds();
             let card_gap = f32::from(ui_space_card_gap(cx));
+            let win_pad = f32::from(ui_space_window_padding(cx));
             let total_axis = f32::from(if is_rows {
                 window_bounds.size.height - px(62.0)
             } else {
@@ -425,7 +426,7 @@ impl WindowView {
             } else {
                 0.0
             };
-            let padding_overhead = 2.0 * card_gap;
+            let padding_overhead = 2.0 * win_pad;
             (total_axis - left_sb - right_sb - right_tb - padding_overhead).max(200.0)
         };
 
@@ -1487,9 +1488,10 @@ impl Render for WindowView {
                         let terminal_fullscreen = self.focus_manager().read(cx).has_fullscreen();
                         is_left_dock_maximized || right_fullscreen || bottom_fullscreen || terminal_fullscreen
                     }, |d| {
-                        d.px(ui_space_card_gap(cx))
-                            .pt(ui_space_card_gap(cx))
-                            .pb(ui_space_card_gap(cx))
+                        let win_pad = ui_space_window_padding(cx);
+                        d.px(win_pad)
+                            .pt(win_pad)
+                            .pb(win_pad)
                     })
                     // Hide left sidebar when right sidebar, bottom dock, or a
                     // terminal is fullscreen/maximized, or when left sidebar is closed.

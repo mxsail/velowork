@@ -4,7 +4,7 @@ use crate::theme::{ThemeColors, surface_bg, theme};
 use crate::ui::tokens::{
     ICON_LG, ICON_MD, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_STD,
     RADIUS_XS, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
-    ui_height_status_bar, ui_space_card_gap, ui_text, ui_text_md, ui_text_ms, ui_text_sm,
+    ui_height_status_bar, ui_space_card_gap, ui_space_window_padding, ui_text, ui_text_md, ui_text_ms, ui_text_sm,
 };
 use crate::views::overlays::dialogs::service_dialog::ServiceDialogMode;
 use crate::views::panels::quick_commands_panel::send_command_to_focused_terminal;
@@ -1514,10 +1514,11 @@ impl StatusBar {
         cx: &App,
     ) -> Point<Pixels> {
         let card_gap = ui_space_card_gap(cx);
+        let win_pad = ui_space_window_padding(cx);
         let anchor_x = if b.size.width > px(0.0) {
-            (b.origin.x + b.size.width).min(viewport.width - card_gap)
+            (b.origin.x + b.size.width).min(viewport.width - win_pad)
         } else {
-            viewport.width - card_gap
+            viewport.width - win_pad
         };
         let anchor_y = if sb_bounds.size.height > px(0.0) && sb_bounds.origin.y > px(0.0) {
             sb_bounds.origin.y - card_gap
