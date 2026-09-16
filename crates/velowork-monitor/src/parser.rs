@@ -471,4 +471,24 @@ cpu  150 0 75 900 20 0 0 0 0 0
         // Δtotal=175, Δbusy=75 -> 75/175 ≈ 42.86%.
         assert!((d.cpu.usage_pct - 42.86).abs() < 0.5);
     }
+
+    #[test]
+    fn parses_users_from_w_and_who_output() {
+        let w_output = "\
+__USERS__
+choi     pts/3     10:03    0.00s  0.31s  0.15s top
+choi     tty2      09:02    1:03m  0.02s  0.02s /usr/bin/startplasma-wayland
+__END__
+";
+        let secs = RawSections::parse_script(w_output);
+        assert_eq!(MonitorParser::parse_users(&secs), 2);
+
+        let empty_output = "\
+__USERS__
+
+__END__
+";
+        let secs_empty = RawSections::parse_script(empty_output);
+        assert_eq!(MonitorParser::parse_users(&secs_empty), 0);
+    }
 }

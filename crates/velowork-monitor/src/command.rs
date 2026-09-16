@@ -64,7 +64,7 @@ impl Section {
             Section::Disk => "LC_ALL=C df -PT",
             Section::Uptime => "cat /proc/uptime",
             Section::Load => "cat /proc/loadavg",
-            Section::Users => "who",
+            Section::Users => "w -h 2>/dev/null || who",
         }
     }
 
