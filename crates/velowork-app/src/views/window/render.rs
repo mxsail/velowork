@@ -215,7 +215,7 @@ impl WindowView {
                 .mt(px(dynamic_gap))
                 .w_full()
                 .relative()
-                .overflow_hidden()
+                .when(is_animating, |d| d.overflow_hidden())
                 .child(if is_animating {
                     div()
                         .absolute()
@@ -1548,7 +1548,7 @@ impl Render for WindowView {
                                         .mr(px(left_dynamic_gap))
                                         .flex_shrink_0()
                                         .relative()
-                                        .overflow_hidden()
+                                        .when(is_animating, |d| d.overflow_hidden())
                                         .child(
                                             if is_animating {
                                                 div()
@@ -1686,7 +1686,7 @@ impl Render for WindowView {
                                             .flex_shrink_0()
                                             .w(px(right_dock_width))
                                             .relative()
-                                            .overflow_hidden()
+                                            .when(is_animating, |d| d.overflow_hidden())
                                             .when(show_right_toolbar, |d| d.mr(px(right_dynamic_gap)))
                                             .when(!show_right_toolbar, |d| d.ml(px(right_dynamic_gap)))
                                             .child(

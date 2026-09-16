@@ -135,23 +135,11 @@ impl Element for ResizeHandle {
     ) {
         let is_hovered = hitbox.is_hovered(window);
         if self.is_active || is_hovered {
-            // Floating gap highlight indicator in the whitespace area
-            let indicator_bounds = if self.is_horizontal {
-                let center_y = bounds.origin.y + px(self.divider_size / 2.0) - px(1.5);
-                Bounds::new(
-                    point(bounds.origin.x, center_y),
-                    size(bounds.size.width, px(3.0)),
-                )
-            } else {
-                let center_x = bounds.origin.x + px(self.divider_size / 2.0) - px(1.5);
-                Bounds::new(
-                    point(center_x, bounds.origin.y),
-                    size(px(3.0), bounds.size.height),
-                )
-            };
+            // Floating gap highlight indicator in the whitespace area (fills entire gap)
+            let radius = px((self.divider_size / 2.0).round().max(1.0));
             window.paint_quad(
-                fill(indicator_bounds, rgb(self.border_active_color))
-                    .corner_radii(px(1.5)),
+                fill(bounds, rgb(self.border_active_color))
+                    .corner_radii(radius),
             );
         }
 
