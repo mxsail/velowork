@@ -6,7 +6,7 @@ use velowork_ui::theme::{surface_bg, surface_bg_t, theme, with_alpha, ThemeColor
 use velowork_ui::icon::{AppIcon, folder_tree_icon};
 use velowork_ui::icon_button::icon_button_sized;
 use velowork_ui::tokens::{
-    ui_space_lg, ui_space_md, ui_space_sm, ui_space_xs, ui_text, ui_text_md, ui_text_sm,
+    ui_space_lg, ui_space_md, ui_space_xs, ui_text, ui_text_md, ui_text_sm,
     ICON_STD, RADIUS_STD,
 };
 use velowork_ui::dock::{Panel, PanelInfo, PanelAction};
@@ -2015,7 +2015,7 @@ impl Render for QuickCommandsPanel {
             .child(
                 h_flex()
                     .h(px(velowork_ui::tab_height(cx)))
-                    .px(ui_space_md(cx))
+                    .px(ui_space_xs(cx))
                     .border_b_1()
                     .border_color(p.border_subtle)
                     .items_center()
@@ -2042,7 +2042,7 @@ impl Render for QuickCommandsPanel {
                                 this.new_quick_folder(cx);
                             })),
                     )
-                    .child(div().w(px(1.0)).h(ICON_STD).bg(p.border_subtle).mx(ui_space_xs(cx)))
+                    .child(div().w(px(1.0)).h(ICON_STD).bg(p.border_subtle))
                     .child(
                         velowork_ui::icon_button::icon_button("btn-qc-search", AppIcon::Search, &t, cx)
                             .when(self.show_qc_search, |b| b.bg(surface_bg_t(t.bg_hover, &t)))
@@ -2057,7 +2057,7 @@ impl Render for QuickCommandsPanel {
             )
             .when(self.show_qc_search, |d| {
                 d.child(
-                    div().px(ui_space_md(cx)).py(ui_space_sm(cx)).when_some(self.filter_input.as_ref(), |this, inp| {
+                    div().px(ui_space_xs(cx)).py(ui_space_xs(cx)).when_some(self.filter_input.as_ref(), |this, inp| {
                         this.child(velowork_ui::Input::new(inp).search(true))
                     }),
                 )

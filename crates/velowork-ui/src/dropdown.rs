@@ -5,7 +5,7 @@
 use crate::design::semantic::SemanticPalette;
 use crate::input::focus_ring_shadows;
 use crate::theme::ThemeColors;
-use crate::tokens::{ui_text_md, ui_text_sm, RADIUS_LG, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM};
+use crate::tokens::{ui_text_md, ui_text_sm, RADIUS_LG, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS};
 use gpui::*;
 use crate::behavior::{HoverBehavior, SelectedBehavior, StatefulElementBehaviorExt};
 use gpui::prelude::*;
@@ -148,8 +148,7 @@ pub fn dropdown_overlay(
         .border_color(p.border_subtle)
         .rounded(RADIUS_LG)
         .shadow_xl()
-        .py(SPACE_SM)
-        .px(SPACE_SM)
+        .p(SPACE_XS)
         // Prevent scroll events from propagating to terminal underneath
         .on_scroll_wheel(|_, _, cx| {
             cx.stop_propagation();

@@ -16,7 +16,6 @@ use velowork_terminal::TerminalsRegistry;
 use velowork_ui::behavior::{HoverBehavior, StatefulElementBehaviorExt};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::dock::{Panel, PanelAction, PanelInfo};
-use velowork_ui::dock::resize::ResizeHandle;
 use velowork_ui::dropdown::{
     dropdown_anchored_above, dropdown_overlay,
 };
@@ -25,14 +24,14 @@ use velowork_ui::menu::PopupMenu;
 use crate::views::overlays::menus::ai_context_menu::open_ai_context_menu;
 use velowork_ui::confirm_dialog::{ConfirmDialog, ConfirmDialogEvent};
 use velowork_ui::design::appearance::{ControlSize, ControlVariant};
-use velowork_ui::input::{Input, InputState};
+use velowork_ui::input::{focus_ring_shadows, Input, InputState};
 use velowork_ui::overlay_registry::{ClosePolicy, OverlayInfo};
 use velowork_ui::scrollable::{Scrollbar, ScrollbarAxis, ScrollbarShow};
 use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState};
 use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
 use velowork_ui::theme::{ThemeColors, surface_bg, theme, with_alpha};
 use velowork_ui::tokens::{
-    elevation_menu_shadow, ui_space_lg, ui_space_md, ui_space_sm, ui_space_xs,
+    elevation_menu_shadow, ui_space_sm, ui_space_xs,
     ICON_MD, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_SM, RADIUS_STD, RADIUS_XS,
     SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
     markdown_font_family, mono_font_family, ui_font_family, ui_text_md, ui_text_sm,
@@ -880,7 +879,7 @@ impl AiAssistantPanel {
             &chat_input_clone,
             |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
                 if *event == velowork_ui::input::InputEvent::PressEnter {
-                    if this.has_input_content(cx) {
+                    if !this.ai_quote_editing && this.has_input_content(cx) {
                         this.on_send_button(cx);
                     }
                     return;
@@ -1975,6 +1974,10 @@ impl AiAssistantPanel {
     /// 发送按钮的统一入口：根据当前是否正在生成以及输入框是否有内容，
     /// 在「发送新消息 / 终止生成 / 加入待发送队列」三种行为间切换。
     fn on_send_button(&mut self, cx: &mut Context<Self>) {
+        // 引用文本正在编辑中时，严禁误触发发送，避免未保存的引用或未完成输入被意外提交。
+        if self.ai_quote_editing {
+            return;
+        }
         let is_streaming = self.ai_streaming_index.is_some();
         let has_input = self.has_input_content(cx);
         if is_streaming && !has_input {
@@ -2920,8 +2923,8 @@ impl AiAssistantPanel {
         h_flex()
             .w_full()
             .flex_wrap()
-            .px(px(10.0))
-            .pb(ui_space_sm(cx))
+            .px(SPACE_XS)
+            .pb(SPACE_XS)
             .gap(ui_space_sm(cx))
             .children(attachments.into_iter().enumerate().map(|(i, att)| {
                 let this = this.clone();
@@ -3015,99 +3018,110 @@ impl AiAssistantPanel {
         let delete_tip = i18n!(cx, "ai_assistant.quote_delete");
         let save_tip = i18n!(cx, "ai_assistant.quote_save");
 
-        div().w_full().px(px(10.0)).pb(SPACE_SM).child(
-            div()
-                .w_full()
-                .rounded(RADIUS_STD)
-                .border_1()
-                .border_color(rgb(t.border))
-                .border_l(px(3.0))
-                .border_color(p.surface_accent)
-                .bg(p.surface_raised)
-                .overflow_hidden()
-                .child(
-                    h_flex()
-                        .w_full()
-                        .items_start()
-                        .gap(SPACE_SM)
-                        .px(SPACE_MD)
-                        .py(SPACE_SM)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .child(if self.ai_quote_editing {
-                                    self.render_ai_quote_edit_input(cx).into_any_element()
-                                } else {
-                                    let quote_tip = quote.clone();
-                                    div()
-                                        .id("ai-quote-content")
-                                        .w_full()
-                                        .text_color(rgb(t.text_primary))
-                                        .text_size(ui_text_md(cx))
-                                        .tooltip(move |_, cx| {
-                                            cx.new(|_| Tooltip::new(quote_tip.clone())).into()
-                                        })
-                                        // 默认最多显示一行，过长自动截断（hover 可查看完整引用）。
-                                        .truncate()
-                                        .whitespace_nowrap()
-                                        .child(quote.lines().collect::<Vec<_>>().join(" "))
-                                        .into_any_element()
-                                }),
-                        )
-                        .child(
-                            h_flex()
-                                .flex_shrink_0()
-                                .items_center()
-                                .gap(px(2.0))
-                                .when(self.ai_quote_editing, |d| {
-                                    d.child(self.ai_icon_btn(
-                                        "ai-quote-save",
-                                        AppIcon::Check,
-                                        save_tip.clone(),
-                                        &t,
-                                        cx,
-                                        |this, window, cx| this.save_ai_quote(window, cx),
-                                    ))
-                                })
-                                .when(!self.ai_quote_editing, |d| {
-                                    d.child(self.ai_icon_btn(
-                                        "ai-quote-edit",
-                                        AppIcon::Edit,
-                                        edit_tip.clone(),
-                                        &t,
-                                        cx,
-                                        |this, window, cx| this.start_edit_ai_quote(window, cx),
-                                    ))
-                                })
-                                .child(self.ai_icon_btn(
-                                    "ai-quote-delete",
-                                    AppIcon::Close,
-                                    delete_tip.clone(),
-                                    &t,
-                                    cx,
-                                    |this, window, cx| this.clear_ai_quote(window, cx),
-                                )),
-                        ),
-                )
-                .when(!self.ai_quote_editing, |d| {
-                    d.child(
-                        div()
+        div()
+            .w_full()
+            .px(SPACE_XS)
+            .pb(SPACE_XS)
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                div()
+                    .w_full()
+                    .rounded(RADIUS_STD)
+                    .border_l(px(3.0))
+                    .border_color(p.surface_accent)
+                    .bg(p.surface_raised)
+                    .overflow_hidden()
+                    .child(
+                        h_flex()
                             .w_full()
+                            .items_start()
+                            .gap(SPACE_SM)
                             .px(SPACE_MD)
-                            .pb(px(4.0))
-                            .text_color(rgb(t.text_muted))
-                            .text_size(ui_text_xs(cx))
-                            .child(quote_label),
+                            .py(SPACE_SM)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.0))
+                                    .child(if self.ai_quote_editing {
+                                        self.render_ai_quote_edit_input(cx).into_any_element()
+                                    } else {
+                                        let quote_tip = quote.clone();
+                                        div()
+                                            .id("ai-quote-content")
+                                            .w_full()
+                                            .text_color(rgb(t.text_primary))
+                                            .text_size(ui_text_md(cx))
+                                            .tooltip(move |_, cx| {
+                                                cx.new(|_| Tooltip::new(quote_tip.clone())).into()
+                                            })
+                                            // 默认最多显示一行，过长自动截断（hover 可查看完整引用）。
+                                            .truncate()
+                                            .whitespace_nowrap()
+                                            .child(quote.lines().collect::<Vec<_>>().join(" "))
+                                            .into_any_element()
+                                    }),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_shrink_0()
+                                    .items_center()
+                                    .gap(px(2.0))
+                                    .when(self.ai_quote_editing, |d| {
+                                        d.child(self.ai_icon_btn(
+                                            "ai-quote-save",
+                                            AppIcon::Check,
+                                            save_tip.clone(),
+                                            &t,
+                                            cx,
+                                            |this, _window, cx| this.save_ai_quote(cx),
+                                        ))
+                                    })
+                                    .when(!self.ai_quote_editing, |d| {
+                                        d.child(self.ai_icon_btn(
+                                            "ai-quote-edit",
+                                            AppIcon::Edit,
+                                            edit_tip.clone(),
+                                            &t,
+                                            cx,
+                                            |this, window, cx| this.start_edit_ai_quote(window, cx),
+                                        ))
+                                    })
+                                    .child(self.ai_icon_btn(
+                                        "ai-quote-delete",
+                                        AppIcon::Close,
+                                        delete_tip.clone(),
+                                        &t,
+                                        cx,
+                                        |this, _window, cx| this.clear_ai_quote(cx),
+                                    )),
+                            ),
                     )
-                }),
-        )
+                    .when(!self.ai_quote_editing, |d| {
+                        d.child(
+                            div()
+                                .w_full()
+                                .px(SPACE_MD)
+                                .pb(px(4.0))
+                                .text_color(rgb(t.text_muted))
+                                .text_size(ui_text_xs(cx))
+                                .child(quote_label),
+                        )
+                    }),
+            )
     }
 
     /// 引用内容编辑态的多行输入框。
-    fn render_ai_quote_edit_input(&self, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_ai_quote_edit_input(&self, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .w_full()
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    this.cancel_edit_ai_quote(cx);
+                    cx.stop_propagation();
+                }
+            }))
             .when_some(self.ai_quote_input.as_ref(), |d, input| {
                 d.child(Input::new(input))
             })
@@ -3122,7 +3136,7 @@ impl AiAssistantPanel {
         let title = i18n!(cx, "ai_assistant.pending_queue");
         let remove_tip = i18n!(cx, "ai_assistant.pending_remove");
 
-        div().w_full().px(px(10.0)).pb(SPACE_SM).child(
+        div().w_full().px(SPACE_XS).pb(SPACE_XS).child(
             div()
                 .w_full()
                 .flex()
@@ -3190,12 +3204,30 @@ impl AiAssistantPanel {
     fn start_edit_ai_quote(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let quote = self.ai_quote.clone().unwrap_or_default();
         self.ai_quote_editing = true;
+        let is_new = self.ai_quote_input.is_none();
         let quote_input = self.ai_quote_input.get_or_insert_with(|| {
             cx.new(|cx| {
                 InputState::new(cx)
+                    .multiline()
+                    .multiline_rows(3)
+                    .wrap(true)
+                    .submit_on_enter(true)
+                    .pass_enter(false)
                     .placeholder(i18n!(cx, "ai_assistant.title"))
             })
         });
+        if is_new {
+            let quote_input_clone = quote_input.clone();
+            cx.subscribe(
+                &quote_input_clone,
+                |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
+                    if *event == velowork_ui::input::InputEvent::PressEnter {
+                        this.save_ai_quote(cx);
+                    }
+                },
+            )
+            .detach();
+        }
         quote_input.update(cx, |input, cx| {
             input.set_value(&quote, cx);
             input.focus(window, cx);
@@ -3204,7 +3236,7 @@ impl AiAssistantPanel {
     }
 
     /// 保存编辑态下的引用内容。
-    fn save_ai_quote(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn save_ai_quote(&mut self, cx: &mut Context<Self>) {
         let new_text = self
             .ai_quote_input
             .as_ref()
@@ -3219,8 +3251,18 @@ impl AiAssistantPanel {
         cx.notify();
     }
 
+    /// 取消编辑态下的引用内容，恢复原本的引用文本。
+    fn cancel_edit_ai_quote(&mut self, cx: &mut Context<Self>) {
+        self.ai_quote_editing = false;
+        if let Some(ref input) = self.ai_quote_input {
+            let orig = self.ai_quote.clone().unwrap_or_default();
+            input.update(cx, |input, cx| input.set_value(&orig, cx));
+        }
+        cx.notify();
+    }
+
     /// 删除引用块。
-    fn clear_ai_quote(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    fn clear_ai_quote(&mut self, cx: &mut Context<Self>) {
         self.ai_quote = None;
         self.ai_quote_editing = false;
         if let Some(ref input) = self.ai_quote_input {
@@ -4745,7 +4787,7 @@ impl AiAssistantPanel {
                     &input_clone,
                     |this: &mut Self, _, event: &velowork_ui::input::InputEvent, cx| {
                         if *event == velowork_ui::input::InputEvent::PressEnter {
-                            if this.has_input_content(cx) {
+                            if !this.ai_quote_editing && this.has_input_content(cx) {
                                 this.on_send_button(cx);
                             }
                             return;
@@ -4974,7 +5016,7 @@ impl AiAssistantPanel {
             .child(
                 h_flex()
                     .h(px(velowork_ui::tab_height(cx)))
-                    .px(ui_space_md(cx))
+                    .px(ui_space_xs(cx))
                     .border_b_1()
                     .border_color(rgb(t.border))
                     .items_center()
@@ -5011,7 +5053,7 @@ impl AiAssistantPanel {
                         cx,
                         |this, _, cx| this.refresh_ai(cx),
                     ))
-                    .child(div().w(px(1.0)).h(ICON_STD).bg(rgb(t.border)).mx(ui_space_xs(cx)))
+                    .child(div().w(px(1.0)).h(ICON_STD).bg(rgb(t.border)))
                     .child(self.ai_icon_btn(
                         "ai-search",
                         AppIcon::Search,
@@ -5298,26 +5340,13 @@ impl AiAssistantPanel {
                 let input_height = px(self.ai_input_area_height);
                 // ── 顶部拖拽手柄 ──
                 let drag_entity = cx.entity().downgrade();
-                let drag_entity_for_handle = drag_entity.clone();
-                let resize_handle =
-                    ResizeHandle::new(true, t.border, t.border_active, move |pos, app_cx| {
-                        if let Some(entity) = drag_entity_for_handle.upgrade() {
-                            entity.update(app_cx, |this, cx| {
-                                this.ai_input_resize_dragging = Some(AiInputResizeDrag {
-                                    start_y: f32::from(pos.y),
-                                    start_height: this.ai_input_area_height,
-                                });
-                                cx.notify();
-                            });
-                        }
-                    });
 
                 div()
                     .id("ai-input-area")
                     .relative()
                     .flex_shrink_0()
-                    .mx(ui_space_sm(cx))
-                    .mb(ui_space_sm(cx))
+                    .mx(SPACE_XS)
+                    .mb(SPACE_XS)
                     .h(input_height)
                     .rounded(RADIUS_LG)
                     .border_1()
@@ -5329,10 +5358,12 @@ impl AiAssistantPanel {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| {
-                            if let Some(ref input) = this.chat_input {
-                                input.update(cx, |input, cx| {
-                                    input.focus(window, cx);
-                                });
+                            if !this.ai_quote_editing {
+                                if let Some(ref input) = this.chat_input {
+                                    input.update(cx, |input, cx| {
+                                        input.focus(window, cx);
+                                    });
+                                }
                             }
                             this.close_history(cx);
                         }),
@@ -5353,18 +5384,38 @@ impl AiAssistantPanel {
                         .absolute()
                         .inset_0(),
                     )
-                    // ── 拖拽调整高度手柄（顶部边缘） ──
-                    .child(resize_handle)
+                    // ── 拖拽调整高度手柄（顶部边缘隐形热区，光标 ResizeUpDown，不挡圆角，无高亮线条） ──
+                    .child(
+                        div()
+                            .id("ai-input-resize-handle")
+                            .absolute()
+                            .top_0()
+                            .left(px(8.0))
+                            .right(px(8.0))
+                            .h(px(6.0))
+                            .cursor(CursorStyle::ResizeUpDown)
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, e: &MouseDownEvent, _window, cx| {
+                                    this.ai_input_resize_dragging = Some(AiInputResizeDrag {
+                                        start_y: f32::from(e.position.y),
+                                        start_height: this.ai_input_area_height,
+                                    });
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
+                    )
                     // ── 顶部工具栏：附件 | 历史 ──
                     .child(
                         h_flex()
                             .flex_shrink_0()
                             .w_full()
-                            .px(px(10.0))
-                            .pt(ui_space_sm(cx))
+                            .px(SPACE_XS)
+                            .pt(SPACE_XS)
                             .pb(px(2.0))
                             .items_center()
-                            .gap(ui_space_sm(cx))
+                            .gap(SPACE_XS)
                             .child(self.ai_icon_btn(
                                 "ai-attach-btn",
                                 AppIcon::NewFile,
@@ -5406,7 +5457,7 @@ impl AiAssistantPanel {
                                     || event.keystroke.modifiers.platform
                                     || event.keystroke.modifiers.shift;
                                 if event.keystroke.key.as_str() == "enter" && !is_newline {
-                                    if this.has_input_content(cx) {
+                                    if !this.ai_quote_editing && this.has_input_content(cx) {
                                         this.on_send_button(cx);
                                     }
                                     cx.stop_propagation();
@@ -5428,7 +5479,7 @@ impl AiAssistantPanel {
                                     .id("ai-input-wrapper")
                                     .w_full()
                                     .h_full()
-                                    .pl(ui_space_lg(cx))
+                                    .px(SPACE_XS)
                                     .py(px(4.0))
                                     .child(
                                         Input::new(&chat_input)
@@ -5442,8 +5493,8 @@ impl AiAssistantPanel {
                         h_flex()
                             .flex_shrink_0()
                             .w_full()
-                            .px(px(10.0))
-                            .pb(ui_space_md(cx))
+                            .px(SPACE_XS)
+                            .pb(SPACE_XS)
                             .items_center()
                             .justify_between()
                             .child(
@@ -5565,6 +5616,12 @@ impl AiAssistantPanel {
             )
             .when(self.ai_search_open, |d| {
                 let p = SemanticPalette::from_context(cx);
+                let is_search_focused = self
+                    .ai_search_input
+                    .as_ref()
+                    .map(|inp| inp.read(cx).focus_handle(cx).is_focused(window))
+                    .unwrap_or(false);
+                let ring = focus_ring_shadows(&t);
                 let case_sensitive = self.ai_search_case_sensitive;
                 let is_regex = self.ai_search_use_regex;
                 let search_q = self
@@ -5599,19 +5656,19 @@ impl AiAssistantPanel {
                         .id("ai-search-bar")
                         .occlude()
                         .absolute()
-                        .top(px(velowork_ui::tab_height(cx)) + ui_space_sm(cx))
-                        .right(px(24.0))
-                        .h(px(38.0))
-                        .px(ui_space_md(cx))
+                        .top(px(velowork_ui::tab_height(cx)) + ui_space_xs(cx))
+                        .left(SPACE_XS)
+                        .right(SPACE_XS)
+                        .h(px(36.0))
+                        .p(SPACE_XS)
                         .flex()
                         .items_center()
-                        .gap(ui_space_sm(cx))
+                        .gap(SPACE_XS)
                         .bg(p.surface_raised)
                         .border_1()
-                        .border_color(rgb(t.border))
+                        .border_color(p.border_subtle)
                         .rounded(RADIUS_LG)
                         .shadow_xl()
-                        .max_w(relative(0.9))
                         .when(use_custom_ui_font(cx), |d| {
                             d.font_family(ui_font_family(cx))
                         })
@@ -5632,18 +5689,35 @@ impl AiAssistantPanel {
                             div()
                                 .id("ai-search-input-group")
                                 .h(px(28.0))
-                                .w(px(260.0))
+                                .flex_1()
+                                .min_w(px(140.0))
                                 .flex()
                                 .items_center()
-                                .bg(p.surface_base)
+                                .rounded(RADIUS_STD)
+                                .bg(if is_search_focused {
+                                    p.surface_hover
+                                } else {
+                                    p.surface_card
+                                })
                                 .border_1()
-                                .border_color(rgb(t.border))
-                                .rounded(RADIUS_MD)
+                                .border_color(if is_search_focused {
+                                    p.border_active
+                                } else {
+                                    p.border_subtle
+                                })
+                                .when(is_search_focused, |s| s.shadow(ring))
+                                .when(!is_search_focused, |s| {
+                                    s.hover(|h| {
+                                        h.border_color(p.surface_accent.opacity(0.6))
+                                            .bg(p.surface_hover)
+                                    })
+                                })
                                 .child(
                                     div()
                                         .id("ai-search-input-wrapper")
                                         .key_context("AiSearchBar")
                                         .flex_1()
+                                        .min_w(px(60.0))
                                         .h_full()
                                         .flex()
                                         .items_center()
@@ -5687,6 +5761,7 @@ impl AiAssistantPanel {
                                     let case_tip = case_tip.clone();
                                     div()
                                         .id("ai-search-case-btn")
+                                        .flex_shrink_0()
                                         .cursor_pointer()
                                         .w(px(24.0))
                                         .h(px(24.0))
@@ -5694,11 +5769,22 @@ impl AiAssistantPanel {
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .rounded(RADIUS_MD)
-                                        .when(cs, |s| s.bg(rgb(t.bg_selection)))
-                                        .stateful_behavior(HoverBehavior {
-                                            hover_bg: rgb(t.bg_hover).into(),
-                                            ..Default::default()
+                                        .rounded(RADIUS_STD)
+                                        .when(cs, |s| {
+                                            s.bg(p.text_primary.opacity(0.14))
+                                                .border_1()
+                                                .border_color(p.border_subtle)
+                                                .text_color(p.text_primary)
+                                                .hover(|h| h.bg(p.text_primary.opacity(0.18)))
+                                        })
+                                        .when(!cs, |s| {
+                                            s.border_1()
+                                                .border_color(gpui::transparent_black())
+                                                .text_color(p.text_secondary)
+                                                .hover(|h| {
+                                                    h.bg(p.text_primary.opacity(0.10))
+                                                        .text_color(p.text_primary)
+                                                })
                                         })
                                         .tooltip(move |_, cx| {
                                             let tip = case_tip.clone();
@@ -5716,11 +5802,6 @@ impl AiAssistantPanel {
                                             div()
                                                 .text_size(ui_text_md(cx))
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(if cs {
-                                                    p.text_primary
-                                                } else {
-                                                    p.text_secondary
-                                                })
                                                 .child("Aa"),
                                         )
                                 })
@@ -5729,6 +5810,7 @@ impl AiAssistantPanel {
                                     let regex_tip = regex_tip.clone();
                                     div()
                                         .id("ai-search-regex-btn")
+                                        .flex_shrink_0()
                                         .cursor_pointer()
                                         .w(px(24.0))
                                         .h(px(24.0))
@@ -5737,11 +5819,22 @@ impl AiAssistantPanel {
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .rounded(RADIUS_MD)
-                                        .when(rx, |s| s.bg(rgb(t.bg_selection)))
-                                        .stateful_behavior(HoverBehavior {
-                                            hover_bg: rgb(t.bg_hover).into(),
-                                            ..Default::default()
+                                        .rounded(RADIUS_STD)
+                                        .when(rx, |s| {
+                                            s.bg(p.text_primary.opacity(0.14))
+                                                .border_1()
+                                                .border_color(p.border_subtle)
+                                                .text_color(p.text_primary)
+                                                .hover(|h| h.bg(p.text_primary.opacity(0.18)))
+                                        })
+                                        .when(!rx, |s| {
+                                            s.border_1()
+                                                .border_color(gpui::transparent_black())
+                                                .text_color(p.text_secondary)
+                                                .hover(|h| {
+                                                    h.bg(p.text_primary.opacity(0.10))
+                                                        .text_color(p.text_primary)
+                                                })
                                         })
                                         .tooltip(move |_, cx| {
                                             let tip = regex_tip.clone();
@@ -5758,20 +5851,18 @@ impl AiAssistantPanel {
                                             div()
                                                 .text_size(ui_text_md(cx))
                                                 .font_weight(FontWeight::BOLD)
-                                                .text_color(if rx {
-                                                    p.text_primary
-                                                } else {
-                                                    p.text_secondary
-                                                })
                                                 .child(".*"),
                                         )
                                 }),
                         )
                         .child(
                             div()
-                                .text_size(ui_text_md(cx))
+                                .id("ai-search-match-count")
+                                .flex_shrink_0()
+                                .text_size(ui_text_sm(cx))
                                 .text_color(p.text_secondary)
-                                .min_w(px(40.0))
+                                .min_w(px(30.0))
+                                .px(px(2.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
@@ -5781,17 +5872,15 @@ impl AiAssistantPanel {
                             let prev_tip = prev_tip.clone();
                             div()
                                 .id("ai-search-prev-btn")
+                                .flex_shrink_0()
                                 .cursor_pointer()
-                                .w(px(26.0))
-                                .h(px(26.0))
+                                .w(px(28.0))
+                                .h(px(28.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(RADIUS_MD)
-                                .stateful_behavior(HoverBehavior {
-                                    hover_bg: rgb(t.bg_hover).into(),
-                                    ..Default::default()
-                                })
+                                .rounded(RADIUS_STD)
+                                .hover(|s| s.bg(p.surface_hover))
                                 .tooltip(move |_, cx| {
                                     let tip = prev_tip.clone();
                                     cx.new(|_| Tooltip::new(tip)).into()
@@ -5804,7 +5893,7 @@ impl AiAssistantPanel {
                                 }))
                                 .child(
                                     AppIcon::ChevronUp
-                                        .size(ICON_MD)
+                                        .size(ICON_STD)
                                         .text_color(p.text_secondary),
                                 )
                         })
@@ -5812,17 +5901,15 @@ impl AiAssistantPanel {
                             let next_tip = next_tip.clone();
                             div()
                                 .id("ai-search-next-btn")
+                                .flex_shrink_0()
                                 .cursor_pointer()
-                                .w(px(26.0))
-                                .h(px(26.0))
+                                .w(px(28.0))
+                                .h(px(28.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(RADIUS_MD)
-                                .stateful_behavior(HoverBehavior {
-                                    hover_bg: rgb(t.bg_hover).into(),
-                                    ..Default::default()
-                                })
+                                .rounded(RADIUS_STD)
+                                .hover(|s| s.bg(p.surface_hover))
                                 .tooltip(move |_, cx| {
                                     let tip = next_tip.clone();
                                     cx.new(|_| Tooltip::new(tip)).into()
@@ -5835,7 +5922,7 @@ impl AiAssistantPanel {
                                 }))
                                 .child(
                                     AppIcon::ChevronDown
-                                        .size(ICON_MD)
+                                        .size(ICON_STD)
                                         .text_color(p.text_secondary),
                                 )
                         })
@@ -5845,16 +5932,13 @@ impl AiAssistantPanel {
                                 .id("ai-search-close-btn")
                                 .flex_shrink_0()
                                 .cursor_pointer()
-                                .w(px(26.0))
-                                .h(px(26.0))
+                                .w(px(28.0))
+                                .h(px(28.0))
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .rounded(RADIUS_MD)
-                                .stateful_behavior(HoverBehavior {
-                                    hover_bg: rgba(0xf14c4c44).into(),
-                                    ..Default::default()
-                                })
+                                .rounded(RADIUS_STD)
+                                .hover(|s| s.bg(p.surface_hover))
                                 .tooltip(move |_, cx| {
                                     let tip = close_tip.clone();
                                     cx.new(|_| Tooltip::new(tip)).into()
@@ -5866,7 +5950,7 @@ impl AiAssistantPanel {
                                     this.ai_search_open = false;
                                     cx.notify();
                                 }))
-                                .child(AppIcon::Close.size(ICON_MD).text_color(p.text_secondary))
+                                .child(AppIcon::Close.size(ICON_STD).text_color(p.text_secondary))
                         }),
                 )
             })

@@ -11,7 +11,7 @@ use crate::keybindings::{
 use crate::settings::{open_settings_file, settings_entity};
 use crate::theme::{surface_bg, theme};
 use crate::ui::tokens::{
-    RADIUS_CARD, ui_right_toolbar_width, ui_space_card_gap, ui_space_window_padding, ui_space_md, ui_text_md, ui_text_xl,
+    RADIUS_CARD, ui_right_toolbar_width, ui_space_card_gap, ui_space_window_padding, ui_space_md, ui_space_xs, ui_text_md, ui_text_xl,
 };
 use crate::views::layout::navigation::{get_pane_map, prune_pane_map};
 use crate::views::layout::split_pane::{DragState, compute_resize, render_project_divider};
@@ -1734,8 +1734,8 @@ impl Render for WindowView {
                                         .flex()
                                         .flex_col()
                                         .items_center()
-                                        .py(ui_space_md(cx))
-                                        .gap(ui_space_md(cx))
+                                        .py(ui_space_xs(cx))
+                                        .gap(ui_space_xs(cx))
                                         .children(visible_panels.into_iter().map(|spec| {
                                             let p_id = &spec.id;
                                             let icon = spec.icon;

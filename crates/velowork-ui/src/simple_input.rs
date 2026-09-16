@@ -126,6 +126,7 @@ pub struct SimpleInputState {
     last_mouse_position: Option<Point<Pixels>>,
     _drag_scroll_task: Option<Task<()>>,
     submit_on_enter: bool,
+    submit_on_ctrl_enter: bool,
     pass_enter: bool,
     read_only: bool,
     allow_clear: bool,
@@ -198,6 +199,7 @@ impl SimpleInputState {
             last_mouse_position: None,
             _drag_scroll_task: None,
             submit_on_enter: false,
+            submit_on_ctrl_enter: false,
             pass_enter: true,
             read_only: false,
             allow_clear: false,
@@ -294,6 +296,13 @@ impl SimpleInputState {
 
     pub fn submit_on_enter(mut self, submit: bool) -> Self {
         self.submit_on_enter = submit;
+        self
+    }
+
+    /// When true, pressing Ctrl+Enter or Cmd+Enter emits `PressEnter` and consumes
+    /// the event (returning Handled and preventing event bubbling).
+    pub fn submit_on_ctrl_enter(mut self, submit: bool) -> Self {
+        self.submit_on_ctrl_enter = submit;
         self
     }
 
@@ -1538,6 +1547,10 @@ impl SimpleInputState {
                 if self.marked_range.is_some() {
                     self.marked_range = None;
                     cx.notify();
+                    return KeyHandled::Handled;
+                }
+                if self.submit_on_ctrl_enter && (modifiers.control || modifiers.platform) {
+                    cx.emit(InputEvent::PressEnter);
                     return KeyHandled::Handled;
                 }
                 if self.multiline {

@@ -4,7 +4,7 @@ use crate::keybindings::{
     ToggleRightDock,
 };
 use crate::settings::settings_entity;
-use crate::theme::{surface_bg, theme};
+use crate::theme::theme;
 use crate::ui::tokens::ui_text;
 use crate::views::components::menu_item;
 use gpui::prelude::*;
@@ -16,7 +16,7 @@ use velowork_ui::decorations::{WindowButtonPosition, WindowDecorationConfig};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::h_flex;
 use velowork_ui::icon::AppIcon;
-use velowork_ui::tokens::{RADIUS_MD, SPACE_MD, SPACE_SM, SPACE_XS};
+use velowork_ui::tokens::{RADIUS_LG, RADIUS_MD, SPACE_MD, SPACE_SM, SPACE_XS};
 use velowork_workspace::settings::TitlebarStyle;
 
 /// Helper to construct `(TitlebarOptions, WindowDecorations)` based on user's `TitlebarStyle` preference.
@@ -512,13 +512,14 @@ impl TitleBar {
                     .absolute()
                     .top(pos.y)
                     .left(pos.x)
-                    .bg(surface_bg(t.bg_panel, cx))
+                    .occlude()
+                    .bg(p.surface_overlay)
                     .border_1()
                     .border_color(p.border_subtle)
-                    .rounded(RADIUS_MD)
+                    .rounded(RADIUS_LG)
                     .shadow_xl()
                     .min_w(px(180.0))
-                    .py(SPACE_XS)
+                    .p(SPACE_XS)
                     .id("title-bar-context-menu-panel")
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
@@ -549,7 +550,7 @@ impl TitleBar {
                             window.dispatch_action(Box::new(ToggleRightDock), cx);
                         })),
                     )
-                    .child(div().h(px(1.0)).mx(SPACE_MD).my(SPACE_XS).bg(p.border_subtle))
+                    .child(div().h(px(1.0)).my(SPACE_XS).bg(p.border_subtle))
                     .child(
                         menu_item(
                             "ctx-toggle-titlebar-style",
@@ -636,7 +637,7 @@ impl Render for TitleBar {
         } else if cfg!(target_os = "macos") && !needs_controls {
             px(80.0 * scale)
         } else {
-            px(8.0 * scale)
+            px(12.0 * scale)
         };
 
         let right_padding = if is_right_controls {

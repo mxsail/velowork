@@ -637,7 +637,42 @@ impl StatusBar {
     }
 }
 
-/// Resolve the focused terminal's live russh session handle, if it is an
+/// Lightweight 20px floating capsule icon button tailored for the 24px status bar.
+///
+/// Ensures strict 20px height (2px vertical breathing margin) and 24px width
+/// so the leftmost icon center remains locked on the X = 20px alignment axis.
+fn status_bar_icon_btn(
+    id: impl Into<ElementId>,
+    icon: impl Into<AppIcon>,
+    custom_color: Option<Hsla>,
+    t: &ThemeColors,
+    cx: &App,
+) -> Stateful<Div> {
+    let p = SemanticPalette::from_context(cx);
+    let el_id = id.into();
+    let group_id = SharedString::from(format!("sb-btn-{:?}", el_id));
+    let default_color = custom_color.unwrap_or(p.text_secondary);
+    div()
+        .id(el_id)
+        .group(group_id.clone())
+        .flex_shrink_0()
+        .cursor_pointer()
+        .w(px(24.0))
+        .h(px(20.0))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(RADIUS_STD)
+        .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
+        .child(
+            icon
+                .into()
+                .size(ICON_SM)
+                .text_color(default_color)
+                .group_hover(group_id, move |s| s.text_color(custom_color.unwrap_or(p.text_primary))),
+        )
+}
+
 impl Render for StatusBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
@@ -670,7 +705,7 @@ impl Render for StatusBar {
             false
         };
         let sftp_btn = if show_sftp {
-            let trigger = icon_button("sftp-toggle-btn", AppIcon::Folder, &t, cx).on_click(
+            let trigger = status_bar_icon_btn("sftp-toggle-btn", AppIcon::Folder, None, &t, cx).on_click(
                 |_, window, cx| {
                     window.dispatch_action(Box::new(ToggleSftpPanel), cx);
                 },
@@ -683,7 +718,7 @@ impl Render for StatusBar {
             None
         };
 
-        let commands_trigger = icon_button("commands-toggle-btn", AppIcon::CommandAction, &t, cx)
+        let commands_trigger = status_bar_icon_btn("commands-toggle-btn", AppIcon::CommandAction, None, &t, cx)
             .on_click(|_, window, cx| {
                 window.dispatch_action(Box::new(ToggleCommandsPanel), cx);
             });
@@ -693,10 +728,10 @@ impl Render for StatusBar {
         });
 
         let left_area = h_flex()
-            .gap(SPACE_2XS)
+            .gap(SPACE_XS)
             .items_center()
             .child(
-                icon_button("left-sidebar-toggle-btn", AppIcon::SidebarLeft, &t, cx)
+                status_bar_icon_btn("left-sidebar-toggle-btn", AppIcon::SidebarLeft, None, &t, cx)
                     .on_click(|_, window, cx| {
                         window.dispatch_action(Box::new(ToggleLeftDock), cx);
                     })
@@ -714,9 +749,11 @@ impl Render for StatusBar {
             .id("charset-btn")
             .group("charset-btn")
             .cursor_pointer()
+            .h(px(20.0))
             .px(SPACE_SM)
-            .py(SPACE_2XS)
             .rounded(RADIUS_STD)
+            .flex()
+            .items_center()
             .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
             .child(
                 h_flex()
@@ -757,9 +794,11 @@ impl Render for StatusBar {
             let trigger = div()
                 .id("transfers-btn")
                 .cursor_pointer()
+                .h(px(20.0))
                 .px(SPACE_SM)
-                .py(SPACE_2XS)
                 .rounded(RADIUS_STD)
+                .flex()
+                .items_center()
                 .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                 .on_click(cx.listener(|this, _ev, _w, cx| {
                     // Anchor point: top-right of the button, popup opens above
@@ -874,9 +913,11 @@ impl Render for StatusBar {
                 .id("sync-status-btn")
                 .group("sync-status-btn")
                 .cursor_pointer()
+                .h(px(20.0))
                 .px(SPACE_SM)
-                .py(SPACE_2XS)
                 .rounded(RADIUS_STD)
+                .flex()
+                .items_center()
                 .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                 .child(indicator)
                 .on_click(cx.listener(|_this, _ev, _w, cx| {
@@ -904,8 +945,7 @@ impl Render for StatusBar {
                     UpdateStatus::Ready { .. } => {
                         let tip = i18n!(cx, "update.available");
                         Some(
-                            icon_button("update-ready-btn", AppIcon::Download, &t, cx)
-                                .text_color(p.status_success)
+                            status_bar_icon_btn("update-ready-btn", AppIcon::Download, Some(p.status_success), &t, cx)
                                 .on_click(|_, window, cx| {
                                     window.dispatch_action(Box::new(crate::keybindings::ShowUpdateDialog), cx);
                                 })
@@ -919,7 +959,11 @@ impl Render for StatusBar {
                         Some(
                             div()
                                 .id("update-installing-badge")
-                                .px(SPACE_XS)
+                                .h(px(20.0))
+                                .px(SPACE_SM)
+                                .flex()
+                                .items_center()
+                                .rounded(RADIUS_STD)
                                 .text_size(ui_text_sm(cx))
                                 .text_color(p.status_warning)
                                 .child(text),
@@ -928,8 +972,7 @@ impl Render for StatusBar {
                     UpdateStatus::ReadyToRestart { .. } => {
                         let tip = i18n!(cx, "update.restart_to_apply");
                         Some(
-                            icon_button("update-restart-btn", AppIcon::Refresh, &t, cx)
-                                .text_color(p.status_success)
+                            status_bar_icon_btn("update-restart-btn", AppIcon::Refresh, Some(p.status_success), &t, cx)
                                 .on_click(|_, _window, cx| {
                                     velowork_updater::restart_app(cx);
                                 })
@@ -944,7 +987,7 @@ impl Render for StatusBar {
 
         let right_toolbar_open = settings_entity(cx).read(cx).settings.right_toolbar_open;
         let toggle_right_sidebar_btn =
-            icon_button("right-sidebar-toggle-btn", AppIcon::SidebarRight, &t, cx)
+            status_bar_icon_btn("right-sidebar-toggle-btn", AppIcon::SidebarRight, None, &t, cx)
                 .when(right_toolbar_open, |btn| {
                     btn.bg(surface_bg(t.bg_selection, cx))
                 })
@@ -960,7 +1003,7 @@ impl Render for StatusBar {
                     cx.new(|_| Tooltip::new(tip).direction(TooltipDirection::Top)).into()
                 });
 
-        let divider = || div().w(px(1.0)).h(px(10.0)).bg(palette.border_subtle).mx(SPACE_XS);
+        let divider = || div().w(px(1.0)).h(px(10.0)).bg(palette.border_subtle);
 
         // Active session IP. We show the literal address the user configured
         // (e.g. "10.254.100.224") rather than a resolved peer name.
@@ -1004,9 +1047,11 @@ impl Render for StatusBar {
             .id("sb-ip")
             .group("sb-ip")
             .cursor_pointer()
+            .h(px(20.0))
             .px(SPACE_SM)
-            .py(SPACE_2XS)
             .rounded(RADIUS_STD)
+            .flex()
+            .items_center()
             .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
             .child(
                 h_flex()
@@ -1120,9 +1165,11 @@ impl Render for StatusBar {
         let monitor_trigger = div()
             .id("sb-monitor-trigger")
             .cursor_pointer()
+            .h(px(20.0))
             .px(SPACE_SM)
-            .py(SPACE_2XS)
             .rounded(RADIUS_STD)
+            .flex()
+            .items_center()
             .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
             .child(
                 canvas(
@@ -1207,7 +1254,7 @@ impl Render for StatusBar {
         });
 
         let right_area = h_flex()
-            .gap(SPACE_MD)
+            .gap(SPACE_XS)
             .items_center()
             .child(ip_el)
             // .child(divider())
@@ -1342,7 +1389,7 @@ impl Render for StatusBar {
         div()
             .id("status-bar")
             .h(ui_height_status_bar(cx))
-            .px(SPACE_LG)
+            .px(SPACE_MD)
             .flex()
             .items_center()
             .justify_between()

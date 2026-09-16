@@ -189,7 +189,7 @@ impl Render for ToastOverlay {
                             cx.notify();
                         }))
                         .max_h(max_panel_h)
-                        .p(SPACE_SM)
+                        .p(SPACE_XS)
                         .bg(p.surface_raised)
                         .border_1()
                         .border_color(p.border_subtle)

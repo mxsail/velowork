@@ -7,7 +7,7 @@ use velowork_ui::simple_input::{InputFocusedEvent, SimpleInput, SimpleInputState
 use velowork_ui::theme::{ThemeColors, surface_bg, surface_bg_t, theme, with_alpha};
 use velowork_ui::tokens::{
     ui_space_lg, ui_space_md, ui_space_sm, ui_space_tree_indent, ui_space_xs, ICON_SM, ICON_STD,
-    RADIUS_MD, RADIUS_SM, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL,
+    RADIUS_SM, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL,
     SPACE_XS, ui_icon_std_ts, ui_text, ui_text_md, ui_text_ms, ui_text_scale, ui_text_sm,
     ui_text_xs,
 };
@@ -8525,18 +8525,19 @@ impl Render for SessionPanel {
 
         let settings_tooltip = i18n!(cx, "settings.title");
 
-        let settings_btn_size = px(28.0) * ui_text_scale(cx);
+        let settings_btn_size = px(24.0) * ui_text_scale(cx);
 
         let settings_trigger = div()
             .id("settings-btn")
             .group("settings-btn")
             .relative()
+            .flex_shrink_0()
             .w(settings_btn_size)
             .h(settings_btn_size)
             .flex()
             .items_center()
             .justify_center()
-            .rounded(RADIUS_MD)
+            .rounded(RADIUS_STD)
             .cursor_pointer()
             .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
             .child(
@@ -8554,21 +8555,23 @@ impl Render for SessionPanel {
         });
 
         let footer_toolbar = h_flex()
-            .h(px(48.0) * ui_text_scale(cx))
+            .h(px(velowork_ui::tab_height(cx)))
             .px(ui_space_xs(cx))
+            .gap(ui_space_xs(cx))
+            .items_center()
             .border_t_1()
             .border_color(p.border_subtle)
-            .justify_between()
             .child(
                 h_flex()
                     .id("project-selector-trigger")
                     .relative()
                     .flex_1()
                     .min_w_0()
+                    .h(settings_btn_size)
+                    .items_center()
                     .gap(ui_space_xs(cx))
                     .px(ui_space_xs(cx))
-                    .py(ui_space_xs(cx))
-                    .rounded(RADIUS_MD)
+                    .rounded(RADIUS_STD)
                     .cursor_pointer()
                     .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                     .on_mouse_down(MouseButton::Left, open_project_menu)
@@ -8594,7 +8597,7 @@ impl Render for SessionPanel {
                     )
                     .child(project_selector_canvas),
             )
-            .child(h_flex().gap(ui_space_xs(cx)).child(settings_btn));
+            .child(settings_btn);
 
         // Render tree using velowork_ui::Tree component
         let tree_elements = self.render_tree_node(&filtered_tree, &t, window, cx);
@@ -8836,7 +8839,7 @@ impl Render for SessionPanel {
                             .overflow_y_scroll()
                             .flex()
                             .flex_col()
-                            .py(ui_space_sm(cx))
+                            .py(ui_space_xs(cx))
                             .px(ui_space_xs(cx))
                             // Clicking the blank area of the tree clears the selection.
                             // Node rows call cx.stop_propagation() so their clicks don't reach here.

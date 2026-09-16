@@ -2028,7 +2028,7 @@ impl Render for DockPanel {
         let right_header_padding = if is_detached_window && is_custom_titlebar && is_right_controls && needs_controls {
             custom_margin_px
         } else {
-            f32::from(crate::tokens::ui_space_md(cx))
+            f32::from(crate::tokens::ui_space_xs(cx))
         };
 
         let is_vert_dock = matches!(self.resize_edge, Some(DockResizeEdge::Left) | Some(DockResizeEdge::Right));
@@ -2041,7 +2041,7 @@ impl Render for DockPanel {
         };
         let actions_total_w = {
             let action_items_count = action_elements.len();
-            let action_gaps_w = action_items_count.saturating_sub(1) as f32 * f32::from(crate::tokens::ui_space_sm(cx));
+            let action_gaps_w = action_items_count.saturating_sub(1) as f32 * f32::from(crate::tokens::ui_space_xs(cx));
             actions_w + action_gaps_w
         };
         let effective_toolbar_w = if has_toolbar {
@@ -2541,7 +2541,7 @@ impl Render for DockPanel {
                 {
                     px(custom_margin_px)
                 } else {
-                    crate::tokens::ui_space_md(cx)
+                    crate::tokens::ui_space_xs(cx)
                 };
 
                 let is_title_mode = match self.header_mode {
@@ -2601,7 +2601,7 @@ impl Render for DockPanel {
                     h_flex()
                         .flex_shrink_0()
                         .h_full()
-                        .pl(SPACE_SM)
+                        .pl(SPACE_XS)
                         .gap(SPACE_XS)
                         .items_center()
                         .children(tab_elements)
@@ -2665,7 +2665,7 @@ impl Render for DockPanel {
                         h.child(
                             h_flex()
                                 .flex_shrink_0()
-                                .pr(SPACE_SM)
+                                .pr(SPACE_XS)
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                     cx.stop_propagation();
                                 })
@@ -2683,8 +2683,8 @@ impl Render for DockPanel {
                                     h_flex()
                                         .flex_shrink_0()
                                         .items_center()
-                                        .gap(crate::tokens::ui_space_sm(cx))
-                                        .px(crate::tokens::ui_space_sm(cx))
+                                        .gap(crate::tokens::ui_space_xs(cx))
+                                        .px(crate::tokens::ui_space_xs(cx))
                                         .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                             cx.stop_propagation();
                                         })
@@ -2694,7 +2694,7 @@ impl Render for DockPanel {
                             .child(
                                 h_flex()
                                     .flex_shrink_0()
-                                    .gap(crate::tokens::ui_space_sm(cx))
+                                    .gap(crate::tokens::ui_space_xs(cx))
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                         cx.stop_propagation();
                                     })

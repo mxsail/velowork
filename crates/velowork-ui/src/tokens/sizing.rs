@@ -102,7 +102,7 @@ pub fn ui_height_status_bar(cx: &App) -> Pixels {
 }
 
 pub fn ui_right_toolbar_width(cx: &App) -> Pixels {
-    px(30.0 * super::scale::ui_zoom_factor(cx))
+    px(32.0 * super::scale::ui_zoom_factor(cx))
 }
 
 // =============================================================================

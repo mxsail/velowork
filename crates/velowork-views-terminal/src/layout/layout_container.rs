@@ -123,10 +123,10 @@ pub struct LayoutContainer<D: ActionDispatch> {
 /// This is the canonical terminal backdrop. It is painted exactly ONCE by the
 /// owning central region (`ProjectColumn`) as the bottom-most layer, beneath
 /// Authoritative tab bar height calculation matching `render_tab_bar`:
-/// `(tab_height - 6.0).max(24.0) + SPACE_SM * 2.0`
+/// `(tab_height - 8.0).max(24.0) + SPACE_XS * 2.0`
 pub fn compute_tab_bar_height(cx: &App) -> Pixels {
-    let item_height = px((velowork_ui::tab::tab_height(cx) - 6.0).max(24.0));
-    item_height + velowork_ui::tokens::SPACE_SM * 2.0
+    let item_height = px((velowork_ui::tab::tab_height(cx) - 8.0).max(24.0));
+    item_height + velowork_ui::tokens::SPACE_XS * 2.0
 }
 
 /// Shared backdrop rendering for terminal surfaces. It is called from

@@ -1748,7 +1748,7 @@ impl Render for ServiceMonitorPanel {
             .child(
                 h_flex()
                     .h(px(velowork_ui::tab_height(cx)))
-                    .px(ui_space_md(cx))
+                    .px(ui_space_xs(cx))
                     .border_b_1()
                     .border_color(p.border_subtle)
                     .items_center()
@@ -1781,7 +1781,7 @@ impl Render for ServiceMonitorPanel {
                                 this.inline_create_folder(parent, cx);
                             })),
                     )
-                    .child(div().w(px(1.0)).h(ICON_STD).bg(p.border_subtle).mx(ui_space_xs(cx)))
+                    .child(div().w(px(1.0)).h(ICON_STD).bg(p.border_subtle))
                     .child(
                         icon_button("btn-service-search", AppIcon::Search, &t, cx)
                             .when(self.show_service_search, |b| b.bg(surface_bg_t(t.bg_hover, &t)))
@@ -1796,7 +1796,7 @@ impl Render for ServiceMonitorPanel {
             )
             .when(self.show_service_search, |d| {
                 d.child(
-                    div().px(ui_space_md(cx)).py(ui_space_sm(cx)).when_some(self.filter_input.as_ref(), |this, inp| {
+                    div().px(ui_space_xs(cx)).py(ui_space_xs(cx)).when_some(self.filter_input.as_ref(), |this, inp| {
                         this.child(velowork_ui::Input::new(inp).search(true))
                     }),
                 )

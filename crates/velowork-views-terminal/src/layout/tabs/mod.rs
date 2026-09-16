@@ -2005,7 +2005,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
 
         let tab_list_btn_bounds = self.tab_list_btn_bounds.clone();
 
-        let item_height = px((tab_height(cx) - 6.0).max(24.0));
+        let item_height = px((tab_height(cx) - 8.0).max(24.0));
         let bar_height = super::layout_container::compute_tab_bar_height(cx);
         let image_set = terminal_view_settings(cx)
             .terminal_background_image
@@ -2047,13 +2047,13 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         div()
             .group("tab-bar-row")
             .h(bar_height)
-            .pl(SPACE_SM)
-            .pr(SPACE_SM)
-            .pt(SPACE_SM)
-            .pb(SPACE_SM)
+            .pl(SPACE_XS)
+            .pr(SPACE_XS)
+            .pt(SPACE_XS)
+            .pb(SPACE_XS)
             .flex()
             .items_center()
-            .gap(SPACE_SM)
+            .gap(SPACE_XS)
             .relative()
             .when(has_top_corners, |d| d.rounded_t(RADIUS_CARD))
             .bg(tab_bar_bg)
@@ -2116,7 +2116,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             .size_full()
                             .flex()
                             .items_center()
-                            .gap(SPACE_SM)
+                            .gap(SPACE_XS)
                             .overflow_x_scroll()
                             .track_scroll(&self.tab_scroll_handle)
                             .children(tab_elements)
@@ -2131,7 +2131,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 h_flex()
                     .flex_shrink_0()
                     .items_center()
-                    .gap(SPACE_SM)
+                    .gap(SPACE_XS)
                     .child(
                         header_button_base(
                             HeaderAction::AddTab,

@@ -6,15 +6,14 @@ use crate::actions::CloseSearch;
 use velowork_terminal::terminal::Terminal;
 use velowork_ui::theme::theme;
 use velowork_ui::design::semantic::SemanticPalette;
-use velowork_ui::tokens::{ui_font_family, use_custom_ui_font, ui_text_md, ICON_MD, SPACE_SM, SPACE_MD, RADIUS_MD, RADIUS_LG};
-use velowork_ui::input::{Input, InputEvent, InputState};
+use velowork_ui::tokens::{ui_font_family, use_custom_ui_font, ui_text_md, ICON_STD, SPACE_XS, RADIUS_STD, RADIUS_LG};
+use velowork_ui::input::{focus_ring_shadows, Input, InputEvent, InputState};
 use velowork_ui::tooltip::Tooltip;
 use velowork_workspace::focus::FocusManager;
 use velowork_workspace::state::Workspace;
 use velowork_i18n::i18n;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
-use velowork_ui::icon_button::icon_button_sized_px;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -196,7 +195,7 @@ impl SearchBar {
 }
 
 impl Render for SearchBar {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         let match_count = self.matches.len();
@@ -211,42 +210,81 @@ impl Render for SearchBar {
         let next_tip = i18n!(cx, "terminal.search_next");
         let close_tip = i18n!(cx, "terminal.search_close");
 
+        let is_focused = self
+            .input
+            .as_ref()
+            .map(|inp| inp.read(cx).focus_handle(cx).is_focused(window))
+            .unwrap_or(false);
+        let ring = focus_ring_shadows(&t);
+
         div()
             .id("search-bar")
+            .occlude()
             .absolute()
-            .top(SPACE_MD)
-            .right(px(24.0))
-            .h(px(38.0))
-            .px(SPACE_MD)
+            .top(SPACE_XS)
+            .right(SPACE_XS)
+            .h(px(36.0))
+            .p(SPACE_XS)
             .flex()
             .items_center()
-            .gap(SPACE_SM)
+            .gap(SPACE_XS)
             .bg(p.surface_raised)
             .border_1()
-            .border_color(rgb(t.border))
+            .border_color(p.border_subtle)
             .rounded(RADIUS_LG)
             .shadow_xl()
             .max_w(relative(0.9))
             .when(use_custom_ui_font(cx), |d| d.font_family(ui_font_family(cx)))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_down(MouseButton::Right, |_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_mouse_move(|_, _, cx| {
+                cx.stop_propagation();
+            })
+            .on_scroll_wheel(|_, _, cx| {
+                cx.stop_propagation();
+            })
             // 外层边框组合：输入框 + 大小写/正则图标，图标内嵌于输入框右侧
             .child(
                 div()
                     .id("search-input-group")
                     .h(px(28.0))
-                    .w(px(260.0))
+                    .w(px(280.0))
+                    .flex_shrink_0()
                     .flex()
                     .items_center()
-                    .bg(p.surface_base)
+                    .rounded(RADIUS_STD)
+                    .bg(if is_focused {
+                        p.surface_hover
+                    } else {
+                        p.surface_card
+                    })
                     .border_1()
-                    .border_color(rgb(t.border))
-                    .rounded(RADIUS_MD)
+                    .border_color(if is_focused {
+                        p.border_active
+                    } else {
+                        p.border_subtle
+                    })
+                    .when(is_focused, |s| s.shadow(ring))
+                    .when(!is_focused, |s| {
+                        s.hover(|h| {
+                            h.border_color(p.surface_accent.opacity(0.6))
+                                .bg(p.surface_hover)
+                        })
+                    })
                     .child(
                         if let Some(ref input) = self.input {
                             div()
                                 .id("search-input-wrapper")
                                 .key_context("SearchBar")
                                 .flex_1()
+                                .min_w(px(60.0))
                                 .h_full()
+                                .flex()
+                                .items_center()
                                 .child(Input::new(input).borderless(true))
                                 .on_mouse_down(MouseButton::Left, |_, _, cx| { cx.stop_propagation(); })
                                 .on_action(cx.listener(|this, _: &CloseSearch, _window, cx| { this.close(cx); }))
@@ -262,6 +300,7 @@ impl Render for SearchBar {
                     .child(
                         div()
                             .id("search-case-sensitive-btn")
+                            .flex_shrink_0()
                             .cursor_pointer()
                             .w(px(24.0))
                             .h(px(24.0))
@@ -269,9 +308,23 @@ impl Render for SearchBar {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded(RADIUS_MD)
-                            .when(case_sensitive, |s| s.bg(rgb(t.bg_selection)))
-                            .hover(|s| s.bg(rgb(t.bg_hover)))
+                            .rounded(RADIUS_STD)
+                            .when(case_sensitive, |s| {
+                                s.bg(p.text_primary.opacity(0.14))
+                                    .border_1()
+                                    .border_color(p.border_subtle)
+                                    .text_color(p.text_primary)
+                                    .hover(|h| h.bg(p.text_primary.opacity(0.18)))
+                            })
+                            .when(!case_sensitive, |s| {
+                                s.border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .text_color(p.text_secondary)
+                                    .hover(|h| {
+                                        h.bg(p.text_primary.opacity(0.10))
+                                            .text_color(p.text_primary)
+                                    })
+                            })
                             .tooltip(move |_, cx| {
                                 let tip = case_tip.clone();
                                 cx.new(|_| Tooltip::new(tip)).into()
@@ -282,13 +335,13 @@ impl Render for SearchBar {
                                 div()
                                     .text_size(ui_text_md(cx))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(if case_sensitive { p.text_primary } else { p.text_secondary })
                                     .child("Aa"),
                             ),
                     )
                     .child(
                         div()
                             .id("search-regex-btn")
+                            .flex_shrink_0()
                             .cursor_pointer()
                             .w(px(24.0))
                             .h(px(24.0))
@@ -297,9 +350,23 @@ impl Render for SearchBar {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded(RADIUS_MD)
-                            .when(is_regex, |s| s.bg(rgb(t.bg_selection)))
-                            .hover(|s| s.bg(rgb(t.bg_hover)))
+                            .rounded(RADIUS_STD)
+                            .when(is_regex, |s| {
+                                s.bg(p.text_primary.opacity(0.14))
+                                    .border_1()
+                                    .border_color(p.border_subtle)
+                                    .text_color(p.text_primary)
+                                    .hover(|h| h.bg(p.text_primary.opacity(0.18)))
+                            })
+                            .when(!is_regex, |s| {
+                                s.border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .text_color(p.text_secondary)
+                                    .hover(|h| {
+                                        h.bg(p.text_primary.opacity(0.10))
+                                            .text_color(p.text_primary)
+                                    })
+                            })
                             .tooltip(move |_, cx| {
                                 let tip = regex_tip.clone();
                                 cx.new(|_| Tooltip::new(tip)).into()
@@ -310,51 +377,83 @@ impl Render for SearchBar {
                                 div()
                                     .text_size(ui_text_md(cx))
                                     .font_weight(FontWeight::BOLD)
-                                    .text_color(if is_regex { p.text_primary } else { p.text_secondary })
                                     .child(".*"),
                             ),
                     )
             )
             .child(
                 div()
+                    .id("search-match-count")
+                    .flex_shrink_0()
                     .text_size(ui_text_md(cx))
                     .text_color(p.text_secondary)
-                    .min_w(px(40.0))
+                    .min_w(px(36.0))
+                    .px(SPACE_XS)
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(match_text),
             )
             .child(
-                icon_button_sized_px("search-prev-btn", AppIcon::ChevronUp, px(26.0), ICON_MD, &t)
+                div()
+                    .id("search-prev-btn")
+                    .flex_shrink_0()
+                    .cursor_pointer()
+                    .w(px(28.0))
+                    .h(px(28.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(RADIUS_STD)
+                    .hover(|s| s.bg(p.surface_hover))
                     .tooltip(move |_, cx| {
                         let tip = prev_tip.clone();
                         cx.new(|_| Tooltip::new(tip)).into()
                     })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| { cx.stop_propagation(); })
-                    .on_click(cx.listener(|this, _, _window, cx| { this.prev_match(cx); })),
+                    .on_click(cx.listener(|this, _, _window, cx| { this.prev_match(cx); }))
+                    .child(
+                        AppIcon::ChevronUp
+                            .size(ICON_STD)
+                            .text_color(p.text_secondary),
+                    ),
             )
             .child(
-                icon_button_sized_px("search-next-btn", AppIcon::ChevronDown, px(26.0), ICON_MD, &t)
+                div()
+                    .id("search-next-btn")
+                    .flex_shrink_0()
+                    .cursor_pointer()
+                    .w(px(28.0))
+                    .h(px(28.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(RADIUS_STD)
+                    .hover(|s| s.bg(p.surface_hover))
                     .tooltip(move |_, cx| {
                         let tip = next_tip.clone();
                         cx.new(|_| Tooltip::new(tip)).into()
                     })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| { cx.stop_propagation(); })
-                    .on_click(cx.listener(|this, _, _window, cx| { this.next_match(cx); })),
+                    .on_click(cx.listener(|this, _, _window, cx| { this.next_match(cx); }))
+                    .child(
+                        AppIcon::ChevronDown
+                            .size(ICON_STD)
+                            .text_color(p.text_secondary),
+                    ),
             )
             .child(
                 div()
                     .id("search-close-btn")
                     .flex_shrink_0()
                     .cursor_pointer()
-                    .w(px(26.0))
-                    .h(px(26.0))
+                    .w(px(28.0))
+                    .h(px(28.0))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(RADIUS_MD)
-                    .hover(|s| s.bg(rgba(0xf14c4c44)))
+                    .rounded(RADIUS_STD)
+                    .hover(|s| s.bg(p.surface_hover))
                     .tooltip(move |_, cx| {
                         let tip = close_tip.clone();
                         cx.new(|_| Tooltip::new(tip)).into()
@@ -363,7 +462,7 @@ impl Render for SearchBar {
                     .on_click(cx.listener(|this, _, _window, cx| { this.close(cx); }))
                     .child(
                         AppIcon::Close
-                            .size(ICON_MD)
+                            .size(ICON_STD)
                             .text_color(p.text_secondary),
                     ),
             )

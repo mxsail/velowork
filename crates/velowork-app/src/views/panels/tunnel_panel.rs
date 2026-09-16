@@ -23,7 +23,7 @@ use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::scrollable::Scrollbar;
 use velowork_ui::theme::{ThemeColors, surface_bg, surface_bg_t, theme, with_alpha};
 use velowork_ui::tokens::{
-    ui_space_md, ui_space_sm, ui_space_xs, ui_text, ui_text_md, ui_text_sm, ui_text_xs, ICON_STD,
+    ui_space_md, ui_space_xs, ui_text, ui_text_md, ui_text_sm, ui_text_xs, ICON_STD,
     RADIUS_STD,
 };
 use velowork_ui::tooltip::Tooltip;
@@ -1995,7 +1995,7 @@ impl Render for TunnelsPanel {
             .child(
                 h_flex()
                     .h(px(velowork_ui::tab_height(cx)))
-                    .px(ui_space_md(cx))
+                    .px(ui_space_xs(cx))
                     .border_b_1()
                     .border_color(p.border_subtle)
                     .items_center()
@@ -2021,7 +2021,7 @@ impl Render for TunnelsPanel {
                                 this.inline_create_folder(None, cx);
                             })),
                     )
-                    .child(div().w(px(1.0)).h(ICON_STD).bg(p.border_subtle).mx(ui_space_xs(cx)))
+                    .child(div().w(px(1.0)).h(ICON_STD).bg(p.border_subtle))
                     .child(
                         velowork_ui::icon_button::icon_button("btn-tunnel-search", AppIcon::Search, &t, cx)
                             .when(self.show_tunnel_search, |b| b.bg(surface_bg_t(t.bg_hover, &t)))
@@ -2036,7 +2036,7 @@ impl Render for TunnelsPanel {
             )
             .when(self.show_tunnel_search, |d| {
                 d.child(
-                    div().px(ui_space_md(cx)).py(ui_space_sm(cx)).when_some(self.filter_input.as_ref(), |this, inp| {
+                    div().px(ui_space_xs(cx)).py(ui_space_xs(cx)).when_some(self.filter_input.as_ref(), |this, inp| {
                         this.child(velowork_ui::Input::new(inp).search(true))
                     }),
                 )

@@ -11,7 +11,7 @@ use velowork_i18n::i18n;
 use velowork_ui::empty_state::empty_state;
 use velowork_ui::h_flex;
 use velowork_ui::input::{InputChangedEvent, InputState};
-use velowork_ui::tokens::{RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM};
+use velowork_ui::tokens::{RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS};
 
 const RECENT_COMMANDS_LIMIT: usize = 20;
 
@@ -408,8 +408,7 @@ impl Render for CommandPalette {
                 div()
                     .id("command-list")
                     .flex_1()
-                    .px(SPACE_SM)
-                    .py(px(6.0))
+                    .p(SPACE_XS)
                     .rounded(RADIUS_STD)
                     .overflow_y_scroll()
                     .track_scroll(&self.state.scroll_handle)

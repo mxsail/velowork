@@ -55,12 +55,12 @@ pub fn tab_style(div: Stateful<Div>, _t: &ThemeColors, is_active: bool, cx: &App
     div
         .relative()
         .cursor_pointer()
-        .h(px(tab_height(cx) - 6.0))
+        .h(px(tab_height(cx) - 8.0))
         .px(tab_h_padding(cx))
         .flex()
         .items_center()
         .flex_shrink_0()
-        .rounded(crate::tokens::RADIUS_MD)
+        .rounded(crate::tokens::RADIUS_STD)
         .text_size(ui_text_md(cx))
         .when(is_active, |d| {
             d.text_color(palette.text_primary)
