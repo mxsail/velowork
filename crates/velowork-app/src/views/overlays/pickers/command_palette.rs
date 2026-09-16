@@ -329,7 +329,8 @@ impl Render for CommandPalette {
             let initial_query = self.state.search_query.clone();
             let input = cx.new(|cx| {
                 let mut st = InputState::new(cx)
-                    .placeholder(i18n!(cx, "search_dialogs.command_palette.search"));
+                    .placeholder(i18n!(cx, "search_dialogs.command_palette.search"))
+                    .pass_enter(true);
                 if !initial_query.is_empty() {
                     st = st.default_value(&initial_query);
                 }

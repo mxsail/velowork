@@ -558,6 +558,7 @@ impl Render for KeybindingsHelp {
             let input = cx.new(|cx| {
                 InputState::new(cx)
                     .placeholder(i18n!(cx, "keybindings.search_placeholder"))
+                    .pass_enter(true)
             });
             let input_clone = input.clone();
             cx.subscribe(&input_clone, |this: &mut Self, _, _: &InputChangedEvent, cx| {

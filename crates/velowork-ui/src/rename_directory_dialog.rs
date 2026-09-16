@@ -156,6 +156,7 @@ impl Render for RenameDirectoryDialog {
                 InputState::new(cx)
                     .placeholder(i18n!(cx, "dialog.directory_name_placeholder"))
                     .default_value(current_name)
+                    .pass_enter(true)
             })
         });
 

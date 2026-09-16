@@ -67,6 +67,7 @@ impl SearchBar {
         let input = cx.new(|cx| {
             InputState::new(cx)
                 .placeholder(i18n!(cx, "terminal.search_placeholder"))
+                .pass_enter(true)
         });
         input.update(cx, |input, cx| {
             input.focus(window, cx);

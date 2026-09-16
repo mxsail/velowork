@@ -52,6 +52,9 @@ pub enum KeyInterceptResult {
     Handled,
     /// Keystroke handled and requests updating the input value
     SetValue(String),
+    /// Keystroke was explicitly not handled and should not be handled by the input;
+    /// pass through to parent element (bubble up without stopping propagation).
+    NotHandled,
 }
 
 #[derive(Clone)]
@@ -123,6 +126,7 @@ pub struct SimpleInputState {
     last_mouse_position: Option<Point<Pixels>>,
     _drag_scroll_task: Option<Task<()>>,
     submit_on_enter: bool,
+    pass_enter: bool,
     read_only: bool,
     allow_clear: bool,
     search_highlights: Vec<Range<usize>>,
@@ -194,6 +198,7 @@ impl SimpleInputState {
             last_mouse_position: None,
             _drag_scroll_task: None,
             submit_on_enter: false,
+            pass_enter: true,
             read_only: false,
             allow_clear: false,
             search_highlights: Vec::new(),
@@ -290,6 +295,29 @@ impl SimpleInputState {
     pub fn submit_on_enter(mut self, submit: bool) -> Self {
         self.submit_on_enter = submit;
         self
+    }
+
+    /// When true (the default for single-line inputs), pressing Enter emits `PressEnter`
+    /// and leaves the key unhandled so parent elements can handle it via event bubbling.
+    /// When false, pressing Enter is consumed by the input and will not bubble.
+    pub fn pass_enter(mut self, pass: bool) -> Self {
+        self.pass_enter = pass;
+        self
+    }
+
+    pub fn set_pass_enter(&mut self, pass: bool) {
+        self.pass_enter = pass;
+    }
+
+    /// When true, prevents Enter key events from bubbling up to parent containers.
+    /// Equivalent to `.pass_enter(!consume)`.
+    pub fn consume_enter(mut self, consume: bool) -> Self {
+        self.pass_enter = !consume;
+        self
+    }
+
+    pub fn set_consume_enter(&mut self, consume: bool) {
+        self.pass_enter = !consume;
     }
 
     pub fn read_only(mut self, ro: bool) -> Self {
@@ -1366,6 +1394,7 @@ impl SimpleInputState {
                     self.set_value(new_val, cx);
                     return KeyHandled::Handled;
                 }
+                KeyInterceptResult::NotHandled => return KeyHandled::NotHandled,
                 KeyInterceptResult::Unhandled => {}
             }
         }
@@ -1478,6 +1507,11 @@ impl SimpleInputState {
                 return KeyHandled::NotHandled;
             }
             "enter" => {
+                if self.marked_range.is_some() {
+                    self.marked_range = None;
+                    cx.notify();
+                    return KeyHandled::Handled;
+                }
                 if self.multiline {
                     let is_newline_chord = modifiers.control || modifiers.platform || modifiers.shift;
                     if self.submit_on_enter && !is_newline_chord {
@@ -1488,7 +1522,10 @@ impl SimpleInputState {
                     return KeyHandled::Handled;
                 }
                 cx.emit(InputEvent::PressEnter);
-                return KeyHandled::Handled;
+                if !self.pass_enter {
+                    return KeyHandled::Handled;
+                }
+                return KeyHandled::NotHandled;
             }
             "tab" => {
                 return KeyHandled::NotHandled;
@@ -3552,6 +3589,46 @@ mod tests {
             assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
             // Text should remain "line1\n", without another newline
             assert_eq!(this.value(), "line1\n");
+        });
+    }
+
+    #[gpui::test]
+    fn test_single_line_pass_enter_and_ime(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use super::KeyHandled;
+
+        // 1. Default single-line input: pass_enter is true -> Enter returns NotHandled (bubbles up to parent)
+        let default_input = cx.new(|cx| SimpleInputState::new(cx).default_value("query"));
+        default_input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("enter").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::NotHandled);
+        });
+
+        // 2. Explicit consume_enter(true) / pass_enter(false): Enter returns Handled (stops propagation)
+        let consume_input = cx.new(|cx| SimpleInputState::new(cx).consume_enter(true).default_value("query"));
+        consume_input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("enter").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
+        });
+
+        // 3. Active IME composition: Enter returns Handled and clears marked_range (does not bubble)
+        default_input.update(cx, |this, cx| {
+            this.marked_range = Some(0..3);
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("enter").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
+            assert!(this.marked_range.is_none());
         });
     }
 }
