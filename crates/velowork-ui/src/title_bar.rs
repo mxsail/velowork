@@ -254,26 +254,40 @@ pub fn render_window_controls(
         }
 
         let custom_close = custom_close.clone();
-        let bound_btn = control_btn
-            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                cx.stop_propagation();
-            })
-            .on_click(move |_, window, cx| {
-                cx.stop_propagation();
-                match actual_type {
-                    WindowControlType::Minimize => window.minimize_window(),
-                    WindowControlType::Maximize | WindowControlType::Restore => {
-                        window.zoom_window();
-                    }
-                    WindowControlType::Close => {
-                        if let Some(close_fn) = &custom_close {
-                            close_fn(window, cx);
-                        } else {
-                            window.remove_window();
+        let is_windows = cfg!(target_os = "windows");
+        // On Windows, Minimize, Maximize, and Restore are handled natively via `WindowControlArea`
+        // (HTMINBUTTON and HTMAXBUTTON) in GPUI's Win32 message procedure.
+        // Registering a client `on_mouse_down(cx.stop_propagation())` suppresses GPUI's native
+        // non-client button state tracking, falling back to `window.zoom_window()` which is
+        // hardcoded to only maximize without restore support on Windows.
+        // By skipping client click interception for Min/Max/Restore on Windows, GPUI natively
+        // toggles maximize/restore and provides Windows 11 Snap Assist layouts.
+        // For `Close`, we retain client interception when `custom_close` is present so custom
+        // handlers (e.g. unsaved changes prompt, detached dock panel re-attach) execute properly.
+        let bound_btn = if is_windows && actual_type != WindowControlType::Close {
+            control_btn
+        } else {
+            control_btn
+                .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                    cx.stop_propagation();
+                })
+                .on_click(move |_, window, cx| {
+                    cx.stop_propagation();
+                    match actual_type {
+                        WindowControlType::Minimize => window.minimize_window(),
+                        WindowControlType::Maximize | WindowControlType::Restore => {
+                            window.zoom_window();
+                        }
+                        WindowControlType::Close => {
+                            if let Some(close_fn) = &custom_close {
+                                close_fn(window, cx);
+                            } else {
+                                window.remove_window();
+                            }
                         }
                     }
-                }
-            });
+                })
+        };
 
         bar = bar.child(bound_btn);
     }

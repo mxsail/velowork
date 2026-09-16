@@ -290,12 +290,14 @@ where
                     .border_color(p.border_subtle)
                     .when(has_rounded_corners, |d| d.rounded_tl(radius).rounded_tr(radius))
                     .window_control_area(WindowControlArea::Drag)
-                    .on_mouse_down(MouseButton::Left, |e, window, _| {
-                        if e.click_count == 2 {
-                            window.zoom_window();
-                        } else {
-                            window.start_window_move();
-                        }
+                    .when(cfg!(target_os = "linux"), |d| {
+                        d.on_mouse_down(MouseButton::Left, |e, window, _| {
+                            if e.click_count == 2 {
+                                window.zoom_window();
+                            } else {
+                                window.start_window_move();
+                            }
+                        })
                     })
                     .child(
                         velowork_ui::h_flex()
