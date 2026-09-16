@@ -26,6 +26,7 @@ impl WindowView {
             &self.focus_manager,
             &backend,
             &self.terminals,
+            Some(self.overlay_manager.clone()),
             cx,
         ).unwrap_or_else(|| ActionDispatcher::Local {
             workspace: self.workspace.clone(),
@@ -33,6 +34,7 @@ impl WindowView {
             backend: self.backend.clone(),
             terminals: self.terminals.clone(),
             window_id: self.window_id,
+            overlay_manager: Some(self.overlay_manager.clone()),
         })
     }
 

@@ -841,6 +841,9 @@ pub struct AppSettings {
     /// `0` disables the feature entirely (close kills immediately, as before).
     #[serde(default = "default_terminal_close_grace_secs")]
     pub terminal_close_grace_secs: u32,
+    /// Whether to prompt for confirmation when closing a terminal tab (default: true)
+    #[serde(default = "default_true")]
+    pub confirm_close_tab: bool,
     /// Terminal background image path or URL. When set, the terminal content
     /// background becomes transparent so the image shows through behind the text.
     /// Empty / unset means no background image (default terminal background color).
@@ -1349,6 +1352,7 @@ impl Default for AppSettings {
             bell_cooldown_ms: default_bell_cooldown_ms(),
             scrollback_lines: default_scrollback_lines(),
             terminal_close_grace_secs: default_terminal_close_grace_secs(),
+            confirm_close_tab: true,
             terminal_background_image: None,
             terminal_background_image_blur: false,
             terminal_scrollbar_show: velowork_core::types::ScrollbarShow::default(),
@@ -2020,5 +2024,18 @@ mod tests {
         assert_eq!(n.enabled, true);
         assert_eq!(n.osc, true);
         assert_eq!(n.bell, true);
+    }
+
+    #[test]
+    fn test_confirm_close_tab_deserialization_compatibility() {
+        // 缺省字段默认为 true
+        let json = r#"{}"#;
+        let recovered = recover_settings_from_json(json).unwrap();
+        assert_eq!(recovered.confirm_close_tab, true);
+
+        // 显式为 false 时正常保留
+        let json = r#"{"confirm_close_tab": false}"#;
+        let recovered = recover_settings_from_json(json).unwrap();
+        assert_eq!(recovered.confirm_close_tab, false);
     }
 }

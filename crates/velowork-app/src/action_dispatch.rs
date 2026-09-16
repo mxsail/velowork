@@ -7,6 +7,7 @@
 //! SSH (russh) directly, so no separate remote-control path is needed here.
 
 use crate::terminal::backend::TerminalBackend;
+use crate::views::overlays::overlay_manager::OverlayManager;
 use crate::views::window::TerminalsRegistry;
 use crate::workspace::actions::execute::execute_action;
 use crate::workspace::focus::FocusManager;
@@ -33,6 +34,7 @@ pub fn dispatcher_for_project(
     focus_manager: &Entity<FocusManager>,
     backend: &Option<Arc<dyn TerminalBackend>>,
     terminals: &TerminalsRegistry,
+    overlay_manager: Option<Entity<OverlayManager>>,
     cx: &gpui::App,
 ) -> Option<ActionDispatcher> {
     let ws = workspace.read(cx);
@@ -44,6 +46,7 @@ pub fn dispatcher_for_project(
         backend: backend.clone(),
         terminals: terminals.clone(),
         window_id,
+        overlay_manager,
     })
 }
 
@@ -64,6 +67,7 @@ pub enum ActionDispatcher {
         /// inside `execute_action` (e.g. `SetProjectShowInOverview`) target
         /// this slot.
         window_id: WindowId,
+        overlay_manager: Option<Entity<OverlayManager>>,
     },
 }
 
@@ -73,8 +77,39 @@ impl ActionDispatcher {
         false
     }
 
+    #[allow(clippy::too_many_arguments)]
+    fn execute_close_single_terminal(
+        workspace: &Entity<Workspace>,
+        focus_manager: &Entity<FocusManager>,
+        backend: &Arc<dyn TerminalBackend>,
+        terminals: &TerminalsRegistry,
+        window_id: WindowId,
+        project_id: String,
+        terminal_id: String,
+        cx: &mut gpui::App,
+    ) {
+        let backend = backend.clone();
+        let terminals = terminals.clone();
+        let focus_manager = focus_manager.clone();
+        let workspace = workspace.clone();
+        focus_manager.update(cx, |fm, cx| {
+            workspace.update(cx, |ws, cx| {
+                if crate::soft_close::begin(
+                    ws, fm, &backend, &terminals, &project_id, &terminal_id, cx,
+                ) {
+                    return;
+                }
+                execute_action(
+                    ActionRequest::CloseTerminal { project_id, terminal_id },
+                    ws, window_id, fm, &*backend, &terminals, cx,
+                );
+            });
+            cx.notify();
+        });
+    }
+
     /// Dispatch a standard action (split, close, create terminal, etc.).
-    pub fn dispatch(&self, action: ActionRequest, cx: &mut impl AppContext) {
+    pub fn dispatch(&self, action: ActionRequest, cx: &mut gpui::App) {
         match self {
             Self::Local {
                 workspace,
@@ -82,53 +117,79 @@ impl ActionDispatcher {
                 backend,
                 terminals,
                 window_id,
+                overlay_manager,
             } => {
+                if let ActionRequest::CloseTerminal { project_id, terminal_id } = &action {
+                    let confirm = crate::settings::settings(cx).confirm_close_tab;
+                    if confirm {
+                        if let Some(om) = overlay_manager {
+                            let pid = project_id.clone();
+                            let tid = terminal_id.clone();
+                            let workspace = workspace.clone();
+                            let focus_manager = focus_manager.clone();
+                            let backend = backend.clone();
+                            let terminals = terminals.clone();
+                            let window_id = *window_id;
+                            om.update(cx, |om, cx| {
+                                om.request_terminal_close_confirm(pid.clone(), tid.clone(), move |cx| {
+                                    Self::execute_close_single_terminal(
+                                        &workspace,
+                                        &focus_manager,
+                                        &backend,
+                                        &terminals,
+                                        window_id,
+                                        pid,
+                                        tid,
+                                        cx,
+                                    );
+                                }, cx);
+                            });
+                            return;
+                        }
+                    }
+                    Self::execute_close_single_terminal(
+                        workspace,
+                        focus_manager,
+                        backend,
+                        terminals,
+                        *window_id,
+                        project_id.clone(),
+                        terminal_id.clone(),
+                        cx,
+                    );
+                    return;
+                }
+
                 let backend = backend.clone();
                 let terminals = terminals.clone();
                 let focus_manager = focus_manager.clone();
                 let window_id = *window_id;
                 focus_manager.update(cx, |fm, cx| {
                     workspace.update(cx, |ws, cx| {
-                        // Interactive closes go through the optimistic soft
-                        // close: the pane is ejected immediately and the PTY's
-                        // fate (kill now vs. keep for undo) is decided off the
-                        // GPUI thread. Both the single and multi-terminal close
-                        // actions are gated; whatever isn't handled there
-                        // (feature off / terminal not in layout) falls through
-                        // to the immediate close.
-                        match &action {
-                            ActionRequest::CloseTerminal { project_id, terminal_id }
-                                if crate::soft_close::begin(
+                        if let ActionRequest::CloseTerminals { project_id, terminal_ids } = &action {
+                            // Optimistically close each terminal (eject now,
+                            // decide kill-vs-undo off-thread); whatever isn't
+                            // handled here (feature off / not in layout)
+                            // hard-closes in a single batched action.
+                            let mut remaining = Vec::new();
+                            for terminal_id in terminal_ids {
+                                if !crate::soft_close::begin(
                                     ws, fm, &backend, &terminals, project_id, terminal_id, cx,
-                                ) => {
-                                    return;
+                                ) {
+                                    remaining.push(terminal_id.clone());
                                 }
-                            ActionRequest::CloseTerminals { project_id, terminal_ids } => {
-                                // Optimistically close each terminal (eject now,
-                                // decide kill-vs-undo off-thread); whatever isn't
-                                // handled here (feature off / not in layout)
-                                // hard-closes in a single batched action.
-                                let mut remaining = Vec::new();
-                                for terminal_id in terminal_ids {
-                                    if !crate::soft_close::begin(
-                                        ws, fm, &backend, &terminals, project_id, terminal_id, cx,
-                                    ) {
-                                        remaining.push(terminal_id.clone());
-                                    }
-                                }
-                                if remaining.is_empty() {
-                                    return;
-                                }
-                                execute_action(
-                                    ActionRequest::CloseTerminals {
-                                        project_id: project_id.clone(),
-                                        terminal_ids: remaining,
-                                    },
-                                    ws, window_id, fm, &*backend, &terminals, cx,
-                                );
+                            }
+                            if remaining.is_empty() {
                                 return;
                             }
-                            _ => {}
+                            execute_action(
+                                ActionRequest::CloseTerminals {
+                                    project_id: project_id.clone(),
+                                    terminal_ids: remaining,
+                                },
+                                ws, window_id, fm, &*backend, &terminals, cx,
+                            );
+                            return;
                         }
                         execute_action(action, ws, window_id, fm, &*backend, &terminals, cx);
                     });

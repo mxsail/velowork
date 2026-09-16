@@ -1753,7 +1753,7 @@ impl BottomPanel {
         cx.subscribe(&dialog, {
             let path = path.clone();
             move |this, _dialog, event, cx| {
-                if matches!(event, ConfirmDialogEvent::Confirmed) {
+                if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                     let (path, is_dir) = (path.clone(), is_dir);
                     this.delete_path(path, is_dir, cx);
                 }
@@ -3087,7 +3087,7 @@ impl BottomPanel {
             let remote_path = remote_path.clone();
             let sftp = sftp.clone();
             move |this, _dialog, event, cx| {
-                if matches!(event, ConfirmDialogEvent::Confirmed) {
+                if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                     let local_path = local_path.clone();
                     let remote_path = remote_path.clone();
                     let sftp = sftp.clone();

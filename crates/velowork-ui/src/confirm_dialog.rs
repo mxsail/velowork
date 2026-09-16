@@ -22,9 +22,17 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub enum ConfirmDialogEvent {
     /// User pressed the Confirm button (or its equivalent).
-    Confirmed,
+    Confirmed { checkbox_checked: bool },
     /// User cancelled: Cancel button, Escape, or a click outside the dialog.
     Cancelled,
+}
+
+/// Control that currently has keyboard focus in the confirmation dialog.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConfirmDialogControl {
+    Cancel,
+    Confirm,
+    Checkbox,
 }
 
 /// Middle-truncates a string with `***` if its character count exceeds `max_chars`.
@@ -129,7 +137,9 @@ pub struct ConfirmDialog {
     confirm_label: String,
     cancel_label: String,
     confirm_danger: bool,
-    selected_button: ConfirmDialogButton,
+    current_focus: ConfirmDialogControl,
+    checkbox_label: Option<SharedString>,
+    checkbox_checked: bool,
     previous_focus_handle: Option<FocusHandle>,
     overlay_registry: Option<WeakEntity<OverlayRegistry>>,
     overlay_id: SharedString,
@@ -191,12 +201,68 @@ impl ConfirmDialog {
             confirm_label: confirm_label.into(),
             cancel_label: cancel_label.into(),
             confirm_danger,
-            selected_button: ConfirmDialogButton::Cancel,
+            current_focus: ConfirmDialogControl::Cancel,
+            checkbox_label: None,
+            checkbox_checked: false,
             previous_focus_handle: None,
             overlay_registry,
             overlay_id,
             dismissed: false,
             focus_handle,
+        }
+    }
+
+    /// Add an optional checkbox (e.g. "Don't ask again") to the confirmation dialog.
+    pub fn checkbox(mut self, label: impl Into<SharedString>, default_checked: bool) -> Self {
+        self.checkbox_label = Some(label.into());
+        self.checkbox_checked = default_checked;
+        self
+    }
+
+    /// Set the default focused button (defaults to `Cancel`).
+    pub fn default_button(mut self, button: ConfirmDialogButton) -> Self {
+        self.current_focus = match button {
+            ConfirmDialogButton::Cancel => ConfirmDialogControl::Cancel,
+            ConfirmDialogButton::Confirm => ConfirmDialogControl::Confirm,
+        };
+        self
+    }
+
+    /// Whether the checkbox was checked.
+    pub fn is_checkbox_checked(&self) -> bool {
+        self.checkbox_checked
+    }
+
+    /// Compute the next focused control when pressing Tab or arrow keys.
+    pub fn next_control(&self, forward: bool) -> ConfirmDialogControl {
+        let has_checkbox = self.checkbox_label.is_some();
+        Self::compute_next_control(self.current_focus, forward, has_checkbox)
+    }
+
+    /// Compute next control purely based on current state.
+    pub fn compute_next_control(
+        current: ConfirmDialogControl,
+        forward: bool,
+        has_checkbox: bool,
+    ) -> ConfirmDialogControl {
+        match (current, forward, has_checkbox) {
+            // Forward (Tab, Right, Down)
+            (ConfirmDialogControl::Cancel, true, false) => ConfirmDialogControl::Confirm,
+            (ConfirmDialogControl::Confirm, true, false) => ConfirmDialogControl::Cancel,
+
+            (ConfirmDialogControl::Cancel, true, true) => ConfirmDialogControl::Confirm,
+            (ConfirmDialogControl::Confirm, true, true) => ConfirmDialogControl::Checkbox,
+            (ConfirmDialogControl::Checkbox, true, true) => ConfirmDialogControl::Cancel,
+
+            // Backward (Shift+Tab, Left, Up)
+            (ConfirmDialogControl::Cancel, false, false) => ConfirmDialogControl::Confirm,
+            (ConfirmDialogControl::Confirm, false, false) => ConfirmDialogControl::Cancel,
+
+            (ConfirmDialogControl::Cancel, false, true) => ConfirmDialogControl::Checkbox,
+            (ConfirmDialogControl::Checkbox, false, true) => ConfirmDialogControl::Confirm,
+            (ConfirmDialogControl::Confirm, false, true) => ConfirmDialogControl::Cancel,
+
+            (ConfirmDialogControl::Checkbox, _, false) => ConfirmDialogControl::Cancel,
         }
     }
 
@@ -246,7 +312,13 @@ impl ConfirmDialog {
     }
 
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.finish_close(ConfirmDialogEvent::Confirmed, Some(window), cx);
+        self.finish_close(
+            ConfirmDialogEvent::Confirmed {
+                checkbox_checked: self.checkbox_checked,
+            },
+            Some(window),
+            cx,
+        );
     }
 
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -303,19 +375,36 @@ impl Render for ConfirmDialog {
                                 cx.stop_propagation();
                                 this.cancel(window, cx);
                             }
-                            "left" | "right" | "up" | "down" | "tab" => {
+                            "tab" => {
                                 cx.stop_propagation();
-                                this.selected_button = match this.selected_button {
-                                    ConfirmDialogButton::Cancel => ConfirmDialogButton::Confirm,
-                                    ConfirmDialogButton::Confirm => ConfirmDialogButton::Cancel,
-                                };
+                                let forward = !event.keystroke.modifiers.shift;
+                                this.current_focus = this.next_control(forward);
                                 cx.notify();
+                            }
+                            "right" | "down" => {
+                                cx.stop_propagation();
+                                this.current_focus = this.next_control(true);
+                                cx.notify();
+                            }
+                            "left" | "up" => {
+                                cx.stop_propagation();
+                                this.current_focus = this.next_control(false);
+                                cx.notify();
+                            }
+                            "space" => {
+                                if this.current_focus == ConfirmDialogControl::Checkbox {
+                                    cx.stop_propagation();
+                                    this.checkbox_checked = !this.checkbox_checked;
+                                    cx.notify();
+                                }
                             }
                             "enter" => {
                                 cx.stop_propagation();
-                                match this.selected_button {
-                                    ConfirmDialogButton::Cancel => this.cancel(window, cx),
-                                    ConfirmDialogButton::Confirm => this.confirm(window, cx),
+                                match this.current_focus {
+                                    ConfirmDialogControl::Cancel => this.cancel(window, cx),
+                                    ConfirmDialogControl::Confirm | ConfirmDialogControl::Checkbox => {
+                                        this.confirm(window, cx);
+                                    }
                                 }
                             }
                             _ => {}
@@ -338,13 +427,39 @@ impl Render for ConfirmDialog {
                             .w_full()
                             .px(px(20.0))
                             .pt(px(10.0))
-                            .pb(px(20.0))
+                            .pb(if self.checkbox_label.is_some() { px(12.0) } else { px(20.0) })
                             .text_size(ui_text_md(cx))
                             .text_color(p.text_secondary)
                             .max_h(px(240.0))
                             .overflow_y_scrollbar()
                             .child(self.message.clone()),
                     )
+                    // Optional Checkbox
+                    .when_some(self.checkbox_label.clone(), |el, label| {
+                        let entity = cx.entity().clone();
+                        let is_checked = self.checkbox_checked;
+                        let is_focused = self.current_focus == ConfirmDialogControl::Checkbox;
+                        el.child(
+                            div()
+                                .id("confirm-dialog-checkbox-row")
+                                .w_full()
+                                .px(px(20.0))
+                                .pb(px(16.0))
+                                .child(
+                                    crate::checkbox::Checkbox::new("confirm-dialog-checkbox")
+                                        .label(label)
+                                        .checked(is_checked)
+                                        .focused(is_focused)
+                                        .on_click(move |new_checked, _window, cx| {
+                                            entity.update(cx, |this, cx| {
+                                                this.checkbox_checked = *new_checked;
+                                                this.current_focus = ConfirmDialogControl::Checkbox;
+                                                cx.notify();
+                                            });
+                                        }),
+                                ),
+                        )
+                    })
                     // Actions: right-aligned buttons at the bottom-right corner without dividing line
                     .child(
                         h_flex()
@@ -356,7 +471,7 @@ impl Render for ConfirmDialog {
                             .pb(px(20.0))
                             .child(
                                 button("confirm-dialog-cancel", cancel_label, &t)
-                                    .selected(self.selected_button == ConfirmDialogButton::Cancel)
+                                    .selected(self.current_focus == ConfirmDialogControl::Cancel)
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.cancel(window, cx);
                                     })),
@@ -364,7 +479,7 @@ impl Render for ConfirmDialog {
                             .child({
                                 let mut btn =
                                     button("confirm-dialog-confirm", confirm_label, &t)
-                                        .selected(self.selected_button == ConfirmDialogButton::Confirm);
+                                        .selected(self.current_focus == ConfirmDialogControl::Confirm);
                                 if confirm_danger {
                                     btn = btn.danger(true);
                                 } else {
@@ -428,22 +543,46 @@ mod tests {
     }
 
     #[test]
-    fn test_confirm_dialog_button_default_and_toggle() {
-        use super::ConfirmDialogButton;
-        let mut selected = ConfirmDialogButton::Cancel;
-        assert_eq!(selected, ConfirmDialogButton::Cancel);
+    fn test_confirm_dialog_control_navigation_without_checkbox() {
+        use super::{ConfirmDialog, ConfirmDialogControl};
 
-        // Direction / tab toggle
-        selected = match selected {
-            ConfirmDialogButton::Cancel => ConfirmDialogButton::Confirm,
-            ConfirmDialogButton::Confirm => ConfirmDialogButton::Cancel,
-        };
-        assert_eq!(selected, ConfirmDialogButton::Confirm);
+        // Forward cycle (Tab)
+        let mut focus = ConfirmDialogControl::Cancel;
+        focus = ConfirmDialog::compute_next_control(focus, true, false);
+        assert_eq!(focus, ConfirmDialogControl::Confirm);
 
-        selected = match selected {
-            ConfirmDialogButton::Cancel => ConfirmDialogButton::Confirm,
-            ConfirmDialogButton::Confirm => ConfirmDialogButton::Cancel,
-        };
-        assert_eq!(selected, ConfirmDialogButton::Cancel);
+        focus = ConfirmDialog::compute_next_control(focus, true, false);
+        assert_eq!(focus, ConfirmDialogControl::Cancel);
+
+        // Backward cycle (Shift+Tab)
+        focus = ConfirmDialog::compute_next_control(focus, false, false);
+        assert_eq!(focus, ConfirmDialogControl::Confirm);
+    }
+
+    #[test]
+    fn test_confirm_dialog_control_navigation_with_checkbox() {
+        use super::{ConfirmDialog, ConfirmDialogControl};
+
+        // Forward cycle from Confirm: Confirm -> Checkbox -> Cancel -> Confirm
+        let mut focus = ConfirmDialogControl::Confirm;
+
+        focus = ConfirmDialog::compute_next_control(focus, true, true);
+        assert_eq!(focus, ConfirmDialogControl::Checkbox);
+
+        focus = ConfirmDialog::compute_next_control(focus, true, true);
+        assert_eq!(focus, ConfirmDialogControl::Cancel);
+
+        focus = ConfirmDialog::compute_next_control(focus, true, true);
+        assert_eq!(focus, ConfirmDialogControl::Confirm);
+
+        // Backward cycle (Shift+Tab): Confirm -> Cancel -> Checkbox -> Confirm
+        focus = ConfirmDialog::compute_next_control(focus, false, true);
+        assert_eq!(focus, ConfirmDialogControl::Cancel);
+
+        focus = ConfirmDialog::compute_next_control(focus, false, true);
+        assert_eq!(focus, ConfirmDialogControl::Checkbox);
+
+        focus = ConfirmDialog::compute_next_control(focus, false, true);
+        assert_eq!(focus, ConfirmDialogControl::Confirm);
     }
 }

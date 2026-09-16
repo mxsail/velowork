@@ -169,6 +169,7 @@ impl SettingsState {
         0,
         60
     );
+    setting_setter!(set_confirm_close_tab, confirm_close_tab, bool);
     setting_setter!(set_show_focused_border, show_focused_border, bool);
     setting_setter!(set_titlebar_style, titlebar_style, TitlebarStyle);
     setting_setter!(set_titlebar_preset, titlebar_preset, CustomTitlebarPreset);

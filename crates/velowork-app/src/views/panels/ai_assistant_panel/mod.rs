@@ -3877,7 +3877,7 @@ impl AiAssistantPanel {
         });
 
         cx.subscribe(&dialog, move |this, _dialog, event, cx| {
-            if matches!(event, ConfirmDialogEvent::Confirmed) {
+            if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                 this.clear_all_conversations(cx);
             }
             this.overlay_manager.update(cx, |om, cx| om.close_modal(cx));

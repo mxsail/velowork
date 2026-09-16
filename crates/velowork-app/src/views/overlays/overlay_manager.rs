@@ -1765,7 +1765,11 @@ impl OverlayManager {
                 }
                 TabContextMenuEvent::CloseTab { project_id, layout_path, tab_index } => {
                     this.hide_tab_context_menu(cx);
-                    this.request_tab_close_confirm(project_id.clone(), layout_path.clone(), *tab_index, cx);
+                    cx.emit(OverlayManagerEvent::TabClose {
+                        project_id: project_id.clone(),
+                        layout_path: layout_path.clone(),
+                        tab_index: *tab_index,
+                    });
                 }
                 TabContextMenuEvent::CloseOtherTabs { project_id, layout_path, tab_index } => {
                     this.hide_tab_context_menu(cx);
@@ -1806,12 +1810,12 @@ impl OverlayManager {
         self.tab_context_menu.render()
     }
 
-    /// Open confirmation dialog before closing the current tab view.
-    pub fn request_tab_close_confirm(
+    /// Open confirmation dialog before closing a terminal tab view.
+    pub fn request_terminal_close_confirm(
         &mut self,
-        project_id: String,
-        layout_path: Vec<usize>,
-        tab_index: usize,
+        _project_id: String,
+        _terminal_id: String,
+        on_confirm: impl FnOnce(&mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
         let dialog = cx.new(|cx| {
@@ -1825,15 +1829,21 @@ impl OverlayManager {
                 Some(self.overlay_registry.clone()),
                 "tab-close-confirm",
             )
+            .checkbox(i18n!(cx, "common.dont_ask_again"), false)
+            .default_button(velowork_ui::confirm_dialog::ConfirmDialogButton::Confirm)
         });
 
+        let mut on_confirm = Some(on_confirm);
         cx.subscribe(&dialog, move |this, _dialog, event, cx| {
-            if matches!(event, ConfirmDialogEvent::Confirmed) {
-                cx.emit(OverlayManagerEvent::TabClose {
-                    project_id: project_id.clone(),
-                    layout_path: layout_path.clone(),
-                    tab_index,
-                });
+            if let ConfirmDialogEvent::Confirmed { checkbox_checked } = event {
+                if *checkbox_checked {
+                    crate::settings::settings_entity(cx).update(cx, |s, cx| {
+                        s.set_confirm_close_tab(false, cx);
+                    });
+                }
+                if let Some(callback) = on_confirm.take() {
+                    callback(cx);
+                }
             }
             this.close_modal(cx);
         })
@@ -1864,7 +1874,7 @@ impl OverlayManager {
         });
 
         cx.subscribe(&dialog, move |this, _dialog, event, cx| {
-            if matches!(event, ConfirmDialogEvent::Confirmed) {
+            if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                 cx.emit(OverlayManagerEvent::TabCloseOthers {
                     project_id: project_id.clone(),
                     layout_path: layout_path.clone(),
@@ -1900,7 +1910,7 @@ impl OverlayManager {
         });
 
         cx.subscribe(&dialog, move |this, _dialog, event, cx| {
-            if matches!(event, ConfirmDialogEvent::Confirmed) {
+            if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                 cx.emit(OverlayManagerEvent::TabCloseToRight {
                     project_id: project_id.clone(),
                     layout_path: layout_path.clone(),
@@ -1935,7 +1945,7 @@ impl OverlayManager {
         });
 
         cx.subscribe(&dialog, move |this, _dialog, event, cx| {
-            if matches!(event, ConfirmDialogEvent::Confirmed) {
+            if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                 cx.emit(OverlayManagerEvent::TabCloseInactive {
                     project_id: project_id.clone(),
                     layout_path: layout_path.clone(),
@@ -2185,7 +2195,7 @@ impl OverlayManager {
         cx.subscribe(&dialog, {
             let ids = ids.clone();
             move |this, _dialog, event, cx| {
-                if matches!(event, ConfirmDialogEvent::Confirmed) {
+                if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                     let ids = ids.clone();
                     let active_pid = this.active_project_id(cx);
                     let settings_entity = crate::settings::settings_entity(cx);
@@ -2850,7 +2860,7 @@ impl OverlayManager {
         });
         let ids_clone = ids.clone();
         cx.subscribe(&dialog, move |this, _, event: &ConfirmDialogEvent, cx| match event {
-            ConfirmDialogEvent::Confirmed => {
+            ConfirmDialogEvent::Confirmed { .. } => {
                 if let Some(store) = cx.try_global::<GlobalServiceStore>() {
                     let store_entity = store.0.clone();
                     store_entity.update(cx, |s, cx| s.remove_nodes(&ids_clone, cx));
@@ -2991,7 +3001,7 @@ impl OverlayManager {
 
         let mut on_confirm = Some(on_confirm);
         cx.subscribe(&entity, move |this, _, event: &velowork_ui::confirm_dialog::ConfirmDialogEvent, cx| match event {
-            velowork_ui::confirm_dialog::ConfirmDialogEvent::Confirmed => {
+            velowork_ui::confirm_dialog::ConfirmDialogEvent::Confirmed { .. } => {
                 if let Some(f) = on_confirm.take() {
                     cx.spawn(async move |_this, cx| {
                         let _ = cx.update(f);
@@ -3056,7 +3066,7 @@ impl OverlayManager {
 
         let mut on_confirm = Some(on_confirm);
         cx.subscribe(&entity, move |this, _, event: &velowork_ui::confirm_dialog::ConfirmDialogEvent, cx| match event {
-            velowork_ui::confirm_dialog::ConfirmDialogEvent::Confirmed => {
+            velowork_ui::confirm_dialog::ConfirmDialogEvent::Confirmed { .. } => {
                 if let Some(f) = on_confirm.take() {
                     cx.spawn(async move |_this, cx| {
                         let _ = cx.update(f);
@@ -3118,7 +3128,7 @@ impl OverlayManager {
         cx.subscribe(&dialog, {
             let ids = ids.clone();
             move |this, _dialog, event, cx| {
-                if matches!(event, ConfirmDialogEvent::Confirmed) {
+                if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                     let ids = ids.clone();
                     let engine = cx
                         .try_global::<GlobalTunnelEngine>()
@@ -3176,7 +3186,7 @@ impl OverlayManager {
         cx.subscribe(&dialog, {
             let node_id = node_id.clone();
             move |this, _dialog, event, cx| {
-                if matches!(event, ConfirmDialogEvent::Confirmed) {
+                if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
                     if let Some(store) = cx.try_global::<velowork_workspace::stores::GlobalSessionStore>() {
                         let store_entity = store.0.clone();
                         store_entity.update(cx, |s, cx| {
@@ -3223,7 +3233,7 @@ impl OverlayManager {
 
         let mut on_confirm = Some(on_confirm);
         cx.subscribe(&entity, move |this, _, event: &ConfirmDialogEvent, cx| match event {
-            ConfirmDialogEvent::Confirmed => {
+            ConfirmDialogEvent::Confirmed { .. } => {
                 if let Some(f) = on_confirm.take() {
                     cx.spawn(async move |_this, cx| {
                         let _ = cx.update(f);
@@ -3275,7 +3285,7 @@ impl OverlayManager {
 
         let mut on_confirm = Some(on_confirm);
         cx.subscribe(&entity, move |this, _, event: &ConfirmDialogEvent, cx| match event {
-            ConfirmDialogEvent::Confirmed => {
+            ConfirmDialogEvent::Confirmed { .. } => {
                 if let Some(f) = on_confirm.take() {
                     cx.spawn(async move |_this, cx| {
                         let _ = cx.update(f);

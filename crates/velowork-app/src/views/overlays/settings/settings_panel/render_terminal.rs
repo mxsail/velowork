@@ -252,6 +252,15 @@ impl SettingsPanel {
                                     cx,
                                 ))
                             })
+                            .child(self.render_toggle_with_desc(
+                                "confirm-close-tab",
+                                &i18n!(cx, "settings.confirm_close_tab"),
+                                &i18n!(cx, "settings.confirm_close_tab_desc"),
+                                s.confirm_close_tab,
+                                true,
+                                |state, val, cx| state.set_confirm_close_tab(val, cx),
+                                cx,
+                            ))
                             .child(self.render_toggle(
                                 "close-grace",
                                 &undo_close_label,

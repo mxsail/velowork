@@ -1,4 +1,4 @@
-#![recursion_limit = "2048"]
+#![recursion_limit = "4096"]
 #![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
 
 //! Velowork UI component library.

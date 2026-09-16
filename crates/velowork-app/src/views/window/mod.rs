@@ -1009,6 +1009,7 @@ impl WindowView {
                 backend: backend_for_dispatch,
                 terminals: terminals_for_dispatch,
                 window_id,
+                overlay_manager: Some(self.overlay_manager.clone()),
             }));
             col
         });

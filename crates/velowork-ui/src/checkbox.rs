@@ -14,6 +14,7 @@ pub struct Checkbox {
     id: ElementId,
     checked: bool,
     disabled: bool,
+    focused: bool,
     label: Option<SharedString>,
     focus_handle: Option<FocusHandle>,
     on_click: Option<Rc<dyn Fn(&bool, &mut Window, &mut App) + 'static>>,
@@ -25,10 +26,16 @@ impl Checkbox {
             id: id.into(),
             checked: false,
             disabled: false,
+            focused: false,
             label: None,
             focus_handle: None,
             on_click: None,
         }
+    }
+
+    pub fn focused(mut self, focused: bool) -> Self {
+        self.focused = focused;
+        self
     }
 
     pub fn focus(mut self, handle: &FocusHandle) -> Self {
@@ -69,7 +76,7 @@ impl RenderOnce for Checkbox {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = theme(cx);
         let p = SemanticPalette::from_context(cx);
-        let is_focused = self.focus_handle.as_ref().is_some_and(|fh| fh.is_focused(window));
+        let is_focused = self.focused || self.focus_handle.as_ref().is_some_and(|fh| fh.is_focused(window));
 
         let box_bg = if self.checked {
             p.surface_accent
