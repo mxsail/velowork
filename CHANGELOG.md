@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.6] - 2026-09-17
+
+### Added / 新增
+- **终端关闭标签确认弹窗与偏好设置支持**：
+  - 新增关闭标签确认弹窗，并支持在设置中配置是否提示确认，防止误触关闭活动终端会话。  
+  *(Add confirmation dialog and configurable preference for closing terminal tabs to prevent accidental closure).*
+- **日志控制台独立新窗口分离**：
+  - 支持将日志控制台剥离并独立为专属桌面窗口，并统一按钮交互样式。  
+  *(Detach log console into a standalone desktop window with unified button interaction styles).*
+- **快捷指令弹窗变量交互与输入校验增强**：
+  - 深度优化新建/编辑快捷指令弹窗中的变量提取与解析逻辑，提供直观的变量输入体验与实时校验提示。  
+  *(Improve quick commands modal variable parsing, input interactions, and live validation).*
+
+### Improved / 优化
+- **全界面 4px 黄金边距对齐与同心圆美学规范**：
+  - 全面清理历史遗留的 6px/8px 间距混用，将弹窗下拉菜单（`dropdown_overlay`）、标签栏（`tab_style`）、Dock 面板、底部状态栏、右侧工具栏及侧栏树列表等关键区域的边距、间隙和悬浮高亮统一收敛至 **4px (`SPACE_XS`)** 基准体系。
+  - 严格满足同心圆几何法则（$R_{inner} = R_{outer} - P$），实现窗口左侧 $X = 20\text{px}$ 垂直中轴线单轨贯穿对齐。  
+  *(System-wide 4px spacing alignment and concentric geometry standardization across dropdown overlays, dock headers, tabs, status bar, right toolbar, and sidebar trees).*
+- **悬浮搜索条体验革新（终端面板 & AI 助手面板）**：
+  - 统一悬浮工具条高度（36px）与内部操作按钮（28px 规格完全等宽），彻底解决前后匹配与关闭按钮尺寸不一致的问题。
+  - AI 悬浮条重构为通栏铺展，弹性扩宽文本检索输入区；搜索框引入与欢迎界面一致的未聚焦/Hover/聚焦动态光晕状态反馈。
+  - 大小写（Aa）与正则（.*）切换按钮引入半透明中性高亮与激活细边框，去除突兀的蓝色强调色。  
+  *(Redesign floating search toolbars with full-width adaptive layout, identical 28px action buttons, subtle neutral toggle activation, and input glow focus rings).*
+- **AI 助手输入区域美学与交互深度收敛**：
+  - 输入框内部元素距外边框严格统一为 4px；移除生硬突兀的高亮色块，改用自适应圆角的纯隐形顶部拖拽热区。
+  - 引用文本卡片去除三面强调色边框，保留左侧 3px 强调色指示条；编辑态升级为舒适的多行文本域，遵循 Enter 保存、Ctrl+Enter 换行、Esc 取消的通用操作逻辑。
+  - 构建多层防事件穿透保护体系，杜绝点击引用卡片抢焦及 Enter 误发送主消息。  
+  *(Refine AI assistant input area with unified 4px inner margins, invisible top drag-resize zone preserving container radiuses, multiline quote editing with comprehensive anti-bubbling event guards).*
+- **微微动效与细滚动条升级**：
+  - 全局微调细滚动条为 macOS/Zed 风格的半透明微浮动条，优化滚动视觉体验。  
+  *(Refine scrollbars to macOS/Zed micro-floating style with unified design tokens).*
+
+### Fixed / 修复
+- **Windows 终端探测性能大幅优化**：
+  - 优化 Windows 平台下的系统终端探测算法，消除新建会话弹窗唤起时的卡顿与延迟。  
+  *(Optimize Windows terminal shell detection performance and eliminate latency when opening new session modals).*
+- **监控面板用户数统计口径对齐**：
+  - 修正监控面板用户数统计算法，确保与系统 top 会话数口径严格对齐。  
+  *(Align monitor panel user count metrics with top session counts).*
+- **Windows 窗口最大化/还原响应修复**：
+  - 修复 Windows 下最大化/还原图标样式与响应问题。  
+  *(Fix Windows window restore responsiveness and normalize maximize/restore icon style).*
+
 ## [0.1.0-beta.5] - 2026-09-16
 
 ### Added / 新增
