@@ -372,9 +372,37 @@ impl SimpleInputState {
     }
 
     pub fn set_selection(&mut self, range: Option<Range<usize>>, reversed: bool, cx: &mut Context<Self>) {
+        if let Some(ref r) = range {
+            self.cursor_position = if reversed { r.start } else { r.end };
+            self.follow_cursor = true;
+        }
         self.selection = range;
         self.selection_reversed = reversed;
         cx.notify();
+    }
+
+    pub fn selection(&self) -> Option<Range<usize>> {
+        self.selection.clone()
+    }
+
+    pub fn cursor_position(&self) -> usize {
+        self.cursor_position
+    }
+
+    /// Insert a template variable like `{{variable_name}}` at the cursor position
+    /// (replacing any active selection) and select the variable name within the braces
+    /// so the user can immediately rename it.
+    pub fn insert_variable_template(&mut self, var_name: &str, cx: &mut Context<Self>) {
+        let insert_pos = self
+            .selection
+            .as_ref()
+            .map(|r| r.start)
+            .unwrap_or(self.cursor_position);
+        let template = format!("{{{{{}}}}}", var_name);
+        self.insert_text(&template, cx);
+        let name_start = insert_pos + 2;
+        let name_end = name_start + var_name.len();
+        self.set_selection(Some(name_start..name_end), false, cx);
     }
 
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
@@ -1927,18 +1955,28 @@ fn build_runs(
 
     if highlight_vars {
         let mut var_ranges = Vec::new();
-        let bytes = line_text.as_bytes();
         let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'{' {
-                if let Some(close) = line_text[i..].find('}') {
-                    let end = i + close + 1;
+        while i < line_text.len() {
+            if line_text[i..].starts_with("{{") {
+                if let Some(close) = line_text[i + 2..].find("}}") {
+                    let end = i + 2 + close + 2;
+                    var_ranges.push(i..end);
+                    i = end;
+                    continue;
+                }
+            } else if line_text[i..].starts_with('{') {
+                if let Some(close) = line_text[i + 1..].find('}') {
+                    let end = i + 1 + close + 1;
                     var_ranges.push(i..end);
                     i = end;
                     continue;
                 }
             }
-            i += 1;
+            if let Some(ch) = line_text[i..].chars().next() {
+                i += ch.len_utf8();
+            } else {
+                break;
+            }
         }
 
         if !var_ranges.is_empty() {

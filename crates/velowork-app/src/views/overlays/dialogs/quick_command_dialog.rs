@@ -13,23 +13,24 @@ use velowork_ui::focus_group::{FocusGroup, FocusGroupExt};
 use velowork_ui::focusable::FocusSurfaceExt;
 use velowork_ui::form::form_item;
 use velowork_ui::icon::AppIcon;
-use velowork_ui::input::{InputFocusRingExt, InputState, TextareaState};
+use velowork_ui::input::{InputEvent, InputFocusRingExt, InputState, TextareaState};
 use velowork_ui::overlay::CloseEvent;
 use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::scrollable::Scrollbar;
 use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectState};
 use velowork_ui::theme::theme;
 use velowork_ui::tokens::{
-    RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS, ui_text_md, ui_text_sm,
+    mono_font_family, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS, ui_text_md, ui_text_sm,
 };
 use velowork_ui::icon_button::{icon_button, FocusableIconButtonExt};
 use velowork_ui::tooltip::Tooltip;
 use velowork_ui::{h_flex, v_flex};
 use velowork_workspace::folder_path::parse_and_validate_folder_path;
 use velowork_workspace::quick_commands::{
-    new_quick_command_id, qc_collect_folders, qc_ensure_folder_path, qc_find_node_mut,
-    qc_insert_node, qc_node_name_exists, qc_parent_id_of, qc_remove_node, QuickCommandNode,
-    QuickCommandVar,
+    extract_quick_command_vars, find_invalid_var_placeholder, find_unclosed_var_placeholder,
+    has_empty_var_placeholder, new_quick_command_id, qc_collect_folders, qc_ensure_folder_path,
+    qc_find_node_mut, qc_insert_node, qc_node_name_exists, qc_parent_id_of, qc_remove_node,
+    QuickCommandNode, QuickCommandVar,
 };
 
 /// Mode the dialog is operating in.
@@ -49,11 +50,13 @@ pub enum QuickCommandDialogMode {
 
 /// One editable variable row in the dialog.
 struct VarDraft {
-    name: Entity<InputState>,
+    name: String,
     default_value: Entity<InputState>,
     hint: Entity<InputState>,
     /// 删除该变量行的按钮焦点句柄（键盘导航）。
     remove_focus: FocusHandle,
+    /// 是否在指令模板中已无引用（已填写内容的草稿保留并警示）。
+    unreferenced: bool,
 }
 
 pub struct QuickCommandDialog {
@@ -74,7 +77,6 @@ pub struct QuickCommandDialog {
     dir_cancel_focus: FocusHandle,
     prefill_name: String,
     prefill_content: String,
-    prefill_vars: Vec<QuickCommandVar>,
     name_input: Option<Entity<InputState>>,
     content_input: Option<Entity<TextareaState>>,
     /// Selected parent folder id for a command (`None` = root level).
@@ -82,12 +84,13 @@ pub struct QuickCommandDialog {
     /// 窗口级 `OverlayRegistry`，用于「所属目录」下拉的 ClickOutside 自动收起。
     overlay_registry: Option<Entity<OverlayRegistry>>,
     variables: Vec<VarDraft>,
-    vars_initialized: bool,
     initial_focus_done: bool,
     /// 「所属目录」下拉选择组件（替代原有手写下拉）。
     directory_select: Entity<SelectState<SharedString>>,
-    /// 校验错误提示（如名称在同目录已存在），非空时阻止保存并回显。
-    error_msg: Option<String>,
+    /// 名称错误提示（如名称在同目录已存在），绑定在名称输入框下方。
+    name_error_msg: Option<String>,
+    /// 指令内容错误提示（如未闭合占位符、空占位符、非法字符），绑定在指令内容下方。
+    content_error_msg: Option<String>,
     creating_directory: bool,
     directory_input: Option<Entity<InputState>>,
     scroll_handle: ScrollHandle,
@@ -152,6 +155,81 @@ impl QuickCommandDialog {
 
         let directory_select = cx.new(|cx| SelectState::new(cx));
 
+        let name_placeholder = i18n!(cx, "quick_commands.name_placeholder");
+        let name_input = cx.new(|cx| {
+            InputState::new(cx)
+                .placeholder(name_placeholder)
+                .default_value(&prefill_name)
+        });
+
+        let is_command = matches!(
+            &mode,
+            QuickCommandDialogMode::CreateCommand { .. }
+                | QuickCommandDialogMode::EditCommand { .. }
+        );
+
+        let content_input = if is_command {
+            let placeholder = i18n!(cx, "quick_commands.content_placeholder");
+            let input = cx.new(|cx| {
+                TextareaState::new(cx)
+                    .multiline()
+                    .highlight_vars()
+                    .placeholder(placeholder)
+                    .default_value(&prefill_content)
+            });
+            Some(input)
+        } else {
+            None
+        };
+
+        let mut initial_vars = Vec::new();
+        if is_command {
+            let current_vars = extract_quick_command_vars(&prefill_content);
+            let def_placeholder = i18n!(cx, "quick_commands.var_default");
+            let hint_placeholder = i18n!(cx, "quick_commands.var_hint");
+
+            for v in &prefill_vars {
+                let is_referenced = current_vars.contains(&v.name);
+                let def_val = v.default_value.clone();
+                let hint_val = v.hint.clone();
+                let def_inp = cx.new(|cx| {
+                    InputState::new(cx)
+                        .placeholder(def_placeholder.clone())
+                        .default_value(&def_val)
+                });
+                let hint_inp = cx.new(|cx| {
+                    InputState::new(cx)
+                        .placeholder(hint_placeholder.clone())
+                        .default_value(&hint_val)
+                });
+                initial_vars.push(VarDraft {
+                    name: v.name.clone(),
+                    default_value: def_inp,
+                    hint: hint_inp,
+                    remove_focus: cx.focus_handle(),
+                    unreferenced: !is_referenced,
+                });
+            }
+
+            for var_name in &current_vars {
+                if !initial_vars.iter().any(|d| &d.name == var_name) {
+                    let def_inp = cx.new(|cx| {
+                        InputState::new(cx).placeholder(def_placeholder.clone())
+                    });
+                    let hint_inp = cx.new(|cx| {
+                        InputState::new(cx).placeholder(hint_placeholder.clone())
+                    });
+                    initial_vars.push(VarDraft {
+                        name: var_name.clone(),
+                        default_value: def_inp,
+                        hint: hint_inp,
+                        remove_focus: cx.focus_handle(),
+                        unreferenced: false,
+                    });
+                }
+            }
+        }
+
         Self {
             mode,
             project_id,
@@ -164,16 +242,15 @@ impl QuickCommandDialog {
             dir_cancel_focus: cx.focus_handle(),
             prefill_name,
             prefill_content,
-            prefill_vars,
-            name_input: None,
-            content_input: None,
+            name_input: Some(name_input),
+            content_input,
             directory: prefill_dir,
             overlay_registry,
-            variables: vec![],
-            vars_initialized: false,
+            variables: initial_vars,
             initial_focus_done: false,
             directory_select,
-            error_msg: None,
+            name_error_msg: None,
+            content_error_msg: None,
             creating_directory: false,
             directory_input: None,
             scroll_handle: ScrollHandle::new(),
@@ -190,7 +267,7 @@ impl QuickCommandDialog {
         cx.emit(QuickCommandDialogEvent::Close);
     }
 
-    /// 订阅「所属目录」Select 的变更事件，写回目录字段。
+    /// 订阅「所属目录」Select 与输入框的变更事件。
     /// 仅在 Entity 创建后调用一次（由 `show_quick_command_dialog` 负责）。
     pub fn setup_selects(&mut self, cx: &mut Context<Self>) {
         if let Some(reg) = self.overlay_registry.clone().or_else(|| OverlayRegistry::global(cx)) {
@@ -207,6 +284,28 @@ impl QuickCommandDialog {
             },
         )
         .detach();
+
+        if let Some(name_input) = &self.name_input {
+            cx.subscribe(name_input, |this, _emitter, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) && this.name_error_msg.is_some() {
+                    this.name_error_msg = None;
+                    cx.notify();
+                }
+            })
+            .detach();
+        }
+
+        if let Some(content_input) = &self.content_input {
+            cx.subscribe(content_input, |this, _emitter, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Change) {
+                    if this.content_error_msg.is_some() {
+                        this.content_error_msg = None;
+                    }
+                    this.sync_variables_with_content(cx);
+                }
+            })
+            .detach();
+        }
     }
 
     /// 将当前父目录同步到「所属目录」Select 组件（含动态文件夹列表）。
@@ -250,24 +349,126 @@ impl QuickCommandDialog {
         }
     }
 
-    fn add_variable(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        let name_placeholder = i18n!(cx, "quick_commands.var_name");
-        let def_placeholder = i18n!(cx, "quick_commands.var_default");
-        let hint_placeholder = i18n!(cx, "quick_commands.var_hint");
-        let name = cx.new(|cx| InputState::new(cx).placeholder(name_placeholder));
-        let default_value = cx.new(|cx| InputState::new(cx).placeholder(def_placeholder));
-        let hint = cx.new(|cx| InputState::new(cx).placeholder(hint_placeholder));
-        self.variables.push(VarDraft {
-            name,
-            default_value,
-            hint,
-            remove_focus: cx.focus_handle(),
+    /// 根据指令文本内容自动同步变量定义列表。
+    fn sync_variables_with_content(&mut self, cx: &mut Context<Self>) {
+        let Some(content_input) = &self.content_input else {
+            return;
+        };
+        let content = content_input.read(cx).text().to_string();
+        let current_vars = extract_quick_command_vars(&content);
+
+        let mut kept_drafts: Vec<VarDraft> = Vec::new();
+        let mut unreferenced_drafts: Vec<VarDraft> = Vec::new();
+
+        for var_name in &current_vars {
+            if let Some(pos) = self.variables.iter().position(|v| &v.name == var_name) {
+                let mut draft = self.variables.remove(pos);
+                draft.unreferenced = false;
+                kept_drafts.push(draft);
+            } else {
+                let def_placeholder = i18n!(cx, "quick_commands.var_default");
+                let hint_placeholder = i18n!(cx, "quick_commands.var_hint");
+                let default_value = cx.new(|cx| InputState::new(cx).placeholder(def_placeholder));
+                let hint = cx.new(|cx| InputState::new(cx).placeholder(hint_placeholder));
+                kept_drafts.push(VarDraft {
+                    name: var_name.clone(),
+                    default_value,
+                    hint,
+                    remove_focus: cx.focus_handle(),
+                    unreferenced: false,
+                });
+            }
+        }
+
+        for mut draft in self.variables.drain(..) {
+            let has_content = !draft.default_value.read(cx).text().trim().is_empty()
+                || !draft.hint.read(cx).text().trim().is_empty();
+            if has_content {
+                draft.unreferenced = true;
+                unreferenced_drafts.push(draft);
+            }
+        }
+
+        kept_drafts.extend(unreferenced_drafts);
+        self.variables = kept_drafts;
+        cx.notify();
+    }
+
+    /// 点击变量胶囊在指令文本框中循环定位并选中该占位符。
+    fn locate_variable_in_content(&self, var_name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(content_input) = &self.content_input else {
+            return;
+        };
+        let target = format!("{{{{{}}}}}", var_name);
+        let text = content_input.read(cx).text().to_string();
+        let cur_sel = content_input.read(cx).selection();
+        let occurrences: Vec<usize> = text.match_indices(&target).map(|(idx, _)| idx).collect();
+        if occurrences.is_empty() {
+            content_input.update(cx, |input, cx| {
+                input.focus(window, cx);
+            });
+            return;
+        }
+        let next_idx = if let Some(sel) = cur_sel {
+            occurrences.iter().find(|&&idx| idx > sel.start).copied().unwrap_or(occurrences[0])
+        } else {
+            occurrences[0]
+        };
+        let end = next_idx + target.len();
+        content_input.update(cx, |input, cx| {
+            input.set_selection(Some(next_idx..end), false, cx);
+            input.focus(window, cx);
+        });
+    }
+
+    /// 移除指定下标的变量定义，并逆向从指令文本中清理掉对应的占位符。
+    fn remove_variable_at(&mut self, idx: usize, cx: &mut Context<Self>) {
+        if idx >= self.variables.len() {
+            return;
+        }
+        let removed = self.variables.remove(idx);
+        let placeholder = format!("{{{{{}}}}}", removed.name);
+        if let Some(content_input) = &self.content_input {
+            let text = content_input.read(cx).text().to_string();
+            if text.contains(&placeholder) {
+                let new_text = text.replace(&placeholder, "");
+                content_input.update(cx, |input, cx| {
+                    input.set_value(new_text, cx);
+                });
+            }
+        }
+        cx.notify();
+    }
+
+    /// 在指令框当前光标处插入新变量模板，并自动聚焦重命名。
+    fn add_variable(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(content_input) = &self.content_input else {
+            return;
+        };
+        let existing_names: Vec<String> = self.variables.iter().map(|v| v.name.clone()).collect();
+        let next_name = if !existing_names.iter().any(|n| n == "variable") {
+            "variable".to_string()
+        } else {
+            let mut i = 1;
+            loop {
+                let cand = format!("variable_{}", i);
+                if !existing_names.iter().any(|n| n == &cand) {
+                    break cand;
+                }
+                i += 1;
+            }
+        };
+
+        content_input.update(cx, |input, cx| {
+            input.insert_variable_template(&next_name, cx);
+            input.focus(window, cx);
         });
         cx.notify();
     }
 
     fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.error_msg = None;
+        self.name_error_msg = None;
+        self.content_error_msg = None;
         let name = self
             .name_input
             .as_ref()
@@ -276,6 +477,9 @@ impl QuickCommandDialog {
             .trim()
             .to_string();
         if name.is_empty() {
+            if let Some(name_inp) = &self.name_input {
+                name_inp.update(cx, |input, cx| input.focus(window, cx));
+            }
             return;
         }
 
@@ -288,19 +492,45 @@ impl QuickCommandDialog {
         } else {
             String::new()
         };
+
+        if is_command {
+            if find_unclosed_var_placeholder(&command) {
+                self.content_error_msg = Some(i18n!(cx, "quick_commands.err_unclosed_variable"));
+                if let Some(ci) = &self.content_input {
+                    ci.update(cx, |input, cx| input.focus(window, cx));
+                }
+                cx.notify();
+                return;
+            }
+            if has_empty_var_placeholder(&command) {
+                self.content_error_msg = Some(i18n!(cx, "quick_commands.err_empty_variable"));
+                if let Some(ci) = &self.content_input {
+                    ci.update(cx, |input, cx| input.focus(window, cx));
+                }
+                cx.notify();
+                return;
+            }
+            if let Some(invalid_name) = find_invalid_var_placeholder(&command) {
+                self.content_error_msg = Some(
+                    i18n!(cx, "quick_commands.err_invalid_variable")
+                        .replace("{name}", &invalid_name),
+                );
+                if let Some(ci) = &self.content_input {
+                    ci.update(cx, |input, cx| input.focus(window, cx));
+                }
+                cx.notify();
+                return;
+            }
+        }
+
         let variables: Vec<QuickCommandVar> = if is_command {
             self.variables
                 .iter()
-                .filter_map(|v| {
-                    let n = v.name.read(cx).text().to_string().trim().to_string();
-                    if n.is_empty() {
-                        return None;
-                    }
-                    Some(QuickCommandVar {
-                        name: n,
-                        default_value: v.default_value.read(cx).text().to_string(),
-                        hint: v.hint.read(cx).text().to_string(),
-                    })
+                .filter(|v| !v.unreferenced)
+                .map(|v| QuickCommandVar {
+                    name: v.name.clone(),
+                    default_value: v.default_value.read(cx).text().to_string(),
+                    hint: v.hint.read(cx).text().to_string(),
                 })
                 .collect()
         } else {
@@ -329,8 +559,11 @@ impl QuickCommandDialog {
                 _ => (None, None),
             };
             if qc_node_name_exists(tree, check_parent.as_deref(), &name, except_id.as_deref()) {
-                self.error_msg =
+                self.name_error_msg =
                     Some(i18n!(cx, "sftp.dialog.name_exists").replace("{name}", &name));
+                if let Some(name_inp) = &self.name_input {
+                    name_inp.update(cx, |input, cx| input.focus(window, cx));
+                }
                 cx.notify();
                 return;
             }
@@ -561,40 +794,109 @@ impl QuickCommandDialog {
     fn render_variables(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
-        let _this = cx.entity();
+        let has_vars = !self.variables.is_empty();
 
         v_flex()
             .gap(SPACE_MD)
-            .child(
-                h_flex()
-                    .items_center()
-                    .gap(SPACE_SM)
-                    .child(
-                        div()
-                            .text_size(ui_text_md(cx))
-                            .text_color(rgb(t.text_secondary))
-                            .child(i18n!(cx, "quick_commands.variables")),
-                    )
-                    .child(
-                        div()
-                            .text_size(ui_text_sm(cx))
-                            .text_color(rgb(t.text_muted))
-                            .child(i18n!(cx, "quick_commands.variables_hint")),
-                    ),
-            )
+            .when(has_vars, |this| {
+                this.child(
+                    h_flex()
+                        .gap(SPACE_SM)
+                        .items_center()
+                        .px(SPACE_XS)
+                        .text_size(ui_text_sm(cx))
+                        .text_color(rgb(t.text_muted))
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(i18n!(cx, "quick_commands.var_name")),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(i18n!(cx, "quick_commands.var_default")),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .child(i18n!(cx, "quick_commands.var_hint")),
+                        )
+                        .child(div().w(px(20.0))),
+                )
+            })
             .children(self.variables.iter().enumerate().map(|(i, v)| {
                 let idx = i;
+                let var_name = v.name.clone();
+                let is_unref = v.unreferenced;
+
+                let badge_bg = if is_unref {
+                    p.status_warning.opacity(0.12)
+                } else {
+                    p.surface_raised
+                };
+                let badge_border = if is_unref {
+                    p.status_warning.opacity(0.5)
+                } else {
+                    p.border_subtle
+                };
+
+                let locate_tip = if is_unref {
+                    i18n!(cx, "quick_commands.var_unreferenced")
+                } else {
+                    i18n!(cx, "quick_commands.click_to_locate_var")
+                };
+
                 h_flex()
                     .gap(SPACE_SM)
                     .items_center()
                     .child(
-                        div().flex_1().child(velowork_ui::Input::new(&v.name).cleanable(true)),
+                        div()
+                            .id(ElementId::Name(format!("qc-var-badge-{}", idx).into()))
+                            .flex_1()
+                            .h(px(28.0))
+                            .px(SPACE_SM)
+                            .bg(badge_bg)
+                            .border_1()
+                            .border_color(badge_border)
+                            .rounded(RADIUS_STD)
+                            .cursor_pointer()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .hover(|s| s.bg(p.surface_hover))
+                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(locate_tip.clone())).into())
+                            .on_click(cx.listener({
+                                let name = var_name.clone();
+                                move |this, _, window, cx| {
+                                    this.locate_variable_in_content(&name, window, cx);
+                                }
+                            }))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(ui_text_sm(cx))
+                                    .font_family(mono_font_family(cx))
+                                    .text_color(if is_unref { p.status_warning } else { p.editor_variable })
+                                    .truncate()
+                                    .child(var_name),
+                            )
+                            .when(is_unref, |badge| {
+                                badge.child(
+                                    AppIcon::Info
+                                        .size(px(13.0))
+                                        .text_color(p.status_warning),
+                                )
+                            }),
                     )
                     .child(
-                        div().flex_1().child(velowork_ui::Input::new(&v.default_value).cleanable(true)),
+                        div()
+                            .flex_1()
+                            .child(velowork_ui::Input::new(&v.default_value).cleanable(true)),
                     )
                     .child(
-                        div().flex_1().child(velowork_ui::Input::new(&v.hint).cleanable(true)),
+                        div()
+                            .flex_1()
+                            .child(velowork_ui::Input::new(&v.hint).cleanable(true)),
                     )
                     .child({
                         let remove_focus = v.remove_focus.clone();
@@ -612,8 +914,7 @@ impl QuickCommandDialog {
                             .hover(|s| s.bg(rgb(t.bg_hover)))
                             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
                                 if matches!(event.keystroke.key.as_str(), "\n" | " ") {
-                                    this.variables.remove(idx);
-                                    cx.notify();
+                                    this.remove_variable_at(idx, cx);
                                 }
                             }))
                             .child(AppIcon::Trash.size(px(13.0)).text_color(rgb(t.text_muted)))
@@ -622,8 +923,7 @@ impl QuickCommandDialog {
                                 cx.new(|_| Tooltip::new(__tip)).into()
                             })
                             .on_click(cx.listener(move |this, _, _, cx| {
-                                this.variables.remove(idx);
-                                cx.notify();
+                                this.remove_variable_at(idx, cx);
                             }))
                     })
             }))
@@ -674,62 +974,6 @@ impl Render for QuickCommandDialog {
         // 同步「所属目录」下拉 Select 组件的选项与当前选中值。
         self.refresh_selects(cx);
 
-        if self.name_input.is_none() {
-            let placeholder = i18n!(cx, "quick_commands.name_placeholder");
-            let default_val = self.prefill_name.clone();
-            let input = cx.new(|cx| {
-                InputState::new(cx)
-                    .placeholder(placeholder)
-                    .default_value(&default_val)
-            });
-            self.name_input = Some(input);
-        }
-
-        if self.content_input.is_none() {
-            let placeholder = i18n!(cx, "quick_commands.content_placeholder");
-            let default_val = self.prefill_content.clone();
-            let input = cx.new(|cx| {
-                TextareaState::new(cx)
-                    .multiline()
-                    .placeholder(placeholder)
-                    .default_value(&default_val)
-            });
-            self.content_input = Some(input);
-        }
-
-        if !self.vars_initialized {
-            self.vars_initialized = true;
-            for v in &self.prefill_vars {
-                let name_placeholder = i18n!(cx, "quick_commands.var_name");
-                let def_placeholder = i18n!(cx, "quick_commands.var_default");
-                let hint_placeholder = i18n!(cx, "quick_commands.var_hint");
-                let name_val = v.name.clone();
-                let def_val = v.default_value.clone();
-                let hint_val = v.hint.clone();
-                let name = cx.new(|cx| {
-                    InputState::new(cx)
-                        .placeholder(name_placeholder)
-                        .default_value(&name_val)
-                });
-                let default_value = cx.new(|cx| {
-                    InputState::new(cx)
-                        .placeholder(def_placeholder)
-                        .default_value(&def_val)
-                });
-                let hint = cx.new(|cx| {
-                    InputState::new(cx)
-                        .placeholder(hint_placeholder)
-                        .default_value(&hint_val)
-                });
-                self.variables.push(VarDraft {
-                    name,
-                    default_value,
-                    hint,
-                    remove_focus: cx.focus_handle(),
-                });
-            }
-        }
-
         if !self.initial_focus_done {
             self.initial_focus_done = true;
             if self.previous_focus_handle.is_none() {
@@ -757,8 +1001,7 @@ impl Render for QuickCommandDialog {
             focus_group.add_with_height(h, 100.0);
         }
         for v in &self.variables {
-            focus_group.add(v.name.read(cx).focus_handle(cx));
-            focus_group.add_same_row(v.default_value.read(cx).focus_handle(cx));
+            focus_group.add(v.default_value.read(cx).focus_handle(cx));
             focus_group.add_same_row(v.hint.read(cx).focus_handle(cx));
             focus_group.add_same_row(v.remove_focus.clone());
         }
@@ -789,7 +1032,7 @@ impl Render for QuickCommandDialog {
                     .label(i18n!(cx, "quick_commands.name"))
                     .focus_opt(name_fh)
                     .required(true)
-                    .error_opt(self.error_msg.clone())
+                    .error_opt(self.name_error_msg.clone())
                     .child(
                         div().flex_1().when_some(self.name_input.as_ref(), |this, name| {
                             this.child(velowork_ui::Input::new(name).cleanable(true))
@@ -812,6 +1055,7 @@ impl Render for QuickCommandDialog {
                         .label(i18n!(cx, "quick_commands.content"))
                         .focus_opt(content_fh)
                         .required(true)
+                        .error_opt(self.content_error_msg.clone())
                         .child(
                             div().flex_1().when_some(self.content_input.as_ref(), |this, content| {
                                 this.child(velowork_ui::Input::new(content).fill_height().h(px(100.0)))

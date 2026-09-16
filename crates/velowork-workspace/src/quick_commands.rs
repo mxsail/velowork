@@ -463,6 +463,89 @@ pub fn default_quick_commands() -> Vec<QuickCommandNode> {
     Vec::new()
 }
 
+/// Check whether a character is valid inside a quick-command variable name.
+/// Allows Unicode alphanumeric characters (including CJK), underscores, and hyphens.
+pub fn is_valid_var_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_' || c == '-'
+}
+
+/// Check whether a string is a valid variable identifier.
+pub fn is_valid_var_name(name: &str) -> bool {
+    !name.is_empty() && name.chars().all(is_valid_var_char)
+}
+
+/// Extract all unique variable names from a command template in order of first appearance.
+/// Only matches `{{<valid_var_name>}}`.
+pub fn extract_quick_command_vars(template: &str) -> Vec<String> {
+    let mut vars = Vec::new();
+    let mut rest = template;
+    while let Some(start_idx) = rest.find("{{") {
+        let after_start = &rest[start_idx + 2..];
+        if let Some(end_idx) = after_start.find("}}") {
+            let candidate = &after_start[..end_idx];
+            if is_valid_var_name(candidate) && !vars.iter().any(|v| v == candidate) {
+                vars.push(candidate.to_string());
+            }
+            rest = &after_start[end_idx + 2..];
+        } else {
+            break;
+        }
+    }
+    vars
+}
+
+/// Check if the template contains unclosed `{{` placeholders (i.e. `{{` without a matching `}}`).
+pub fn find_unclosed_var_placeholder(template: &str) -> bool {
+    let mut rest = template;
+    while let Some(start_idx) = rest.find("{{") {
+        let after_start = &rest[start_idx + 2..];
+        if let Some(end_idx) = after_start.find("}}") {
+            rest = &after_start[end_idx + 2..];
+        } else {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if the template contains empty `{{}}` or whitespace-only `{{   }}` placeholders.
+pub fn has_empty_var_placeholder(template: &str) -> bool {
+    let mut rest = template;
+    while let Some(start_idx) = rest.find("{{") {
+        let after_start = &rest[start_idx + 2..];
+        if let Some(end_idx) = after_start.find("}}") {
+            let candidate = &after_start[..end_idx];
+            if candidate.trim().is_empty() {
+                return true;
+            }
+            rest = &after_start[end_idx + 2..];
+        } else {
+            break;
+        }
+    }
+    false
+}
+
+/// Check if the template contains `{{...}}` placeholders with invalid variable characters
+/// (e.g. spaces like `{{ foo }}`, or special punctuation like `{{foo.bar}}`).
+/// Returns the first invalid variable name found, if any.
+pub fn find_invalid_var_placeholder(template: &str) -> Option<String> {
+    let mut rest = template;
+    while let Some(start_idx) = rest.find("{{") {
+        let after_start = &rest[start_idx + 2..];
+        if let Some(end_idx) = after_start.find("}}") {
+            let candidate = &after_start[..end_idx];
+            if !candidate.trim().is_empty() && !is_valid_var_name(candidate) {
+                return Some(candidate.to_string());
+            }
+            rest = &after_start[end_idx + 2..];
+        } else {
+            break;
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,5 +563,39 @@ mod tests {
         assert_eq!(folders[1].1, "常用/Git");
         assert_eq!(folders[2].1, "常用/Git/分支");
         assert_eq!(folders[2].0, leaf_id);
+    }
+
+    #[test]
+    fn test_extract_quick_command_vars() {
+        let template = "ssh {{user}}@{{host}}:{{port}} -p {{port}} && echo {{用户名}} {{k8s-pod_id}}";
+        let vars = extract_quick_command_vars(template);
+        assert_eq!(vars, vec!["user", "host", "port", "用户名", "k8s-pod_id"]);
+    }
+
+    #[test]
+    fn test_find_unclosed_var_placeholder() {
+        assert!(!find_unclosed_var_placeholder("ssh {{host}}:{{port}}"));
+        assert!(find_unclosed_var_placeholder("ssh {{host}}:{{port"));
+        assert!(find_unclosed_var_placeholder("ssh {{"));
+    }
+
+    #[test]
+    fn test_has_empty_var_placeholder() {
+        assert!(!has_empty_var_placeholder("ssh {{host}}:{{port}}"));
+        assert!(has_empty_var_placeholder("ssh {{}}"));
+        assert!(has_empty_var_placeholder("ssh {{   }}"));
+    }
+
+    #[test]
+    fn test_find_invalid_var_placeholder() {
+        assert_eq!(find_invalid_var_placeholder("ssh {{host}}:{{port}}"), None);
+        assert_eq!(
+            find_invalid_var_placeholder("ssh {{ host }}"),
+            Some(" host ".to_string())
+        );
+        assert_eq!(
+            find_invalid_var_placeholder("ssh {{host.name}}"),
+            Some("host.name".to_string())
+        );
     }
 }
