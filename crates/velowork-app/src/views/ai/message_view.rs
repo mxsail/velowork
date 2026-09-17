@@ -78,7 +78,7 @@ fn render_user_message(
     // 1. 附件 Chips（如果有）
     if !msg.attachments.is_empty() {
         let chips = msg.attachments.iter().map(|att| {
-            render_attachment_chip(att, p)
+            render_attachment_chip(att, p, cx)
         });
         card_children.push(
             h_flex()
@@ -389,7 +389,7 @@ pub fn render_quote_capsule(
                 div()
                     .flex_shrink_0()
                     .when(expanded, |d| d.pt(px(2.0)))
-                    .text_size(ui_text_xs(cx))
+                    .text_size(ui_text_md(cx))
                     .text_color(p.text_muted)
                     .child(toggle_hint),
             ),
@@ -398,7 +398,7 @@ pub fn render_quote_capsule(
 }
 
 /// 渲染附件 Chip
-pub fn render_attachment_chip(att: &ChatAttachment, p: &SemanticPalette) -> AnyElement {
+pub fn render_attachment_chip(att: &ChatAttachment, p: &SemanticPalette, cx: &App) -> AnyElement {
     h_flex()
         .items_center()
         .gap(SPACE_XS)
@@ -411,7 +411,7 @@ pub fn render_attachment_chip(att: &ChatAttachment, p: &SemanticPalette) -> AnyE
         .child(AppIcon::File.size(px(11.0)).text_color(p.text_muted))
         .child(
             div()
-                .text_size(px(11.0))
+                .text_size(ui_text_md(cx))
                 .text_color(p.text_secondary)
                 .child(att.name.clone()),
         )

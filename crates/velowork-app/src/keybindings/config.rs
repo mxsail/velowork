@@ -24,6 +24,21 @@ impl Default for KeybindingConfig {
     }
 }
 
+/// 判断单键绑定是否会遮挡和弦绑定：
+/// - (None, None) => true (同为全局，单键抢先触发)
+/// - (Some(x), Some(y)) if x == y => true (同一 context，单键抢先触发)
+/// - (Some(_), None) => true (在局部 context 下按前缀键，单键优先于全局和弦)
+/// - (None, Some(_)) => false (全局单键不阻止特定 context 内的和弦)
+/// - (Some(x), Some(y)) if x != y => false (不同 context 互不影响)
+fn single_blocks_chord(single_ctx: Option<&str>, chord_ctx: Option<&str>) -> bool {
+    match (single_ctx, chord_ctx) {
+        (None, None) => true,
+        (Some(x), Some(y)) => x == y,
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+    }
+}
+
 impl KeybindingConfig {
     /// Create default keybinding configuration
     pub fn defaults() -> Self {
@@ -133,8 +148,8 @@ impl KeybindingConfig {
         bindings.insert(
             "TerminalInlineAi".to_string(),
             vec![
-                KeybindingEntry::new("cmd-k", None),
-                KeybindingEntry::new("ctrl-k", None),
+                KeybindingEntry::new("cmd-i", Some("TerminalPane")),
+                KeybindingEntry::new("ctrl-i", Some("TerminalPane")),
             ],
         );
         bindings.insert(
@@ -436,7 +451,7 @@ impl KeybindingConfig {
         }
     }
 
-    /// Check for keybinding conflicts.
+    /// Detect conflicts in the current keybinding configuration
     ///
     /// 分组维度为 `(keystroke, context)`：
     /// - 同一 context 下同一 keystroke 绑定到**不同 action** → `Hard` 冲突（错误）。
@@ -444,11 +459,13 @@ impl KeybindingConfig {
     ///   属于 GPUI 的合法 Context Override，因 `seen` 以 `(keystroke, context)` 为键，
     ///   不会落入同一组，故不报错。
     /// - 同一 keystroke 绑定到**相同 action** → 视为重复注册，不报告。
+    /// - 单键绑定作为和弦绑定的前缀（如 ctrl-k 与 ctrl-k ctrl-s）→ `ChordPrefix` 冲突。
     pub fn detect_conflicts(&self) -> Vec<KeybindingConflict> {
         use crate::keybindings::types::ConflictKind;
         let mut conflicts = Vec::new();
         let mut seen: HashMap<(String, Option<String>), String> = HashMap::new();
 
+        // 1. Exact match / Hard conflicts
         for (action, entries) in &self.bindings {
             for entry in entries {
                 if !entry.enabled {
@@ -465,10 +482,49 @@ impl KeybindingConfig {
                             action1: existing_action.clone(),
                             action2: action.clone(),
                             kind: ConflictKind::Hard,
+                            chord_keystroke: None,
                         });
                     }
                 } else {
                     seen.insert(key, action.clone());
+                }
+            }
+        }
+
+        // 2. Chord prefix conflicts
+        let mut singles = Vec::new();
+        let mut chords = Vec::new();
+
+        for (action, entries) in &self.bindings {
+            for entry in entries {
+                if !entry.enabled {
+                    continue;
+                }
+                if entry.keystroke.contains(' ') {
+                    chords.push((action.clone(), entry.keystroke.clone(), entry.context.clone()));
+                } else {
+                    singles.push((action.clone(), entry.keystroke.clone(), entry.context.clone()));
+                }
+            }
+        }
+
+        for (s_action, s_key, s_ctx) in &singles {
+            for (c_action, c_key, c_ctx) in &chords {
+                if s_action == c_action {
+                    continue;
+                }
+                let Some(prefix) = c_key.split_whitespace().next() else {
+                    continue;
+                };
+                if s_key == prefix && single_blocks_chord(s_ctx.as_deref(), c_ctx.as_deref()) {
+                    conflicts.push(KeybindingConflict {
+                        keystroke: s_key.clone(),
+                        context: s_ctx.clone(),
+                        action1: s_action.clone(),
+                        action2: c_action.clone(),
+                        kind: ConflictKind::ChordPrefix,
+                        chord_keystroke: Some(c_key.clone()),
+                    });
                 }
             }
         }
@@ -484,6 +540,7 @@ impl KeybindingConfig {
         context: Option<&str>,
     ) -> Option<KeybindingConflict> {
         use crate::keybindings::types::ConflictKind;
+        // 1. Exact match check
         for (act, entries) in &self.bindings {
             if act == action {
                 continue;
@@ -499,10 +556,66 @@ impl KeybindingConfig {
                         action1: act.clone(),
                         action2: action.to_string(),
                         kind: ConflictKind::Hard,
+                        chord_keystroke: None,
                     });
                 }
             }
         }
+
+        // 2. Chord prefix check (bidirectional)
+        let is_chord = keystroke.contains(' ');
+        if is_chord {
+            // Direction A: New key is a chord: check if any existing single key blocks its prefix
+            let Some(prefix) = keystroke.split_whitespace().next() else {
+                return None;
+            };
+            for (act, entries) in &self.bindings {
+                if act == action {
+                    continue;
+                }
+                for entry in entries {
+                    if !entry.enabled || entry.keystroke.contains(' ') {
+                        continue;
+                    }
+                    if entry.keystroke == prefix && single_blocks_chord(entry.context.as_deref(), context) {
+                        return Some(KeybindingConflict {
+                            keystroke: entry.keystroke.clone(),
+                            context: entry.context.clone(),
+                            action1: act.clone(),
+                            action2: action.to_string(),
+                            kind: ConflictKind::ChordPrefix,
+                            chord_keystroke: Some(keystroke.to_string()),
+                        });
+                    }
+                }
+            }
+        } else {
+            // Direction B: New key is a single key: check if it blocks any existing chord
+            for (act, entries) in &self.bindings {
+                if act == action {
+                    continue;
+                }
+                for entry in entries {
+                    if !entry.enabled || !entry.keystroke.contains(' ') {
+                        continue;
+                    }
+                    let Some(prefix) = entry.keystroke.split_whitespace().next() else {
+                        continue;
+                    };
+                    if prefix == keystroke && single_blocks_chord(context, entry.context.as_deref()) {
+                        return Some(KeybindingConflict {
+                            keystroke: keystroke.to_string(),
+                            context: context.map(|s| s.to_string()),
+                            action1: act.clone(),
+                            action2: action.to_string(),
+                            kind: ConflictKind::ChordPrefix,
+                            chord_keystroke: Some(entry.keystroke.clone()),
+                        });
+                    }
+                }
+            }
+        }
+
         None
     }
 
@@ -830,5 +943,37 @@ mod tests {
         // Unused shortcut should not conflict
         let no_conflict = config.check_conflict("SomeNewAction", "ctrl-alt-shift-super-f12", None);
         assert!(no_conflict.is_none(), "Unused keybinding should not conflict");
+    }
+
+    #[test]
+    fn test_chord_prefix_conflict() {
+        use crate::keybindings::types::ConflictKind;
+        let config = KeybindingConfig::defaults();
+
+        // 1. Defaults should have zero conflicts (neither Hard nor ChordPrefix)
+        let default_conflicts = config.detect_conflicts();
+        assert!(
+            default_conflicts.is_empty(),
+            "Default keybindings should have no conflicts, but found: {:?}",
+            default_conflicts
+        );
+
+        // 2. check_conflict Direction A: setting a chord whose prefix is already a single key
+        // "ctrl-q" is Quit (global). Setting "ctrl-q ctrl-x" should detect ChordPrefix conflict.
+        let chord_conflict = config.check_conflict("SomeAction", "ctrl-q ctrl-x", None);
+        assert!(chord_conflict.is_some());
+        let c = chord_conflict.unwrap();
+        assert_eq!(c.kind, ConflictKind::ChordPrefix);
+        assert_eq!(c.action1, "Quit");
+        assert_eq!(c.chord_keystroke.as_deref(), Some("ctrl-q ctrl-x"));
+
+        // 3. check_conflict Direction B: setting a single key that blocks an existing chord
+        // "ctrl-k ctrl-s" is ShowKeybindings. Setting "ctrl-k" should detect ChordPrefix conflict.
+        let single_conflict = config.check_conflict("SomeAction", "ctrl-k", None);
+        assert!(single_conflict.is_some());
+        let c = single_conflict.unwrap();
+        assert_eq!(c.kind, ConflictKind::ChordPrefix);
+        assert_eq!(c.action1, "ShowKeybindings");
+        assert_eq!(c.chord_keystroke.as_deref(), Some("ctrl-k ctrl-s"));
     }
 }

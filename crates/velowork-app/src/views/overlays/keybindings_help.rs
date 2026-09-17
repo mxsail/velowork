@@ -1,7 +1,7 @@
 use crate::keybindings::{
     format_keystroke, get_action_descriptions, get_config,
     keystroke_to_config_string, reset_to_defaults, update_config,
-    Cancel, KeybindingConfig, KeybindingEntry, ShowKeybindings,
+    Cancel, ConflictKind, KeybindingConfig, KeybindingEntry, ShowKeybindings,
 };
 use crate::theme::{surface_bg_t, theme};
 use crate::views::components::{modal_content, modal_header};
@@ -342,7 +342,15 @@ impl KeybindingsHelp {
                 .map(|d| d.name)
                 .unwrap_or(other_action.as_str());
             let translated_name = translate_action_name(other_name, &other_action, cx);
-            let msg = i18n!(cx, "keybindings.conflict_with").replace("{action}", &translated_name);
+            let msg = match conflict.kind {
+                ConflictKind::ChordPrefix => {
+                    let chord = conflict.chord_keystroke.as_deref().unwrap_or(&conflict.keystroke);
+                    i18n!(cx, "keybindings.conflict_chord_prefix")
+                        .replace("{chord}", chord)
+                        .replace("{action}", &translated_name)
+                }
+                _ => i18n!(cx, "keybindings.conflict_with").replace("{action}", &translated_name),
+            };
             self.pending_conflict = Some(msg);
         } else {
             self.pending_conflict = None;

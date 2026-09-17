@@ -85,6 +85,7 @@ impl WindowView {
                 project_id,
                 pos,
                 selection,
+                window,
                 cx,
             );
         });

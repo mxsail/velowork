@@ -55,8 +55,10 @@ pub struct KeybindingConflict {
     pub context: Option<String>,
     pub action1: String,
     pub action2: String,
-    /// 冲突分类：Hard（错误）或 Override（不同 context 的合法覆盖）。
+    /// 冲突分类：Hard（错误）、Override（合法覆盖）或 ChordPrefix（前缀遮挡）。
     pub kind: ConflictKind,
+    /// 仅 ChordPrefix 冲突时有值，记录被遮挡的完整和弦 keystroke。
+    pub chord_keystroke: Option<String>,
 }
 
 impl std::fmt::Display for KeybindingConflict {
@@ -76,6 +78,15 @@ impl std::fmt::Display for KeybindingConflict {
                 f,
                 "'{}'{} context override (legal): {} vs {}",
                 self.keystroke, ctx, self.action1, self.action2
+            ),
+            ConflictKind::ChordPrefix => write!(
+                f,
+                "'{}'{} chord-prefix conflict: {} (single) blocks {} (chord: {})",
+                self.keystroke,
+                ctx,
+                self.action1,
+                self.action2,
+                self.chord_keystroke.as_deref().unwrap_or("?")
             ),
         }
     }
@@ -104,6 +115,8 @@ pub enum ConflictKind {
     Hard,
     /// 不同 KeyContext 同一 keystroke，属于合法 context override，不报错。
     Override,
+    /// 单键绑定是和弦绑定的前缀，会导致和弦永远无法触发。
+    ChordPrefix,
 }
 
 /// Human-readable description of an action

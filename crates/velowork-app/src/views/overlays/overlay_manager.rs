@@ -1619,11 +1619,24 @@ impl OverlayManager {
         project_id: String,
         position: Point<Pixels>,
         selection_text: String,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let settings = settings_entity(cx).read(cx).settings.clone();
         if !settings.ai_enabled {
             return;
+        }
+
+        if self.terminal_ai_inline.is_open() && selection_text.trim().is_empty() {
+            if let Some(view) = self.terminal_ai_inline.render() {
+                if view.read(cx).terminal_id == terminal_id {
+                    view.update(cx, |this, cx| {
+                        this.focus_input(window, cx);
+                    });
+                    cx.notify();
+                    return;
+                }
+            }
         }
 
         let reg = Some(self.overlay_registry.clone());
@@ -1639,7 +1652,10 @@ impl OverlayManager {
         });
 
         self.subscribe_terminal_ai_inline(&view, cx);
-        self.terminal_ai_inline.set(view);
+        self.terminal_ai_inline.set(view.clone());
+        view.update(cx, |this, cx| {
+            this.focus_input(window, cx);
+        });
         cx.notify();
     }
 

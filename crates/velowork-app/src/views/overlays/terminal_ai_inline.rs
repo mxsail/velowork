@@ -27,7 +27,7 @@ use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, Se
 use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
 use velowork_ui::theme::theme;
 use velowork_ui::tokens::{
-    elevation_menu_shadow, ui_text_md, RADIUS_MD, RADIUS_SM,
+    elevation_menu_shadow, ui_text_md, RADIUS_MD,
     SPACE_MD, SPACE_SM, SPACE_XS,
 };
 use velowork_ui::tooltip::Tooltip;
@@ -40,6 +40,9 @@ use crate::views::ai::types::ChatMessage;
 /// Minimum dimensions for the resizable inline AI popover.
 const MIN_POPOVER_WIDTH: f32 = 360.0;
 const MIN_POPOVER_HEIGHT: f32 = 260.0;
+const DEFAULT_INPUT_HEIGHT: f32 = 96.0;
+const MIN_INPUT_HEIGHT: f32 = 72.0;
+const MIN_CHAT_HEIGHT: f32 = 140.0;
 
 /// Edges and corners of the inline AI popover available for resizing.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -72,6 +75,13 @@ pub struct PopoverResizeDrag {
     pub start_mouse: Point<Pixels>,
     pub start_size: Size<Pixels>,
     pub start_pos: Point<Pixels>,
+}
+
+/// Active dragging state when resizing the followup input card height.
+#[derive(Clone, Copy, Debug)]
+pub struct InputResizeDrag {
+    pub start_mouse_y: Pixels,
+    pub start_height: Pixels,
 }
 
 /// Mode of the inline AI view.
@@ -156,6 +166,8 @@ pub struct TerminalAiInline {
     pub has_no_model: bool,
     pub popover_size: Size<Pixels>,
     pub resize_drag: Option<PopoverResizeDrag>,
+    pub input_height: Pixels,
+    pub input_resize_drag: Option<InputResizeDrag>,
     pub messages: Vec<ChatMessage>,
     pub expanded_quotes: HashSet<usize>,
     pub copied_msg_index: Option<usize>,
@@ -189,7 +201,7 @@ impl TerminalAiInline {
             SimpleInputState::new(cx)
                 .placeholder(fu_ph)
                 .multiline()
-                .multiline_rows(2)
+                .fill_height(true)
                 .submit_on_enter(true)
         });
 
@@ -237,12 +249,26 @@ impl TerminalAiInline {
             has_no_model,
             popover_size: size(px(480.0), px(380.0)),
             resize_drag: None,
+            input_height: px(DEFAULT_INPUT_HEIGHT),
+            input_resize_drag: None,
             messages: Vec::new(),
             expanded_quotes: HashSet::new(),
             copied_msg_index: None,
             scroll_handle: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             animation_frame: 0,
+        }
+    }
+
+    /// Focus the input box appropriate for the current mode.
+    pub fn focus_input(&self, window: &mut Window, cx: &mut Context<Self>) {
+        match self.mode {
+            InlineAiMode::Toolbar => {
+                self.toolbar_input.update(cx, |inp, cx| inp.focus(window, cx));
+            }
+            InlineAiMode::Popover => {
+                self.followup_input.update(cx, |inp, cx| inp.focus(window, cx));
+            }
         }
     }
 
@@ -428,7 +454,7 @@ impl TerminalAiInline {
                 .options(options)
                 .selected(selected)
                 .placeholder(i18n!(cx, "ai_assistant.model"))
-                .placement(SelectPlacement::Below)
+                .placement(SelectPlacement::Above)
                 .ghost(true)
                 .size(ControlSize::Compact)
                 .text_size(ui_text_md(cx));
@@ -714,8 +740,13 @@ impl Render for TerminalAiInline {
             InlineAiMode::Popover => point(self.position.x, self.position.y + px(4.0)),
         };
 
-        let drag_overlay = if let Some(drag) = self.resize_drag {
-            let cursor = drag.edge.cursor_style();
+        let is_dragging = self.resize_drag.is_some() || self.input_resize_drag.is_some();
+        let drag_overlay = if is_dragging {
+            let cursor = if let Some(drag) = self.resize_drag {
+                drag.edge.cursor_style()
+            } else {
+                CursorStyle::ResizeUpDown
+            };
             let drag_entity = cx.entity().downgrade();
             Some(
                 deferred(
@@ -798,6 +829,11 @@ impl Render for TerminalAiInline {
                                                         _ => {}
                                                     }
 
+                                                    let max_input = (new_h - MIN_CHAT_HEIGHT).max(MIN_INPUT_HEIGHT);
+                                                    if f32::from(this.input_height) > max_input {
+                                                        this.input_height = px(max_input);
+                                                    }
+
                                                     if this.popover_size.width != px(new_w)
                                                         || this.popover_size.height != px(new_h)
                                                         || this.position.x != px(new_x)
@@ -805,6 +841,14 @@ impl Render for TerminalAiInline {
                                                     {
                                                         this.popover_size = size(px(new_w), px(new_h));
                                                         this.position = point(px(new_x), px(new_y));
+                                                        cx.notify();
+                                                    }
+                                                } else if let Some(drag) = this.input_resize_drag {
+                                                    let delta_y = f32::from(e.position.y - drag.start_mouse_y);
+                                                    let max_input = (f32::from(this.popover_size.height) - MIN_CHAT_HEIGHT).max(MIN_INPUT_HEIGHT);
+                                                    let new_h = (f32::from(drag.start_height) - delta_y).clamp(MIN_INPUT_HEIGHT, max_input);
+                                                    if this.input_height != px(new_h) {
+                                                        this.input_height = px(new_h);
                                                         cx.notify();
                                                     }
                                                 }
@@ -822,7 +866,7 @@ impl Render for TerminalAiInline {
                                         }
                                         if let Some(entity) = ent_up.upgrade() {
                                             entity.update(cx, |this, cx| {
-                                                if this.resize_drag.take().is_some() {
+                                                if this.resize_drag.take().is_some() || this.input_resize_drag.take().is_some() {
                                                     cx.notify();
                                                 }
                                             });
@@ -1126,11 +1170,13 @@ impl TerminalAiInline {
                             .flex()
                             .items_center()
                             .gap(SPACE_XS)
-                            .child(AppIcon::AiAssistant.size(px(14.0)).text_color(p.text_primary))
+                            .child(AppIcon::AiAssistant.size(px(14.0)).text_color(p.surface_accent))
                             .child(
                                 div()
-                                    .w(px(140.0))
-                                    .child(Select::new(&self.model_select)),
+                                    .text_size(ui_text_md(cx))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(p.text_primary)
+                                    .child(i18n!(cx, "ai_assistant.title")),
                             ),
                     )
                     .child(
@@ -1139,12 +1185,7 @@ impl TerminalAiInline {
                             .items_center()
                             .gap(SPACE_XS)
                             .child(
-                                div()
-                                    .id("btn-popover-to-panel")
-                                    .cursor_pointer()
-                                    .p(px(3.0))
-                                    .rounded(RADIUS_SM)
-                                    .hover(|s| s.bg(p.surface_hover))
+                                icon_button_sized("btn-popover-to-panel", AppIcon::ExternalLink, 22.0, 13.0, &t)
                                     .tooltip(move |_, cx| cx.new(|_| Tooltip::new(to_panel_tip)).into())
                                     .on_click(cx.listener(move |_, _, _, cx| {
                                         cx.emit(TerminalAiInlineEvent::ContinueInSidePanel {
@@ -1152,25 +1193,14 @@ impl TerminalAiInline {
                                             reply: reply.clone(),
                                         });
                                         cx.emit(TerminalAiInlineEvent::Close);
-                                    }))
-                                    .child(
-                                        AppIcon::ExternalLink
-                                            .size(px(13.0))
-                                            .text_color(p.text_secondary),
-                                    ),
+                                    })),
                             )
                             .child(
-                                div()
-                                    .id("btn-popover-close")
-                                    .cursor_pointer()
-                                    .p(px(3.0))
-                                    .rounded(RADIUS_SM)
-                                    .hover(|s| s.bg(p.surface_hover))
+                                icon_button_sized("btn-popover-close", AppIcon::Close, 22.0, 13.0, &t)
                                     .tooltip(move |_, cx| cx.new(|_| Tooltip::new(close_tip)).into())
                                     .on_click(cx.listener(|_, _, _, cx| {
                                         cx.emit(TerminalAiInlineEvent::Close);
-                                    }))
-                                    .child(AppIcon::Close.size(px(13.0)).text_color(p.text_secondary)),
+                                    })),
                             ),
                     ),
             )
@@ -1197,7 +1227,7 @@ impl TerminalAiInline {
                                 .py(px(16.0))
                                 .child(
                                     div()
-                                        .text_size(px(12.0))
+                                        .text_size(ui_text_md(cx))
                                         .text_color(p.text_muted)
                                         .child(i18n!(cx, "terminal.inline_ai_no_model_configured")),
                                 )
@@ -1209,7 +1239,7 @@ impl TerminalAiInline {
                                         .py(px(4.0))
                                         .rounded(RADIUS_MD)
                                         .bg(p.surface_accent)
-                                        .text_size(px(11.5))
+                                        .text_size(ui_text_md(cx))
                                         .text_color(p.text_on_accent)
                                         .on_click(cx.listener(|_, _, _, cx| {
                                             cx.emit(TerminalAiInlineEvent::OpenSettings);
@@ -1227,7 +1257,7 @@ impl TerminalAiInline {
                                     .p(SPACE_SM)
                                     .rounded(RADIUS_MD)
                                     .bg(p.surface_danger)
-                                    .text_size(px(12.0))
+                                    .text_size(ui_text_md(cx))
                                     .text_color(p.text_primary)
                                     .child(format!("Error: {}", err))
                                     .into_any_element()
@@ -1356,25 +1386,53 @@ impl TerminalAiInline {
             // --- Footer: Followup Input ---
             .child(
                 div()
-                    .p(SPACE_XS)
+                    .px(SPACE_XS)
+                    .pb(SPACE_XS)
+                    .pt(px(2.0))
                     .flex_shrink_0()
                     .bg(p.surface_overlay)
                     .rounded_b(RADIUS_MD)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .child(
                         div()
+                            .relative()
                             .w_full()
+                            .h(self.input_height)
                             .rounded(RADIUS_MD)
                             .border_1()
                             .border_color(p.border_subtle)
                             .bg(p.surface_raised)
-                            .p(SPACE_XS)
+                            .p(px(4.0))
                             .flex()
                             .flex_col()
+                            .justify_between()
+                            // Top Splitter / Resize Handle for input card
                             .child(
                                 div()
+                                    .absolute()
+                                    .top(px(-4.0))
+                                    .left(px(4.0))
+                                    .right(px(4.0))
+                                    .h(px(8.0))
+                                    .cursor(CursorStyle::ResizeUpDown)
+                                    .on_mouse_down(
+                                        MouseButton::Left,
+                                        cx.listener(|this, e: &MouseDownEvent, _window, cx| {
+                                            cx.stop_propagation();
+                                            this.input_resize_drag = Some(InputResizeDrag {
+                                                start_mouse_y: e.position.y,
+                                                start_height: this.input_height,
+                                            });
+                                            cx.notify();
+                                        }),
+                                    ),
+                            )
+                            // Input Text Area
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_h(px(28.0))
                                     .w_full()
+                                    .overflow_hidden()
                                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
                                         if event.keystroke.key.as_str() == "escape" {
                                             cx.emit(TerminalAiInlineEvent::Close);
@@ -1406,13 +1464,21 @@ impl TerminalAiInline {
                                     .child(
                                         SimpleInput::new(&self.followup_input)
                                             .borderless(true)
+                                            .fill_height()
                                             .text_size(ui_text_md(cx)),
                                     ),
                             )
+                            // Bottom Controls Bar: Model selector on bottom-left (4px margin), Send on bottom-right
                             .child(
                                 h_flex()
-                                    .justify_end()
+                                    .items_center()
+                                    .justify_between()
                                     .pt(px(2.0))
+                                    .child(
+                                        div()
+                                            .w(px(140.0))
+                                            .child(Select::new(&self.model_select)),
+                                    )
                                     .child(
                                         icon_button_sized(
                                             btn_id,

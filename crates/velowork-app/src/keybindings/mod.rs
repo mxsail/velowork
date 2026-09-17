@@ -11,7 +11,7 @@ pub use config::{
 };
 pub use descriptions::get_action_descriptions;
 #[allow(unused_imports)]
-pub use types::{ActionDescription, KeybindingConflict, KeybindingEntry};
+pub use types::{ActionDescription, ConflictKind, KeybindingConflict, KeybindingEntry};
 
 // App-level actions (handled by window view, overlay manager, sidebar)
 actions!(
