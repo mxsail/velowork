@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.7] - 2026-09-18
+
+### Added / 新增
+- **终端 Inline AI 浮窗交互与视觉美化**：
+  - 支持通过浮窗边框热区自由拖拽调整宽度与高度尺寸；增加主题强调色品牌图标；修复输入框聚焦光标与多行自动撑高排版。  
+  *(Terminal Inline AI popover enhancements with freeform drag-resizing, theme accent branding icon, and input focus cursor fixes).*
+- **场景化 AI 上下文架构与 Prompt Caching 对齐**：
+  - 引入 `TerminalContextSnapshot` 上下文生成管道，自动进行 ANSI 逃逸序列剥离、终端长屏幕首尾保留截断与选中文本引用；严格保障 System -> Context -> User 顺序以最大化利用大模型上下文缓存（Prompt Caching）；支持将浮窗对话及上下文一键无缝升级到侧栏持久化会话。  
+  *(Contextual terminal AI snapshot pipeline with ANSI stripping, smart head-tail screen truncation, quote references, Prompt Caching alignment, and one-click escalation to sidebar).*
+
+### Improved / 优化
+- **Command Palette 快捷键跨平台自适应与键帽药丸风格对齐**：
+  - 彻底修复 Linux/Windows 环境下命令面板误显 Mac `Cmd` 快捷键的缺陷，统一抽象底层平台匹配单一事实来源；Linux/Windows 自动显示 `Ctrl+Shift+P`、`Ctrl+Q`，macOS 显示 `⌘⇧P`、`⌘Q`。
+  - 命令面板右侧快捷键胶囊样式全面对齐快捷键管理设置面板（轻量键帽药丸框、卡片表面背景、微弱细描边、等宽字体与语义文本色）。
+  - 命令搜索词库（`haystack`）扩充了格式化快捷键文本，支持输入快捷键（如 `ctrl+p`、`shift`）直接反向模糊检索命令。  
+  *(Command Palette shortcut platform adaptation showing Ctrl on Linux/Windows and Cmd on macOS, aligned keycap pill card styling, and reverse fuzzy search by shortcuts).*
+
+### Fixed / 修复
+- **开始录制按钮图标与底层 Button 组件渲染修复**：
+  - 修复底层 `Button` 组件在渲染 `icon_left` 与 `icon_right` 时缺少 `text_color` 导致 GPUI 忽略 SVG 绘制的缺陷；并将开始录制主按钮图标规范对齐为标准的 `AppIcon::Play`。  
+  *(Fix underlying Button component SVG text_color inheritance and align start recording modal icon to Play).*
+- **日志保存完成弹窗按钮图标精简**：
+  - 移除日志录制已保存弹窗中打开文件和打开目录按钮的多余图标，保持操作按钮纯文字排版干净整洁。  
+  *(Remove redundant icons from log saved dialog action buttons).*
+
 ## [0.1.0-beta.6] - 2026-09-17
 
 ### Added / 新增
