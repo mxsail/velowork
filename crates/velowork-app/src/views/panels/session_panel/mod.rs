@@ -8554,16 +8554,18 @@ impl Render for SessionPanel {
                 .into()
         });
 
+        let active_project_tooltip = active_project_name.clone();
+
         let footer_toolbar = h_flex()
             .h(px(velowork_ui::tab_height(cx)))
             .px(ui_space_xs(cx))
             .gap(ui_space_xs(cx))
             .items_center()
-            .border_t_1()
-            .border_color(p.border_subtle)
+            .bg(surface_bg(t.bg_secondary, cx))
             .child(
                 h_flex()
                     .id("project-selector-trigger")
+                    .group("project-selector-trigger")
                     .relative()
                     .flex_1()
                     .min_w_0()
@@ -8587,15 +8589,21 @@ impl Render for SessionPanel {
                             .text_size(ui_text_md(cx))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(rgb(t.text_secondary))
+                            .group_hover("project-selector-trigger", |s| s.text_color(rgb(t.text_primary)))
                             .truncate()
                             .child(active_project_name),
                     )
                     .child(
                         AppIcon::ChevronDown
                             .size(ui_icon_std_ts(cx))
-                            .text_color(rgb(t.text_muted)),
+                            .text_color(rgb(t.text_secondary))
+                            .group_hover("project-selector-trigger", |s| s.text_color(rgb(t.text_primary))),
                     )
-                    .child(project_selector_canvas),
+                    .child(project_selector_canvas)
+                    .tooltip(move |_, cx| {
+                        cx.new(|_| Tooltip::new(active_project_tooltip.clone()).direction(TooltipDirection::Top))
+                            .into()
+                    }),
             )
             .child(settings_btn);
 
