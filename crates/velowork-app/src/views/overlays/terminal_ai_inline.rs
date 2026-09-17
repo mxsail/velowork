@@ -6,6 +6,7 @@
 //!    follow-up conversation, and seamless escalation to the right AI assistant dock panel.
 
 use gpui::*;
+use std::collections::HashSet;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -156,6 +157,7 @@ pub struct TerminalAiInline {
     pub popover_size: Size<Pixels>,
     pub resize_drag: Option<PopoverResizeDrag>,
     pub messages: Vec<ChatMessage>,
+    pub expanded_quotes: HashSet<usize>,
     pub copied_msg_index: Option<usize>,
     pub scroll_handle: ScrollHandle,
     pub focus_handle: FocusHandle,
@@ -236,6 +238,7 @@ impl TerminalAiInline {
             popover_size: size(px(480.0), px(380.0)),
             resize_drag: None,
             messages: Vec::new(),
+            expanded_quotes: HashSet::new(),
             copied_msg_index: None,
             scroll_handle: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
@@ -1241,6 +1244,7 @@ impl TerminalAiInline {
                         let inline_for_run = cx.entity().downgrade();
                         let inline_for_copy = cx.entity().downgrade();
                         let inline_for_sel = cx.entity().downgrade();
+                        let inline_for_quote = cx.entity().downgrade();
                         let tid_ins = self.terminal_id.clone();
                         let tid_run = self.terminal_id.clone();
 
@@ -1300,7 +1304,17 @@ impl TerminalAiInline {
                                 }
                             })),
                             on_context_menu: None,
-                            on_toggle_quote: None,
+                            on_toggle_quote: Some(Arc::new({
+                                let w = inline_for_quote;
+                                move |msg_idx: usize, _window: &mut Window, cx: &mut App| {
+                                    let _ = w.update(cx, |this, cx| {
+                                        if !this.expanded_quotes.remove(&msg_idx) {
+                                            this.expanded_quotes.insert(msg_idx);
+                                        }
+                                        cx.notify();
+                                    });
+                                }
+                            })),
                             on_edit_message: None,
                         };
 
@@ -1324,12 +1338,13 @@ impl TerminalAiInline {
                                     } else {
                                         None
                                     };
+                                    let is_quote_expanded = self.expanded_quotes.contains(&msg_idx);
                                     render_chat_message(
                                         msg,
                                         msg_idx,
                                         frame,
                                         copied_idx == Some(msg_idx),
-                                        false, // quote_expanded — popover uses simple collapsed quotes
+                                        is_quote_expanded,
                                         active_sel,
                                         &callbacks,
                                         cx,

@@ -343,9 +343,11 @@ pub fn render_quote_capsule(
         .border_color(p.surface_accent)
         .when(on_toggle.is_some(), |d| {
             let on_toggle = on_toggle.unwrap();
-            d.cursor_pointer().on_click(move |_ev, window, cx| {
-                on_toggle(msg_index, window, cx);
-            })
+            d.cursor_pointer()
+                .hover(|s| s.bg(p.surface_selection))
+                .on_click(move |_ev, window, cx| {
+                    on_toggle(msg_index, window, cx);
+                })
         });
 
     let toggle_hint: &'static str = if expanded {
@@ -356,13 +358,18 @@ pub fn render_quote_capsule(
 
     card.child(
         h_flex()
-            .items_start()
+            .when(expanded, |d| d.items_start())
+            .when(!expanded, |d| d.items_center())
             .gap(SPACE_XS)
             .child(
-                AppIcon::Terminal
-                    .size(px(12.0))
-                    .text_color(p.text_muted)
-                    .flex_shrink_0(),
+                div()
+                    .flex_shrink_0()
+                    .when(expanded, |d| d.pt(px(2.0)))
+                    .child(
+                        AppIcon::Terminal
+                            .size(px(12.0))
+                            .text_color(p.text_muted),
+                    ),
             )
             .child(
                 div()
@@ -380,6 +387,8 @@ pub fn render_quote_capsule(
             )
             .child(
                 div()
+                    .flex_shrink_0()
+                    .when(expanded, |d| d.pt(px(2.0)))
                     .text_size(ui_text_xs(cx))
                     .text_color(p.text_muted)
                     .child(toggle_hint),

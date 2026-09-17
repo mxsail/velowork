@@ -6280,76 +6280,26 @@ fn render_ai_message(
             if !q.trim().is_empty() {
                 let expanded = expanded_quotes.contains(&msg_index);
                 let entity = panel_entity.clone();
-                let quote_text = q.clone();
-                let expand_label = if expanded {
-                    i18n!(cx, "ai_assistant.quote_collapse")
-                } else {
-                    i18n!(cx, "ai_assistant.quote_expand")
-                };
-                out.push(
-                    div()
-                        .rounded(px(6.0))
-                        .border_l_2()
-                        .border_color(p.surface_accent)
-                        .bg(p.surface_hover)
-                        .overflow_hidden()
-                        .child(
-                            div()
-                                .id(("ai-quote-card", msg_index))
-                                .flex()
-                                .items_center()
-                                .justify_between()
-                                .gap(SPACE_SM)
-                                .px(px(8.0))
-                                .py(SPACE_XS)
-                                .cursor_pointer()
-                                .on_click({
-                                    let entity = entity.clone();
-                                    move |_ev, _window, cx| {
-                                        entity.update(cx, |this, cx| {
-                                            let mut v = this.ai_expanded_quotes.borrow_mut();
-                                            if let Some(pos) =
-                                                v.iter().position(|x| *x == msg_index)
-                                            {
-                                                v.remove(pos);
-                                            } else {
-                                                v.push(msg_index);
-                                            }
-                                            cx.notify();
-                                        });
-                                    }
-                                })
-                                .child(
-                                    h_flex()
-                                        .items_center()
-                                        .gap(SPACE_XS)
-                                        .flex_1()
-                                        .min_w(px(0.0))
-                                        .child(AppIcon::Terminal.size(px(12.0)).text_color(p.text_muted))
-                                        .child(
-                                            div()
-                                                .flex_1()
-                                                .min_w(px(0.0))
-                                                .font_family(mono_font_family(cx))
-                                                .text_size(ui_text_md(cx))
-                                                .text_color(p.text_muted)
-                                                .when(!expanded, |d| {
-                                                    d.truncate().whitespace_nowrap().child(
-                                                        quote_text.lines().collect::<Vec<_>>().join(" "),
-                                                    )
-                                                })
-                                                .when(expanded, |d| d.child(quote_text.clone())),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(ui_text_xs(cx))
-                                        .text_color(p.text_muted)
-                                        .child(expand_label),
-                                ),
-                        )
-                        .into_any_element(),
-                );
+                let on_toggle: Option<Arc<dyn Fn(usize, &mut Window, &mut App) + Send + Sync>> =
+                    Some(Arc::new(move |msg_idx, _window, cx| {
+                        let _ = entity.update(cx, |this, cx| {
+                            let mut v = this.ai_expanded_quotes.borrow_mut();
+                            if let Some(pos) = v.iter().position(|x| *x == msg_idx) {
+                                v.remove(pos);
+                            } else {
+                                v.push(msg_idx);
+                            }
+                            cx.notify();
+                        });
+                    }));
+                out.push(crate::views::ai::message_view::render_quote_capsule(
+                    q,
+                    msg_index,
+                    expanded,
+                    on_toggle,
+                    &p,
+                    cx,
+                ));
             }
         }
         let lines: Vec<&str> = msg.text.split('\n').collect();
