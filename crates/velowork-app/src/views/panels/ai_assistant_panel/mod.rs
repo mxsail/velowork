@@ -33,7 +33,7 @@ use velowork_ui::theme::{ThemeColors, surface_bg, theme, with_alpha};
 use velowork_ui::tokens::{
     elevation_menu_shadow, ui_space_sm, ui_space_xs,
     ICON_MD, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_SM, RADIUS_STD, RADIUS_XS,
-    SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
+    SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
     markdown_font_family, mono_font_family, ui_font_family, ui_text_md, ui_text_sm,
     ui_text_xs, use_custom_markdown_font, use_custom_ui_font,
 };
@@ -3349,6 +3349,7 @@ impl AiAssistantPanel {
                         .pl(SPACE_LG)
                         .pr(px(14.0))
                         .py(SPACE_SM)
+                        .rounded(RADIUS_STD)
                         .cursor_pointer()
                         .stateful_behavior(HoverBehavior {
                             hover_bg: rgb(t.bg_hover).into(),
@@ -3398,6 +3399,7 @@ impl AiAssistantPanel {
                         .w_full()
                         .max_h(px(260.0))
                         .py(SPACE_XS)
+                        .gap(SPACE_2XS)
                         .overflow_y_scroll()
                         .track_scroll(scroll_handle)
                         .children(items),
