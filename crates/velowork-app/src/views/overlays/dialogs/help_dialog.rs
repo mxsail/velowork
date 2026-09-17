@@ -15,7 +15,7 @@ use velowork_i18n::i18n;
 use velowork_ui::button::Button;
 use velowork_ui::design::appearance::ControlSize;
 use velowork_ui::icon::AppIcon;
-use velowork_ui::scrollable::ScrollableElement;
+use velowork_ui::scrollable::Scrollbar;
 use velowork_ui::tokens::{
     RADIUS_MD, RADIUS_STD, RADIUS_XS, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL,
     SPACE_XS,
@@ -27,6 +27,7 @@ use velowork_ui::{h_flex, v_flex};
 pub struct HelpDialog {
     focus_handle: FocusHandle,
     close_button_focus: FocusHandle,
+    scroll_handle: ScrollHandle,
 }
 
 /// 弹窗事件：关闭时由 `toggle_overlay!` / `open_overlay!` 订阅并处理。
@@ -41,6 +42,7 @@ impl HelpDialog {
         Self {
             focus_handle: cx.focus_handle(),
             close_button_focus: cx.focus_handle(),
+            scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -60,6 +62,7 @@ impl HelpDialog {
         let close_tip = i18n!(cx, "common.close");
 
         div()
+            .flex_shrink_0()
             .px(SPACE_XL)
             .py(px(12.0))
             .border_b_1()
@@ -107,7 +110,7 @@ impl HelpDialog {
     fn render_shortcut_item(
         &self,
         label: String,
-        keys: &[&str],
+        keys: Vec<String>,
         _t: &ThemeColors,
         cx: &App,
     ) -> impl IntoElement {
@@ -130,7 +133,7 @@ impl HelpDialog {
                 h_flex()
                     .items_center()
                     .gap(SPACE_XS)
-                    .children(keys.iter().map(|key| {
+                    .children(keys.into_iter().map(|key| {
                         div()
                             .px(SPACE_SM)
                             .py(px(2.0))
@@ -141,9 +144,22 @@ impl HelpDialog {
                             .text_size(ui_text_xs(cx))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(p.text_muted)
-                            .child(key.to_string())
+                            .child(key)
                     })),
             )
+    }
+
+    fn render_action_shortcut(
+        &self,
+        label: String,
+        action: &str,
+        fallback_keys: &[&str],
+        t: &ThemeColors,
+        cx: &App,
+    ) -> impl IntoElement {
+        let keys = crate::keybindings::shortcut_keys_for_action(action)
+            .unwrap_or_else(|| fallback_keys.iter().map(|s| s.to_string()).collect());
+        self.render_shortcut_item(label, keys, t, cx)
     }
 
     fn render_help_link(
@@ -175,23 +191,25 @@ impl HelpDialog {
     fn render_body(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
-        let mod_key = if cfg!(target_os = "macos") {
+        let is_mac = cfg!(target_os = "macos");
+        let mod_key = if is_mac {
             "⌘"
         } else {
             "Ctrl"
         };
 
         let quick_start_title = i18n!(cx, "help.quick_start");
-        let s_new_ssh = i18n!(cx, "help.shortcut_new_ssh");
+        let s_new_session = i18n!(cx, "help.shortcut_new_session");
+        let s_add_tab = i18n!(cx, "help.shortcut_add_tab");
+        let s_palette = i18n!(cx, "help.shortcut_command_palette");
         let s_toggle_sidebar = i18n!(cx, "help.shortcut_toggle_sidebar");
         let s_toggle_right = i18n!(cx, "help.shortcut_toggle_right_panel");
         let s_toggle_bottom = i18n!(cx, "help.shortcut_toggle_bottom_panel");
-        let s_search = i18n!(cx, "help.shortcut_search_connections");
         let s_close_tab = i18n!(cx, "help.shortcut_close_tab");
 
         let common_ops_title = i18n!(cx, "help.common_operations");
-        let conn_title = i18n!(cx, "help.connection_mgmt_title");
-        let conn_desc = i18n!(cx, "help.connection_mgmt_desc");
+        let session_title = i18n!(cx, "help.session_mgmt_title");
+        let session_desc = i18n!(cx, "help.session_mgmt_desc");
         let qc_title = i18n!(cx, "help.quick_commands_title");
         let qc_prefix = i18n!(cx, "help.quick_commands_desc_prefix");
         let qc_var = i18n!(cx, "help.quick_commands_var");
@@ -209,10 +227,13 @@ impl HelpDialog {
         let community_label = i18n!(cx, "help.community_label");
         let community_url = i18n!(cx, "help.community_url");
 
-        v_flex()
+        let body_content = v_flex()
+            .id("help-dialog-body-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.scroll_handle)
             .gap(SPACE_XL)
             .p(SPACE_XL)
-            .overflow_y_scrollbar()
             // 1. 快速入门 (Quick Start)
             .child(
                 v_flex()
@@ -221,27 +242,55 @@ impl HelpDialog {
                     .child(
                         v_flex()
                             .gap(px(2.0))
-                            .child(self.render_shortcut_item(s_new_ssh, &[mod_key, "N"], &t, cx))
-                            .child(self.render_shortcut_item(
+                            .child(self.render_action_shortcut(
+                                s_new_session,
+                                "NewSession",
+                                &[mod_key, "N"],
+                                &t,
+                                cx,
+                            ))
+                            .child(self.render_action_shortcut(
+                                s_add_tab,
+                                "AddTab",
+                                if is_mac { &["⌘", "T"] } else { &["Ctrl", "Shift", "T"] },
+                                &t,
+                                cx,
+                            ))
+                            .child(self.render_action_shortcut(
+                                s_palette,
+                                "ShowCommandPalette",
+                                if is_mac { &["⌘", "⇧", "P"] } else { &["Ctrl", "Shift", "P"] },
+                                &t,
+                                cx,
+                            ))
+                            .child(self.render_action_shortcut(
                                 s_toggle_sidebar,
+                                "ToggleLeftDock",
                                 &[mod_key, "B"],
                                 &t,
                                 cx,
                             ))
-                            .child(self.render_shortcut_item(
+                            .child(self.render_action_shortcut(
                                 s_toggle_right,
-                                &[mod_key, "\\"],
+                                "ToggleRightDock",
+                                if is_mac { &["⌘", "⇧", "R"] } else { &["Ctrl", "Shift", "R"] },
                                 &t,
                                 cx,
                             ))
-                            .child(self.render_shortcut_item(
+                            .child(self.render_action_shortcut(
                                 s_toggle_bottom,
-                                &[mod_key, "`"],
+                                "ToggleCommandsPanel",
+                                if is_mac { &["⌘", "⇧", "Y"] } else { &["Ctrl", "Shift", "Y"] },
                                 &t,
                                 cx,
                             ))
-                            .child(self.render_shortcut_item(s_search, &[mod_key, "F"], &t, cx))
-                            .child(self.render_shortcut_item(s_close_tab, &[mod_key, "W"], &t, cx)),
+                            .child(self.render_action_shortcut(
+                                s_close_tab,
+                                "CloseTerminal",
+                                if is_mac { &["⌘", "W"] } else { &["Ctrl", "Shift", "W"] },
+                                &t,
+                                cx,
+                            )),
                     ),
             )
             // 2. 常用操作 (Common Operations)
@@ -260,10 +309,10 @@ impl HelpDialog {
                                         div()
                                             .font_weight(FontWeight::BOLD)
                                             .text_color(rgb(t.text_primary))
-                                            .child(conn_title),
+                                            .child(session_title),
                                     )
                                     .child(
-                                        div().text_color(rgb(t.text_secondary)).child(conn_desc),
+                                        div().text_color(rgb(t.text_secondary)).child(session_desc),
                                     ),
                             )
                             .child(
@@ -366,6 +415,22 @@ impl HelpDialog {
                                 ))
                             }),
                     ),
+            );
+
+        div()
+            .relative()
+            .flex_1()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .overflow_hidden()
+            .child(body_content)
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .child(Scrollbar::vertical(&self.scroll_handle)),
             )
     }
 
@@ -396,12 +461,16 @@ impl HelpDialog {
 }
 
 impl Render for HelpDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focus_handle = self.focus_handle.clone();
+        let win_size = window.viewport_size();
+        let card_w = px(580.0).min(win_size.width - px(48.0));
+        let card_h = px(680.0).min(win_size.height - px(64.0)).max(px(360.0));
 
         modal_content("help-dialog-card", cx)
-            .w(px(560.0))
-            .max_h(px(640.0))
+            .w(card_w)
+            .h(card_h)
+            .overflow_hidden()
             .track_focus(&focus_handle)
             .on_action(cx.listener(|this, _: &Cancel, _, cx| this.close(cx)))
             .on_mouse_down(MouseButton::Left, |_, _, cx| {

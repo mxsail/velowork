@@ -320,9 +320,10 @@ fn create_keybinding(action: &str, keystroke: &str, context: Option<&str>) -> Op
 /// The shortcut currently bound to `action`, dynamically retrieved from
 /// the current runtime `KeybindingConfig` and formatted for display.
 ///
-/// Returns `None` if the action is unbound or disabled.
+/// Returns `None` if the action is unbound, disabled, or if config is not initialized.
 pub fn shortcut_for_action(action: &str) -> Option<String> {
-    let config = get_config();
+    let guard = KEYBINDING_CONFIG.read();
+    let config = guard.as_ref()?;
     let entries = config.bindings.get(action)?;
     let chosen = if cfg!(target_os = "macos") {
         entries.iter().find(|e| e.enabled)
@@ -333,6 +334,26 @@ pub fn shortcut_for_action(action: &str) -> Option<String> {
             .or_else(|| entries.iter().find(|e| e.enabled))
     }?;
     Some(format_keystroke(&chosen.keystroke))
+}
+
+/// The shortcut currently bound to `action`, dynamically retrieved from
+/// the current runtime `KeybindingConfig` and split into individual key
+/// strings suitable for badge rendering (e.g. `["Ctrl", "Shift", "P"]` or `["⌘", "⇧", "P"]`).
+///
+/// Returns `None` if the action is unbound, disabled, or if config is not initialized.
+pub fn shortcut_keys_for_action(action: &str) -> Option<Vec<String>> {
+    let guard = KEYBINDING_CONFIG.read();
+    let config = guard.as_ref()?;
+    let entries = config.bindings.get(action)?;
+    let chosen = if cfg!(target_os = "macos") {
+        entries.iter().find(|e| e.enabled)
+    } else {
+        entries
+            .iter()
+            .find(|e| e.enabled && e.keystroke.contains("ctrl"))
+            .or_else(|| entries.iter().find(|e| e.enabled))
+    }?;
+    Some(format_keystroke_to_parts(&chosen.keystroke))
 }
 
 /// Format a keystroke for display (convert to human-readable format).
@@ -347,32 +368,54 @@ pub fn format_keystroke(keystroke: &str) -> String {
     format_single_keystroke(keystroke)
 }
 
-fn format_single_keystroke(k: &str) -> String {
+/// Format a keystroke into individual key strings for badge rendering.
+pub fn format_keystroke_to_parts(keystroke: &str) -> Vec<String> {
+    if keystroke.contains(' ') {
+        return keystroke
+            .split_whitespace()
+            .flat_map(format_single_keystroke_parts)
+            .collect();
+    }
+    format_single_keystroke_parts(keystroke)
+}
+
+/// Split and format a single keystroke into its component key names.
+pub fn format_single_keystroke_parts(k: &str) -> Vec<String> {
     if cfg!(target_os = "macos") {
-        k.replace("cmd", "⌘")
-            .replace("shift", "⇧")
-            .replace("alt", "⌥")
-            .replace("ctrl", "⌃")
-            .replace("escape", "Esc")
-            .replace("pageup", "PgUp")
-            .replace("pagedown", "PgDn")
-            .replace("left", "←")
-            .replace("right", "→")
-            .replace("up", "↑")
-            .replace("down", "↓")
-            .split('-')
-            .map(|part| {
-                if part.len() == 1 {
-                    part.to_uppercase()
-                } else {
-                    part.to_string()
+        k.split('-')
+            .map(|part| match part.to_lowercase().as_str() {
+                "cmd" => "⌘".to_string(),
+                "shift" => "⇧".to_string(),
+                "alt" => "⌥".to_string(),
+                "ctrl" => "⌃".to_string(),
+                "escape" => "Esc".to_string(),
+                "pageup" => "PgUp".to_string(),
+                "pagedown" => "PgDn".to_string(),
+                "enter" => "Enter".to_string(),
+                "space" => "Space".to_string(),
+                "tab" => "Tab".to_string(),
+                "left" => "←".to_string(),
+                "right" => "→".to_string(),
+                "up" => "↑".to_string(),
+                "down" => "↓".to_string(),
+                p if p.starts_with('f') && p.len() > 1 && p[1..].chars().all(|c| c.is_ascii_digit()) => {
+                    p.to_uppercase()
+                }
+                other => {
+                    if other.len() == 1 {
+                        other.to_uppercase()
+                    } else {
+                        let mut chars = other.chars();
+                        match chars.next() {
+                            None => String::new(),
+                            Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+                        }
+                    }
                 }
             })
-            .collect::<Vec<_>>()
-            .join("")
+            .collect()
     } else {
-        let parts: Vec<String> = k
-            .split('-')
+        k.split('-')
             .map(|part| match part.to_lowercase().as_str() {
                 "ctrl" => "Ctrl".to_string(),
                 "shift" => "Shift".to_string(),
@@ -402,7 +445,16 @@ fn format_single_keystroke(k: &str) -> String {
                     }
                 }
             })
-            .collect();
+            .collect()
+    }
+}
+
+fn format_single_keystroke(k: &str) -> String {
+    let parts = format_single_keystroke_parts(k);
+    if cfg!(target_os = "macos") {
+        parts.join("")
+    } else {
         parts.join("+")
     }
 }
+
