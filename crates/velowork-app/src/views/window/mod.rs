@@ -211,6 +211,8 @@ pub struct WindowView {
     pub(crate) initial_focus_done: bool,
     /// Flag allowing force quit when user confirmed quitting with active sessions.
     pub(crate) allow_force_quit: bool,
+    /// Whether the window/app is currently in a locked state (screen lock).
+    pub(crate) is_locked: bool,
 }
 
 impl WindowView {
@@ -676,6 +678,7 @@ impl WindowView {
             last_had_modal: false,
             initial_focus_done: false,
             allow_force_quit: false,
+            is_locked: false,
         };
 
         // Slice 07 cri 7: persist OS bounds back into this window's
@@ -854,6 +857,14 @@ impl WindowView {
         self.overlay_manager.update(cx, |om, cx| {
             om.close_all_overlays(window, cx);
         });
+    }
+
+    /// Update the window's screen lock state.
+    pub(crate) fn set_locked(&mut self, locked: bool, cx: &mut Context<Self>) {
+        if self.is_locked != locked {
+            self.is_locked = locked;
+            cx.notify();
+        }
     }
 
     /// Get the terminals registry (for sharing with detached windows).

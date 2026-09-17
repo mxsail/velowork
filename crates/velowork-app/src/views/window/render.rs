@@ -1827,16 +1827,20 @@ impl Render for WindowView {
                     })
                     // Content modal overlays — positioned relative to content-root,
                     // so they cover the content area + status bar but NOT the titlebar.
-                    // Stacked modal overlays (renders bottom-to-top so child modals layer over parent modals)
-                    .children(self.overlay_manager.read(cx).render_modals().into_iter().map(|modal| {
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .when(has_rounded_corners, |d| {
-                                d.rounded(corner_radius).overflow_hidden()
-                            })
-                            .child(modal)
-                    }))
+                    // Stacked modal overlays (renders bottom-to-top so child modals layer over parent modals).
+                    // When the window is locked, modals are rendered by the root `Velowork` view
+                    // on top of the lock screen instead of here beneath the lock screen.
+                    .when(!self.is_locked, |d| {
+                        d.children(self.overlay_manager.read(cx).render_modals().into_iter().map(|modal| {
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .when(has_rounded_corners, |d| {
+                                    d.rounded(corner_radius).overflow_hidden()
+                                })
+                                .child(modal)
+                        }))
+                    })
                     // Sidebar active dialog overlay (session add/edit)
                     .when_some(self.sidebar.read(cx).active_dialog.clone(), |d, dialog| {
                         let content = self.sidebar.update(cx, |panel, cx| {

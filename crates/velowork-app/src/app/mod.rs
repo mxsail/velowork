@@ -235,6 +235,16 @@ impl Velowork {
             None
         };
 
+        if needs_lock {
+            main_window.update(cx, |w, cx| w.set_locked(true, cx));
+        }
+
+        // Observe main_window so Velowork re-renders whenever child overlays/modals change
+        cx.observe(&main_window, |_this, _, cx| {
+            cx.notify();
+        })
+        .detach();
+
         let mut manager = Self {
             main_window,
             main_window_handle,
@@ -675,8 +685,10 @@ impl Velowork {
         // underlying editor state (e.g. the lock-screen-settings edit dialog)
         // lives in the main window subtree, not in a floating surface, so it is
         // preserved and restored intact after unlocking.
-        self.main_window
-            .update(cx, |w, cx| w.close_all_overlays(window, cx));
+        self.main_window.update(cx, |w, cx| {
+            w.set_locked(true, cx);
+            w.close_all_overlays(window, cx);
+        });
         if self.lock_screen.is_none() {
             let ls = cx.new(|cx| crate::views::overlays::lock_screen::LockScreen::new(cx));
             // Subscribe to the new lock screen's unlock event
@@ -695,6 +707,8 @@ impl Velowork {
         self.locked = false;
         self.lock_screen = None;
         self.last_activity = std::time::Instant::now();
+        self.main_window
+            .update(cx, |w, cx| w.set_locked(false, cx));
         cx.notify();
     }
 
@@ -765,10 +779,24 @@ impl Render for Velowork {
                     overlay_div = overlay_div.rounded_bl(radius).rounded_br(radius);
                 }
 
+                let modals = self.main_window.read(cx).overlay_manager.read(cx).render_modals();
+
                 div()
                     .size_full()
                     .child(self.main_window.clone())
                     .child(overlay_div.child(ls))
+                    .children(modals.into_iter().map(|modal| {
+                        let mut modal_div = div()
+                            .absolute()
+                            .top(titlebar_offset)
+                            .bottom_0()
+                            .left_0()
+                            .right_0();
+                        if has_rounded_corners {
+                            modal_div = modal_div.rounded_bl(radius).rounded_br(radius).overflow_hidden();
+                        }
+                        modal_div.child(modal)
+                    }))
             } else {
                 div().size_full().child(self.main_window.clone())
             }
@@ -808,29 +836,39 @@ impl Render for Velowork {
             });
         }))
         .on_action(cx.listener(|this, _: &crate::keybindings::AddTab, window, cx| {
-            this.main_window.update(cx, |w, cx| {
-                w.handle_global_add_tab(window, cx);
-            });
+            if !this.locked {
+                this.main_window.update(cx, |w, cx| {
+                    w.handle_global_add_tab(window, cx);
+                });
+            }
         }))
         .on_action(cx.listener(|this, _: &crate::keybindings::NewSession, _window, cx| {
-            this.main_window.update(cx, |w, cx| {
-                w.open_add_session_dialog(cx);
-            });
+            if !this.locked {
+                this.main_window.update(cx, |w, cx| {
+                    w.open_add_session_dialog(cx);
+                });
+            }
         }))
         .on_action(cx.listener(|this, _: &crate::keybindings::ShowCommandPalette, _window, cx| {
-            this.main_window.update(cx, |w, cx| {
-                w.overlay_manager.update(cx, |om, cx| om.toggle_command_palette(cx));
-            });
+            if !this.locked {
+                this.main_window.update(cx, |w, cx| {
+                    w.overlay_manager.update(cx, |om, cx| om.toggle_command_palette(cx));
+                });
+            }
         }))
         .on_action(cx.listener(|this, _: &crate::keybindings::ShowSettings, _window, cx| {
-            this.main_window.update(cx, |w, cx| {
-                w.overlay_manager.update(cx, |om, cx| om.toggle_settings_panel(cx));
-            });
+            if !this.locked {
+                this.main_window.update(cx, |w, cx| {
+                    w.overlay_manager.update(cx, |om, cx| om.toggle_settings_panel(cx));
+                });
+            }
         }))
         .on_action(cx.listener(|this, _: &crate::keybindings::ShowKeybindings, _window, cx| {
-            this.main_window.update(cx, |w, cx| {
-                w.overlay_manager.update(cx, |om, cx| om.toggle_keybindings_help(cx));
-            });
+            if !this.locked {
+                this.main_window.update(cx, |w, cx| {
+                    w.overlay_manager.update(cx, |om, cx| om.toggle_keybindings_help(cx));
+                });
+            }
         }))
     }
 }
