@@ -1,7 +1,6 @@
 use crate::keybindings::Cancel;
 use velowork_ui::button::Button;
 use velowork_ui::focus_group::{FocusGroup, FocusGroupExt};
-use velowork_ui::icon::AppIcon;
 use crate::theme::theme;
 use crate::views::components::{modal_content, modal_header};
 use velowork_ui::tokens::{RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_XL, ui_text, ui_text_md};
@@ -127,7 +126,6 @@ impl Render for LogSavedDialog {
                             )
                             .child(
                                 Button::new("open-file-btn", &t)
-                                    .icon_left(AppIcon::File)
                                     .label(i18n!(cx, "dialog.log_saved.open_file"))
                                     .focus_handle(&self.file_focus)
                                     .on_click(cx.listener(|this, _, _, cx| this.open_file(cx))),
@@ -135,7 +133,6 @@ impl Render for LogSavedDialog {
                             .child(
                                 Button::new("open-folder-btn", &t)
                                     .primary()
-                                    .icon_left(AppIcon::Folder)
                                     .label(i18n!(cx, "dialog.log_saved.open_folder"))
                                     .focus_handle(&self.folder_focus)
                                     .on_click(cx.listener(|this, _, _, cx| this.open_folder(cx))),
