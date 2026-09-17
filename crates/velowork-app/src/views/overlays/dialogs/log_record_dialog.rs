@@ -202,7 +202,7 @@ impl Render for LogRecordDialog {
                             )
                             .child(
                                 button_primary("start-btn", i18n!(cx, "dialog.log.start"), &t)
-                                    .icon_left(AppIcon::Terminal)
+                                    .icon_left(AppIcon::Play)
                                     .focus_handle(&self.confirm_focus)
                                     .on_click(cx.listener(|this, _, _, cx| this.start_recording(cx)))
                             )

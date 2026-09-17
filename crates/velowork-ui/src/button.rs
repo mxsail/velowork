@@ -536,8 +536,7 @@ impl RenderOnce for Button {
         } else if let Some(icon) = self.icon_left {
             match icon {
                 ButtonIcon::Icon(icon) => {
-                    // Inherits parent text_color so hover_fg automatically applies to both text and icon
-                    let icon_elem = icon.size(geom.icon_size);
+                    let icon_elem = icon.size(geom.icon_size).text_color(final_fg);
                     container = container.child(icon_elem);
                 }
                 ButtonIcon::Element(render) => {
@@ -556,8 +555,7 @@ impl RenderOnce for Button {
             if let Some(icon) = self.icon_right {
                 match icon {
                     ButtonIcon::Icon(icon) => {
-                        // Inherits parent text_color so hover_fg automatically applies to both text and icon
-                        let icon_elem = icon.size(geom.icon_size);
+                        let icon_elem = icon.size(geom.icon_size).text_color(final_fg);
                         container = container.child(icon_elem);
                     }
                     ButtonIcon::Element(render) => {
