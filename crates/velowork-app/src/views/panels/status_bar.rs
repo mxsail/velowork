@@ -667,7 +667,7 @@ fn status_bar_icon_btn(
         .child(
             icon
                 .into()
-                .size(ICON_SM)
+                .size(ICON_STD)
                 .text_color(default_color)
                 .group_hover(group_id, move |s| s.text_color(custom_color.unwrap_or(p.text_primary))),
         )
@@ -767,7 +767,7 @@ impl Render for StatusBar {
                     )
                     .child(
                         AppIcon::ChevronDown
-                            .size(ICON_SM)
+                            .size(ICON_MICRO)
                             .text_color(rgb(t.text_muted))
                             .group_hover("charset-btn", |s| s.text_color(rgb(t.text_primary))),
                     ),
@@ -882,7 +882,7 @@ impl Render for StatusBar {
                             this.child(
                                 AppIcon::Refresh
                                     .svg()
-                                    .size(ICON_MICRO)
+                                    .size(ICON_STD)
                                     .text_color(palette.status_info)
                                     .with_transformation(Transformation::rotate(radians(angle))),
                             )
@@ -901,7 +901,7 @@ impl Render for StatusBar {
                         .items_center()
                         .child(
                             AppIcon::CloudUpload
-                                .size(ICON_MICRO)
+                                .size(ICON_STD)
                                 .text_color(rgb(t.text_secondary))
                                 .group_hover("sync-status-btn", |s| s.text_color(rgb(t.text_primary))),
                         )
@@ -1059,7 +1059,7 @@ impl Render for StatusBar {
                     .items_center()
                     .child(
                         AppIcon::Network
-                            .size(ICON_MICRO)
+                            .size(ICON_STD)
                             .text_color(rgb(t.text_secondary))
                             .group_hover("sb-ip", |s| s.text_color(rgb(t.text_primary))),
                     )
@@ -1840,7 +1840,7 @@ fn monitor_item(
         .gap(px(3.0))
         .items_center()
         .child(
-            icon.size(ICON_MICRO)
+            icon.size(ICON_STD)
                 .text_color(rgb(t.text_secondary))
                 .group_hover("sb-monitor", |s| s.text_color(rgb(t.text_primary))),
         )
@@ -1913,7 +1913,7 @@ fn service_item(
         .gap(px(3.0))
         .items_center()
         .child(
-            icon.size(ICON_MICRO)
+            icon.size(ICON_STD)
                 .text_color(rgb(t.text_secondary))
                 .group_hover("sb-monitor", |s| s.text_color(rgb(t.text_primary))),
         )
@@ -3668,7 +3668,7 @@ fn monitor_status_item(
     h_flex()
         .items_center()
         .gap(SPACE_XS)
-        .child(icon.size(ICON_MICRO).text_color(rgb(t.text_muted)))
+        .child(icon.size(ICON_STD).text_color(rgb(t.text_muted)))
         .child(
             div()
                 .text_size(ui_text_md(cx))
