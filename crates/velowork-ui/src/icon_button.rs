@@ -173,7 +173,7 @@ pub fn icon_button_sized_px(
     t: &ThemeColors,
 ) -> Stateful<Div> {
     let p = SemanticPalette::from_theme(t);
-    let hover_bg = p.surface_raised;
+    let hover_bg = p.surface_hover;
     let el_id = id.into();
     let group_id = SharedString::from(format!("icon-btn-{:?}", el_id));
     div()

@@ -879,7 +879,8 @@ fn render_code_block(
     search_state: &mut Option<RunningSearchState>,
     hit_tests: &Rc<RefCell<Vec<BlockHitTest>>>,
 ) -> AnyElement {
-    let raw_code = code.trim_end_matches(['\r', '\n']).to_string();
+    let normalized_code = code.replace("\r\n", "\n").replace('\r', "\n");
+    let raw_code = normalized_code.trim_end_matches('\n').to_string();
     let lang = language.unwrap_or("").trim().to_lowercase();
     let display_lang = if !lang.is_empty() && lang != "text" {
         lang.to_uppercase()
@@ -1015,7 +1016,9 @@ fn render_code_block(
 
         code_lines_div.push(
             div()
-                .h(ui_text_sm(cx) * 1.4)
+                .w_full()
+                .min_w(px(0.0))
+                .whitespace_normal()
                 .child(styled)
                 .into_any_element(),
         );
@@ -1078,7 +1081,7 @@ fn render_code_block(
             div()
                 .id(ElementId::from(format!("code-body-{}", block_idx)))
                 .w_full()
-                .overflow_x_scroll()
+                .min_w(px(0.0))
                 .p(px(10.0))
                 .font_family(mono_font_family(cx))
                 .text_size(ui_text_sm(cx))
@@ -1156,6 +1159,44 @@ sudo du -xhd 1 / | sort -hr
         let doc = MarkdownDocument::parse("# Heading\n\nParagraph text.");
         let sliced = doc.slice_plain_text(0, 7);
         assert_eq!(sliced, "Heading");
+    }
+
+    #[test]
+    fn test_ini_code_block_parsing() {
+        let md = r#"针对 Qt5 (~/.config/qt5ct/qt5ct.conf，如果使用 qt5ct 桥接)：
+```ini
+[Appearance]
+style=kvantum
+icon_theme=breeze-dark
+standard_dialogs=default
+```
+"#;
+        let el = MarkdownElement::new("test-ini", md);
+        assert_eq!(el.document.nodes().len(), 2);
+        match &el.document.nodes()[1] {
+            Node::CodeBlock { language, code } => {
+                assert_eq!(language.as_deref(), Some("ini"));
+                assert!(code.contains("[Appearance]"));
+                assert!(code.contains("style=kvantum"));
+                assert!(code.contains("standard_dialogs=default"));
+            }
+            _ => panic!("Expected CodeBlock"),
+        }
+    }
+
+    #[test]
+    fn test_unclosed_ini_code_block_parsing() {
+        let md = "针对 Qt5 (~/.config/qt5ct/qt5ct.conf，如果使用 qt5ct 桥接)：\n```ini\n[Appearance]\nstyle=kvantum\nicon_theme=breeze-dark";
+        let el = MarkdownElement::new("test-unclosed-ini", md);
+        assert_eq!(el.document.nodes().len(), 2);
+        match &el.document.nodes()[1] {
+            Node::CodeBlock { language, code } => {
+                assert_eq!(language.as_deref(), Some("ini"));
+                assert!(code.contains("[Appearance]"));
+                assert!(code.contains("style=kvantum"));
+            }
+            _ => panic!("Expected CodeBlock for unclosed fence"),
+        }
     }
 }
 

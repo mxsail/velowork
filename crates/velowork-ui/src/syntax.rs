@@ -132,12 +132,13 @@ pub fn map_extension_to_syntax(ext: &str) -> Option<&'static str> {
         "rb" => Some("ruby"),
         "php" => Some("php"),
         "sql" => Some("sql"),
-        // Schema / IaC / RPC
+        // Schema / IaC / RPC / Config
         "graphql" | "gql" | "graphqls" => Some("graphql"),
         "prisma" => Some("graphql"),
         "tf" | "tfvars" | "hcl" => Some("tf"),
         "proto" => Some("protobuf"),
         "dockerfile" | "containerfile" => Some("dockerfile"),
+        "ini" | "conf" | "cfg" => Some("ini"),
         _ => None,
     }
 }

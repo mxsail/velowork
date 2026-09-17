@@ -302,6 +302,13 @@ impl MarkdownDocument {
             }
         }
 
+        if in_code_block {
+            nodes.push(Node::CodeBlock {
+                language: code_block_lang.take(),
+                code: std::mem::take(&mut code_block_content),
+            });
+        }
+
         // Build flat text representation
         let mut plain_text = String::new();
 

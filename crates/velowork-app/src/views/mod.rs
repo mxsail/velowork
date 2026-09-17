@@ -17,3 +17,4 @@ pub mod overlays;
 pub mod panels;
 pub mod window;
 pub mod dock_controller;
+pub mod ai;

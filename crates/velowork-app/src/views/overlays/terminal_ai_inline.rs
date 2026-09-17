@@ -6,14 +6,13 @@
 //!    follow-up conversation, and seamless escalation to the right AI assistant dock panel.
 
 use gpui::*;
-use gpui::prelude::*;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use velowork_ai::{provider, StreamChunk};
 use velowork_i18n::i18n;
 use velowork_markdown::{
-    find_line_boundaries, find_word_boundaries, MarkdownElement, MarkdownSelectionEvent,
+    find_line_boundaries, find_word_boundaries, MarkdownSelectionEvent,
 };
 use velowork_ui::capsule_toolbar::{
     capsule_divider, capsule_icon_button, capsule_toolbar_container,
@@ -25,13 +24,17 @@ use velowork_ui::motion::{ease_out_cubic, DURATION_PANEL};
 use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState};
 use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
-use velowork_ui::theme::{theme, ThemeColors};
+use velowork_ui::theme::theme;
 use velowork_ui::tokens::{
-    elevation_menu_shadow, ui_text_md, RADIUS_LG, RADIUS_MD, RADIUS_SM, SPACE_MD,
-    SPACE_SM, SPACE_XS,
+    elevation_menu_shadow, ui_text_md, RADIUS_MD, RADIUS_SM,
+    SPACE_MD, SPACE_SM, SPACE_XS,
 };
 use velowork_ui::tooltip::Tooltip;
-use velowork_ui::{h_flex, v_flex};
+use velowork_ui::{h_flex, v_flex, ControlSize};
+
+use crate::views::ai::commands::extract_commands;
+use crate::views::ai::message_view::{render_chat_message, ChatMessageCallbacks};
+use crate::views::ai::types::ChatMessage;
 
 /// Minimum dimensions for the resizable inline AI popover.
 const MIN_POPOVER_WIDTH: f32 = 360.0;
@@ -96,16 +99,6 @@ pub struct InlineSelectionDrag {
     pub plain_text: String,
 }
 
-/// A single turn in the inline popover chat history.
-#[derive(Clone)]
-pub struct InlineAiMessage {
-    pub is_user: bool,
-    pub text: String,
-    pub quote: Option<String>,
-    pub extracted_commands: Vec<String>,
-    pub is_streaming: bool,
-}
-
 /// Events emitted by TerminalAiInline.
 #[derive(Clone, Debug)]
 pub enum TerminalAiInlineEvent {
@@ -162,7 +155,7 @@ pub struct TerminalAiInline {
     pub has_no_model: bool,
     pub popover_size: Size<Pixels>,
     pub resize_drag: Option<PopoverResizeDrag>,
-    pub messages: Vec<InlineAiMessage>,
+    pub messages: Vec<ChatMessage>,
     pub copied_msg_index: Option<usize>,
     pub scroll_handle: ScrollHandle,
     pub focus_handle: FocusHandle,
@@ -433,7 +426,9 @@ impl TerminalAiInline {
                 .selected(selected)
                 .placeholder(i18n!(cx, "ai_assistant.model"))
                 .placement(SelectPlacement::Below)
-                .ghost(true);
+                .ghost(true)
+                .size(ControlSize::Compact)
+                .text_size(ui_text_md(cx));
             if let Some(r) = reg {
                 s.set_overlay_registry(r);
             }
@@ -493,45 +488,24 @@ impl TerminalAiInline {
         };
 
         // Push User Message
-        self.messages.push(InlineAiMessage {
-            is_user: true,
-            text: user_text.clone(),
-            quote: quote.clone(),
-            extracted_commands: Vec::new(),
-            is_streaming: false,
-        });
+        self.messages.push(ChatMessage::new_user(user_text.clone(), quote.clone(), Vec::new()));
 
         // Push Assistant Message
         self.reply_text.clear();
         self.extracted_commands.clear();
         self.is_streaming = true;
 
-        self.messages.push(InlineAiMessage {
-            is_user: false,
-            text: String::new(),
-            quote: None,
-            extracted_commands: Vec::new(),
-            is_streaming: true,
-        });
+        self.messages.push(ChatMessage::new_assistant(String::new(), true));
         self.scroll_handle.scroll_to_bottom();
 
-        // Prepare multi-turn messages for API
+        // Prepare multi-turn messages for API (using unified api_content)
         let mut api_messages = Vec::new();
         for msg in &self.messages {
-            if msg.is_streaming && msg.text.is_empty() {
+            if msg.streaming && msg.text.is_empty() {
                 continue;
             }
             if msg.is_user {
-                let content = if let Some(ref q) = msg.quote {
-                    if !q.trim().is_empty() {
-                        format!("终端选中文本：\n```\n{}\n```\n\n用户问题：{}", q, msg.text)
-                    } else {
-                        msg.text.clone()
-                    }
-                } else {
-                    msg.text.clone()
-                };
-                api_messages.push((content, true));
+                api_messages.push((msg.api_content(), true));
             } else if !msg.text.is_empty() {
                 api_messages.push((msg.text.clone(), false));
             }
@@ -563,45 +537,69 @@ impl TerminalAiInline {
                         let mut done = false;
                         let mut updated = false;
 
-                        while let Ok(chunk) = rx.try_recv() {
-                            match chunk {
-                                StreamChunk::Delta(delta) => {
-                                    this.reply_text.push_str(&delta);
-                                    if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
-                                        last.text.push_str(&delta);
+                        loop {
+                            match rx.try_recv() {
+                                Ok(chunk) => match chunk {
+                                    StreamChunk::Delta(delta) => {
+                                        this.reply_text.push_str(&delta);
+                                        if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
+                                            last.text.push_str(&delta);
+                                        }
+                                        updated = true;
                                     }
-                                    updated = true;
-                                }
-                                StreamChunk::Done => {
+                                    StreamChunk::Done => {
+                                        this.is_streaming = false;
+                                        if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
+                                            last.streaming = false;
+                                            if last.text.is_empty() {
+                                                let err_str = format!("{}: {}", i18n!(cx, "ai_assistant.error"), i18n!(cx, "ai_assistant.empty_response"));
+                                                this.error_message = Some(err_str.clone());
+                                                last.text = err_str.clone();
+                                                this.reply_text = err_str;
+                                            }
+                                        }
+                                        done = true;
+                                        updated = true;
+                                        break;
+                                    }
+                                    StreamChunk::Error(err) => {
+                                        let err_str = err.to_string();
+                                        this.error_message = Some(err_str.clone());
+                                        this.is_streaming = false;
+                                        if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
+                                            last.streaming = false;
+                                            let full_err = format!("{}: {}", i18n!(cx, "ai_assistant.error"), err_str);
+                                            last.text = full_err.clone();
+                                            this.reply_text = full_err;
+                                        }
+                                        done = true;
+                                        updated = true;
+                                        break;
+                                    }
+                                    _ => {}
+                                },
+                                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                     this.is_streaming = false;
                                     if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
-                                        last.is_streaming = false;
+                                        last.streaming = false;
+                                        if last.text.is_empty() {
+                                            let err_str = format!("{}: {}", i18n!(cx, "ai_assistant.error"), i18n!(cx, "ai_assistant.network_interrupted"));
+                                            this.error_message = Some(err_str.clone());
+                                            last.text = err_str.clone();
+                                            this.reply_text = err_str;
+                                        }
                                     }
                                     done = true;
                                     updated = true;
                                     break;
                                 }
-                                StreamChunk::Error(err) => {
-                                    this.error_message = Some(err.to_string());
-                                    this.is_streaming = false;
-                                    if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
-                                        last.is_streaming = false;
-                                    }
-                                    done = true;
-                                    updated = true;
-                                    break;
-                                }
-                                _ => {}
                             }
                         }
 
                         if updated {
                             let text = this.reply_text.clone();
-                            let cmds = Self::extract_commands(&text);
-                            this.extracted_commands = cmds.clone();
-                            if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
-                                last.extracted_commands = cmds;
-                            }
+                            this.extracted_commands = extract_commands(&text);
                             this.scroll_handle.scroll_to_bottom();
                             cx.notify();
                         } else if this.is_streaming && this.reply_text.is_empty() {
@@ -611,6 +609,12 @@ impl TerminalAiInline {
 
                         if done {
                             this.scroll_handle.scroll_to_bottom();
+                            let entity = cx.entity().clone();
+                            cx.defer(move |cx| {
+                                entity.update(cx, |this, _cx| {
+                                    this.scroll_handle.scroll_to_bottom();
+                                });
+                            });
                             let final_reply = this.reply_text.clone();
                             cx.emit(TerminalAiInlineEvent::AppendConversation {
                                 project_id: this.project_id.clone(),
@@ -646,42 +650,6 @@ impl TerminalAiInline {
         cx.notify();
     }
 
-    /// Extract bash/sh/shell command blocks or single executable lines from AI markdown output.
-    fn extract_commands(text: &str) -> Vec<String> {
-        let mut commands = Vec::new();
-        let mut in_code_block = false;
-        let mut is_shell_block = false;
-        let mut current_block = String::new();
-
-        for line in text.lines() {
-            let trimmed = line.trim();
-            if trimmed.starts_with("```") {
-                if in_code_block {
-                    in_code_block = false;
-                    if is_shell_block && !current_block.trim().is_empty() {
-                        commands.push(current_block.trim().to_string());
-                    }
-                    current_block.clear();
-                    is_shell_block = false;
-                } else {
-                    in_code_block = true;
-                    let lang = trimmed.trim_start_matches('`').to_lowercase();
-                    is_shell_block = lang.is_empty()
-                        || lang.contains("bash")
-                        || lang.contains("sh")
-                        || lang.contains("shell")
-                        || lang.contains("zsh");
-                }
-            } else if in_code_block && is_shell_block {
-                if !current_block.is_empty() {
-                    current_block.push('\n');
-                }
-                current_block.push_str(line);
-            }
-        }
-
-        commands
-    }
 
     pub fn trigger_explain(&mut self, cx: &mut Context<Self>) {
         let user_text = i18n!(cx, "terminal.ai_toolbar_explain");
@@ -1042,9 +1010,6 @@ impl TerminalAiInline {
             .unwrap_or_else(|| self.selection_text.clone());
         let reply = self.reply_text.clone();
 
-        let terminal_id = self.terminal_id.clone();
-        let tid_for_run = self.terminal_id.clone();
-
         let to_panel_tip: &'static str =
             Box::leak(i18n!(cx, "terminal.inline_ai_continue_in_side_panel").into_boxed_str());
         let close_tip: &'static str =
@@ -1161,7 +1126,7 @@ impl TerminalAiInline {
                             .child(AppIcon::AiAssistant.size(px(14.0)).text_color(p.text_primary))
                             .child(
                                 div()
-                                    .w(px(130.0))
+                                    .w(px(140.0))
                                     .child(Select::new(&self.model_select)),
                             ),
                     )
@@ -1272,289 +1237,103 @@ impl TerminalAiInline {
                     )
                     .child({
                         let active_selection = self.active_selection.clone();
-                        let inline_entity = cx.entity().clone();
+                        let inline_for_ins = cx.entity().downgrade();
+                        let inline_for_run = cx.entity().downgrade();
+                        let inline_for_copy = cx.entity().downgrade();
+                        let inline_for_sel = cx.entity().downgrade();
+                        let tid_ins = self.terminal_id.clone();
+                        let tid_run = self.terminal_id.clone();
+
+                        let callbacks = ChatMessageCallbacks {
+                            on_copy_message: Some(Arc::new({
+                                let w = inline_for_copy.clone();
+                                move |msg_idx: usize, text: &str, _window: &mut Window, cx: &mut App| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(text.to_string()));
+                                    let _ = w.update(cx, |this, cx| {
+                                        this.copied_msg_index = Some(msg_idx);
+                                        cx.notify();
+                                        cx.spawn(async move |this: WeakEntity<TerminalAiInline>, cx| {
+                                            smol::Timer::after(Duration::from_millis(2000)).await;
+                                            let _ = this.update(cx, |this, cx| {
+                                                this.copied_msg_index = None;
+                                                cx.notify();
+                                            });
+                                        }).detach();
+                                    });
+                                }
+                            })),
+                            on_run_command: Some(Arc::new({
+                                let w = inline_for_run;
+                                let tid = tid_run;
+                                move |cmd: &str, _window: &mut Window, cx: &mut App| {
+                                    let _ = w.update(cx, |_this, cx| {
+                                        cx.emit(TerminalAiInlineEvent::RunInTerminal {
+                                            terminal_id: tid.clone(),
+                                            command: cmd.to_string(),
+                                        });
+                                    });
+                                }
+                            })),
+                            on_insert_command: Some(Arc::new({
+                                let w = inline_for_ins;
+                                let tid = tid_ins;
+                                move |cmd: &str, _window: &mut Window, cx: &mut App| {
+                                    let _ = w.update(cx, |_this, cx| {
+                                        cx.emit(TerminalAiInlineEvent::InsertToTerminal {
+                                            terminal_id: tid.clone(),
+                                            command: cmd.to_string(),
+                                        });
+                                    });
+                                }
+                            })),
+                            on_selection_event: Some(Arc::new({
+                                let w = inline_for_sel;
+                                let followup = self.followup_input.clone();
+                                move |msg_idx: usize, ev: MarkdownSelectionEvent, window: &mut Window, cx: &mut App| {
+                                    let _ = w.update(cx, |this, cx| {
+                                        this.focus_handle.focus(window, cx);
+                                        if let MarkdownSelectionEvent::Start { .. } = &ev {
+                                            followup.update(cx, |inp, cx| inp.clear_selection(cx));
+                                        }
+                                        this.handle_selection_event(msg_idx, ev, cx);
+                                    });
+                                }
+                            })),
+                            on_context_menu: None,
+                            on_toggle_quote: None,
+                            on_edit_message: None,
+                        };
+
+                        let frame = self.animation_frame;
+                        let copied_idx = self.copied_msg_index;
+                        let sel_range = active_selection
+                            .as_ref()
+                            .map(|s| (s.start, s.end));
+                        let sel_msg_idx = active_selection
+                            .as_ref()
+                            .map(|s| s.msg_index);
+
                         v_flex()
                             .w_full()
                             .min_w(px(0.0))
                             .gap(SPACE_MD)
                             .children(
                                 self.messages.iter().enumerate().map(|(msg_idx, msg)| {
-                                    if msg.is_user {
-                                        // User message: Antigravity unified card with embedded quote capsule
-                                        let mut card_children: Vec<AnyElement> = Vec::new();
-                                        if let Some(q) = msg.quote.as_ref().filter(|s| !s.trim().is_empty()) {
-                                            let q_text = q.clone();
-                                                card_children.push(
-                                                    div()
-                                                        .w_full()
-                                                        .min_w(px(0.0))
-                                                        .p(SPACE_XS)
-                                                        .rounded(RADIUS_SM)
-                                                        .bg(p.surface_raised)
-                                                        .border_l_2()
-                                                        .border_color(p.border_active)
-                                                        .flex()
-                                                        .flex_col()
-                                                        .gap(px(2.0))
-                                                        .child(
-                                                            h_flex()
-                                                                .items_center()
-                                                                .gap(SPACE_XS)
-                                                                .child(AppIcon::Terminal.size(px(11.0)).text_color(p.text_muted))
-                                                                .child(
-                                                                    div()
-                                                                        .text_size(px(10.5))
-                                                                        .text_color(p.text_muted)
-                                                                        .child(i18n!(cx, "ai_assistant.quote"))
-                                                                )
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .id(SharedString::from(format!("user-quote-{}", msg_idx)))
-                                                                .w_full()
-                                                                .min_w(px(0.0))
-                                                                .max_h(px(72.0))
-                                                                .overflow_y_scroll()
-                                                                .text_size(px(11.0))
-                                                                .text_color(p.text_secondary)
-                                                                .child(q_text)
-                                                        )
-                                                        .into_any_element()
-                                                );
-                                        }
-                                        card_children.push(
-                                            div()
-                                                .w_full()
-                                                .min_w(px(0.0))
-                                                .text_size(ui_text_md(cx))
-                                                .text_color(p.text_primary)
-                                                .child(msg.text.clone())
-                                                .into_any_element()
-                                        );
-
-                                        div()
-                                            .w_full()
-                                            .min_w(px(0.0))
-                                            .p(SPACE_SM)
-                                            .rounded(RADIUS_LG)
-                                            .bg(p.surface_card)
-                                            .border_1()
-                                            .border_color(p.border_subtle)
-                                            .flex()
-                                            .flex_col()
-                                            .gap(SPACE_XS)
-                                            .children(card_children)
-                                            .into_any_element()
+                                    let active_sel = if sel_msg_idx == Some(msg_idx) {
+                                        sel_range
                                     } else {
-                                        // Assistant reply: 100% transparent background, NO border, full width
-                                        let cmd_tid_ins = terminal_id.clone();
-                                        let cmd_tid_run = tid_for_run.clone();
-                                        let copy_text = msg.text.clone();
-                                        let is_copied = self.copied_msg_index == Some(msg_idx);
-                                        let copy_label: &'static str = if is_copied {
-                                            Box::leak(i18n!(cx, "ai_assistant.copied").into_boxed_str())
-                                        } else {
-                                            Box::leak(i18n!(cx, "common.copy").into_boxed_str())
-                                        };
-
-                                        div()
-                                            .w_full()
-                                            .min_w(px(0.0))
-                                            .flex()
-                                            .flex_col()
-                                            .gap(SPACE_XS)
-                                            .py(SPACE_XS)
-                                            .when(msg.is_streaming && msg.text.is_empty(), |d| {
-                                                d.child(loading_indicator(&t, cx, self.animation_frame))
-                                            })
-                                            .when(!msg.text.is_empty(), |d| {
-                                                let active_sel = active_selection
-                                                    .as_ref()
-                                                    .filter(|s| s.msg_index == msg_idx);
-                                                let sel_range = active_sel.map(|s| (s.start, s.end));
-                                                let inline_for_sel = inline_entity.clone();
-                                                let md_el = MarkdownElement::new(
-                                                    ElementId::from(format!("inline-md-{}", msg_idx)),
-                                                    &msg.text,
-                                                )
-                                                .selection(sel_range)
-                                                .on_selection_event(move |ev, window, cx| {
-                                                    inline_for_sel.update(cx, |this, cx| {
-                                                        this.focus_handle.focus(window, cx);
-                                                        if let MarkdownSelectionEvent::Start { .. } = &ev {
-                                                            this.followup_input.update(cx, |inp, cx| inp.clear_selection(cx));
-                                                        }
-                                                        this.handle_selection_event(msg_idx, ev, cx);
-                                                    });
-                                                })
-                                                .on_url_click(move |url, _window, cx| {
-                                                    cx.open_url(url);
-                                                });
-                                                d.child(md_el)
-                                            })
-                                            .children(
-                                                msg.extracted_commands.iter().enumerate().map(|(c_idx, cmd)| {
-                                                    let cmd_to_insert = cmd.clone();
-                                                    let cmd_to_run = cmd.clone();
-                                                    let cmd_to_copy = cmd.clone();
-                                                    let tid_ins = cmd_tid_ins.clone();
-                                                    let tid_run = cmd_tid_run.clone();
-
-                                                    let ins_tip: &'static str = Box::leak(
-                                                        i18n!(cx, "terminal.inline_ai_insert_terminal_tip").into_boxed_str(),
-                                                    );
-                                                    let run_tip: &'static str = Box::leak(
-                                                        i18n!(cx, "terminal.inline_ai_run_terminal_tip").into_boxed_str(),
-                                                    );
-                                                    let copy_tip: &'static str = Box::leak(
-                                                        i18n!(cx, "terminal.inline_ai_copy_command").into_boxed_str(),
-                                                    );
-
-                                                    div()
-                                                        .w_full()
-                                                        .min_w(px(0.0))
-                                                        .mt(SPACE_XS)
-                                                        .p(SPACE_XS)
-                                                        .bg(p.surface_raised)
-                                                        .border_1()
-                                                        .border_color(p.border_subtle)
-                                                        .rounded(RADIUS_MD)
-                                                        .flex()
-                                                        .items_center()
-                                                        .justify_between()
-                                                        .gap(SPACE_XS)
-                                                        .child(
-                                                            h_flex()
-                                                                .items_center()
-                                                                .gap(SPACE_XS)
-                                                                .flex_1()
-                                                                .min_w(px(0.0))
-                                                                .overflow_hidden()
-                                                                .child(AppIcon::Terminal.size(px(12.0)).text_color(p.text_muted))
-                                                                .child(
-                                                                    div()
-                                                                        .flex_1()
-                                                                        .min_w(px(0.0))
-                                                                        .truncate()
-                                                                        .text_size(px(11.0))
-                                                                        .text_color(p.text_primary)
-                                                                        .child(cmd.clone())
-                                                                )
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .flex_shrink_0()
-                                                                .flex()
-                                                                .items_center()
-                                                                .gap(px(4.0))
-                                                                .child(
-                                                                    div()
-                                                                        .id(SharedString::from(format!("cmd-ins-{}-{}", msg_idx, c_idx)))
-                                                                        .cursor_pointer()
-                                                                        .flex()
-                                                                        .items_center()
-                                                                        .gap(px(2.0))
-                                                                        .px(px(6.0))
-                                                                        .h(px(22.0))
-                                                                        .rounded(RADIUS_SM)
-                                                                        .bg(p.surface_hover)
-                                                                        .hover(|s| s.bg(p.surface_selection))
-                                                                        .text_size(px(11.0))
-                                                                        .text_color(p.text_secondary)
-                                                                        .tooltip(move |_, cx| cx.new(|_| Tooltip::new(ins_tip)).into())
-                                                                        .on_click(cx.listener(move |_, _, _, cx| {
-                                                                            cx.emit(TerminalAiInlineEvent::InsertToTerminal {
-                                                                                terminal_id: tid_ins.clone(),
-                                                                                command: cmd_to_insert.clone(),
-                                                                            });
-                                                                        }))
-                                                                        .child(i18n!(cx, "terminal.inline_ai_insert_terminal")),
-                                                                )
-                                                                .child(
-                                                                    div()
-                                                                        .id(SharedString::from(format!("cmd-run-{}-{}", msg_idx, c_idx)))
-                                                                        .cursor_pointer()
-                                                                        .flex()
-                                                                        .items_center()
-                                                                        .gap(px(2.0))
-                                                                        .px(px(6.0))
-                                                                        .h(px(22.0))
-                                                                        .rounded(RADIUS_SM)
-                                                                        .bg(p.surface_accent)
-                                                                        .text_size(px(11.0))
-                                                                        .text_color(p.text_on_accent)
-                                                                        .tooltip(move |_, cx| cx.new(|_| Tooltip::new(run_tip)).into())
-                                                                        .on_click(cx.listener(move |_, _, _, cx| {
-                                                                            cx.emit(TerminalAiInlineEvent::RunInTerminal {
-                                                                                terminal_id: tid_run.clone(),
-                                                                                command: cmd_to_run.clone(),
-                                                                            });
-                                                                        }))
-                                                                        .child(AppIcon::Play.size(px(10.0)).text_color(p.text_on_accent))
-                                                                        .child(i18n!(cx, "terminal.inline_ai_run_terminal")),
-                                                                )
-                                                                .child(
-                                                                    div()
-                                                                        .id(SharedString::from(format!("cmd-cpy-{}-{}", msg_idx, c_idx)))
-                                                                        .cursor_pointer()
-                                                                        .p(px(4.0))
-                                                                        .rounded(RADIUS_SM)
-                                                                        .hover(|s| s.bg(p.surface_hover))
-                                                                        .tooltip(move |_, cx| cx.new(|_| Tooltip::new(copy_tip)).into())
-                                                                        .on_click(cx.listener(move |_, _, _, cx| {
-                                                                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                                                                cmd_to_copy.clone(),
-                                                                            ));
-                                                                        }))
-                                                                        .child(
-                                                                            AppIcon::Copy
-                                                                                .size(px(12.0))
-                                                                                .text_color(p.text_secondary),
-                                                                        ),
-                                                                ),
-                                                        )
-                                                })
-                                            )
-                                            .when(!msg.is_streaming && !msg.text.is_empty(), |d| {
-                                                d.child(
-                                                    h_flex()
-                                                        .justify_start()
-                                                        .pt(px(2.0))
-                                                        .child(
-                                                            div()
-                                                                .id(SharedString::from(format!("copy-reply-{}", msg_idx)))
-                                                                .cursor_pointer()
-                                                                .flex()
-                                                                .items_center()
-                                                                .gap(px(3.0))
-                                                                .px(px(6.0))
-                                                                .h(px(20.0))
-                                                                .rounded(RADIUS_SM)
-                                                                .hover(|s| s.bg(p.surface_hover))
-                                                                .tooltip(move |_, cx| cx.new(|_| Tooltip::new(copy_label)).into())
-                                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                                    cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
-                                                                    this.copied_msg_index = Some(msg_idx);
-                                                                    cx.notify();
-                                                                }))
-                                                                .child(
-                                                                    if is_copied {
-                                                                        AppIcon::Check.size(px(11.0)).text_color(p.surface_accent)
-                                                                    } else {
-                                                                        AppIcon::Copy.size(px(11.0)).text_color(p.text_muted)
-                                                                    }
-                                                                )
-                                                                .child(
-                                                                    div()
-                                                                        .text_size(px(10.5))
-                                                                        .text_color(if is_copied { p.surface_accent } else { p.text_muted })
-                                                                        .child(copy_label)
-                                                                )
-                                                        )
-                                                )
-                                            })
-                                            .into_any_element()
-                                    }
+                                        None
+                                    };
+                                    render_chat_message(
+                                        msg,
+                                        msg_idx,
+                                        frame,
+                                        copied_idx == Some(msg_idx),
+                                        false, // quote_expanded — popover uses simple collapsed quotes
+                                        active_sel,
+                                        &callbacks,
+                                        cx,
+                                    )
                                 })
                             )
                     })
@@ -1564,7 +1343,7 @@ impl TerminalAiInline {
                 div()
                     .p(SPACE_XS)
                     .flex_shrink_0()
-                    .bg(p.surface_header)
+                    .bg(p.surface_overlay)
                     .rounded_b(RADIUS_MD)
                     .border_t_1()
                     .border_color(p.border_subtle)
@@ -1574,7 +1353,7 @@ impl TerminalAiInline {
                             .rounded(RADIUS_MD)
                             .border_1()
                             .border_color(p.border_subtle)
-                            .bg(p.surface_card)
+                            .bg(p.surface_raised)
                             .p(SPACE_XS)
                             .flex()
                             .flex_col()
@@ -1609,7 +1388,11 @@ impl TerminalAiInline {
                                             }
                                         }
                                     }))
-                                    .child(SimpleInput::new(&self.followup_input).borderless(true)),
+                                    .child(
+                                        SimpleInput::new(&self.followup_input)
+                                            .borderless(true)
+                                            .text_size(ui_text_md(cx)),
+                                    ),
                             )
                             .child(
                                 h_flex()
@@ -1645,33 +1428,4 @@ impl TerminalAiInline {
             .child(self.render_resize_handle(PopoverResizeEdge::BottomLeft, cx))
             .child(self.render_resize_handle(PopoverResizeEdge::BottomRight, cx))
     }
-}
-
-/// 加载状态指示器：三个错相位呼吸跳动的圆点 + 文案，直观表达「等待回复中」（与右侧 AI 助手面板保持一致）。
-fn loading_indicator(t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement {
-    let label = i18n!(cx, "ai_assistant.thinking");
-    let dots = (0..3).map(|i| {
-        // 每个圆点相位错开，形成波浪式呼吸效果。
-        let phase = (frame + i * 10) % 30;
-        let wave = (phase as f32 / 30.0 * std::f32::consts::PI * 2.0).sin();
-        let opacity = 0.35 + 0.65 * ((wave + 1.0) / 2.0);
-        div()
-            .w(px(7.0))
-            .h(px(7.0))
-            .rounded(px(3.5))
-            .bg(rgb(t.accent))
-            .opacity(opacity)
-    });
-    div()
-        .flex()
-        .items_center()
-        .gap(px(10.0))
-        .py(SPACE_SM)
-        .child(h_flex().gap(px(5.0)).items_center().children(dots))
-        .child(
-            div()
-                .text_size(ui_text_md(cx))
-                .text_color(rgb(t.text_muted))
-                .child(label),
-        )
 }

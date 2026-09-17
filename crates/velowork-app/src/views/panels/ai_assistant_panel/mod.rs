@@ -27,7 +27,7 @@ use velowork_ui::design::appearance::{ControlSize, ControlVariant};
 use velowork_ui::input::{focus_ring_shadows, Input, InputState};
 use velowork_ui::overlay_registry::{ClosePolicy, OverlayInfo};
 use velowork_ui::scrollable::{Scrollbar, ScrollbarAxis, ScrollbarShow};
-use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState};
+use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState, SelectWidthMode};
 use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
 use velowork_ui::theme::{ThemeColors, surface_bg, theme, with_alpha};
 use velowork_ui::tokens::{
@@ -618,6 +618,7 @@ pub struct AiAssistantPanel {
     ai_selected_model_id: Option<String>,
     ai_model_select: Entity<SelectState<String>>,
     ai_perm_select: Entity<SelectState<AiPermission>>,
+    ai_sessions_search_scope_select: Entity<SelectState<bool>>,
     ai_slash_menu_open: bool,
     ai_slash_selected_index: usize,
     ai_slash_scroll_handle: ScrollHandle,
@@ -866,6 +867,32 @@ impl AiAssistantPanel {
         )
         .detach();
 
+        let ai_sessions_search_scope_select = cx.new(|cx| {
+            let mut s = SelectState::new(cx)
+                .options(vec![
+                    SelectOption::new(false, i18n!(cx, "ai_assistant.search_scope_title")),
+                    SelectOption::new(true, i18n!(cx, "ai_assistant.search_scope_content")),
+                ])
+                .selected(Some(false))
+                .placement(SelectPlacement::Below)
+                .width_mode(SelectWidthMode::ContentAdaptive)
+                .size(ControlSize::Default)
+                .text_size(ui_text_md(cx));
+            s.set_overlay_registry(reg.clone());
+            s
+        });
+
+        cx.subscribe(
+            &ai_sessions_search_scope_select,
+            |this, _, event: &SelectEvent<bool>, cx| {
+                if let SelectEvent::Change(Some(content)) = event {
+                    this.ai_sessions_search_content = *content;
+                    this.refresh_sessions_search(cx);
+                }
+            },
+        )
+        .detach();
+
         let chat_input = cx.new(|cx| {
             InputState::new(cx)
                 .multiline()
@@ -926,6 +953,7 @@ impl AiAssistantPanel {
             ai_selected_model_id: restored_model_id,
             ai_model_select,
             ai_perm_select,
+            ai_sessions_search_scope_select,
             ai_slash_menu_open: false,
             ai_slash_selected_index: 0,
             ai_slash_scroll_handle: ScrollHandle::new(),
@@ -1032,8 +1060,28 @@ impl AiAssistantPanel {
                 let should_continue = this.update(cx, |this, cx| {
                     this.animation_frame = this.animation_frame.wrapping_add(1);
 
+                    let total_msgs = this.messages.len();
+                    let frame = this.animation_frame;
+                    let mut needs_notify = false;
+                    {
+                        let mut revealed = this.ai_reveal_revealed.borrow_mut();
+                        while revealed.len() < total_msgs {
+                            revealed.push(0);
+                        }
+                        for (mi, msg) in this.messages.iter().enumerate() {
+                            if !msg.is_user {
+                                let rev_lines = this.ai_revealed_lines(mi, msg, frame);
+                                if revealed[mi] < rev_lines {
+                                    revealed[mi] = rev_lines;
+                                    this.list_state.remeasure_items(mi..mi + 1);
+                                    needs_notify = true;
+                                }
+                            }
+                        }
+                    }
+
                     // 仅在需要动画时通知重渲染；空闲时静默，零 CPU 占用。
-                    if this.animation_active() || this.loading_history || this.loading_older {
+                    if needs_notify || this.animation_active() || this.loading_history || this.loading_older {
                         cx.notify();
                     }
                     true
@@ -1497,7 +1545,7 @@ impl AiAssistantPanel {
             if i + 3 < self.messages.len() {
                 continue;
             }
-            if m.is_user || !m.streaming {
+            if m.is_user {
                 continue;
             }
             let total = ai_text_line_count(&m.text);
@@ -2196,19 +2244,91 @@ impl AiAssistantPanel {
                             if let Some(rx) = rx {
                                 let mut done = false;
                                 let mut should_clear = false;
-                                while let Ok(chunk) = rx.try_recv() {
-                                    match chunk {
-                                        StreamChunk::Delta(text) => {
-                                            if let Some(idx) = this.ai_streaming_index {
-                                                this.messages[idx].text.push_str(&text);
-                                                this.update_message_input_states(idx, cx);
-                                                this.list_state.remeasure_items(idx..idx + 1);
+                                loop {
+                                    match rx.try_recv() {
+                                        Ok(chunk) => match chunk {
+                                            StreamChunk::Delta(text) => {
+                                                if let Some(idx) = this.ai_streaming_index {
+                                                    this.messages[idx].text.push_str(&text);
+                                                    this.update_message_input_states(idx, cx);
+                                                    this.list_state.remeasure_items(idx..idx + 1);
+                                                }
                                             }
-                                        }
-                                        StreamChunk::Done => {
+                                            StreamChunk::Done => {
+                                                if let Some(idx) = this.ai_streaming_index {
+                                                    this.messages[idx].streaming = false;
+                                                    if this.messages[idx].text.is_empty() {
+                                                        this.messages[idx].text = format!(
+                                                            "{}: {}",
+                                                            i18n!(cx, "ai_assistant.error"),
+                                                            i18n!(cx, "ai_assistant.empty_response")
+                                                        );
+                                                    }
+                                                    this.update_message_input_states(idx, cx);
+                                                    let total = ai_text_line_count(&this.messages[idx].text);
+                                                    {
+                                                        let mut rev = this.ai_reveal_revealed.borrow_mut();
+                                                        if idx < rev.len() {
+                                                            rev[idx] = total;
+                                                        }
+                                                    }
+                                                    this.list_state.remeasure_items(idx..idx + 1);
+                                                }
+                                                this.ai_streaming_index = None;
+                                                this.save_current_sessions_to_disk();
+                                                this.maybe_send_pending(cx);
+                                                should_clear = true;
+                                                done = true;
+                                                break;
+                                            }
+                                            StreamChunk::Error(e) => {
+                                                if let Some(idx) = this.ai_streaming_index {
+                                                    this.messages[idx].text = format!(
+                                                        "{}: {}",
+                                                        i18n!(cx, "ai_assistant.error"),
+                                                        e
+                                                    );
+                                                    this.messages[idx].streaming = false;
+                                                    this.update_message_input_states(idx, cx);
+                                                    let total = ai_text_line_count(&this.messages[idx].text);
+                                                    {
+                                                        let mut rev = this.ai_reveal_revealed.borrow_mut();
+                                                        if idx < rev.len() {
+                                                            rev[idx] = total;
+                                                        }
+                                                    }
+                                                    this.list_state.remeasure_items(idx..idx + 1);
+                                                }
+                                                this.ai_streaming_index = None;
+                                                this.save_current_sessions_to_disk();
+                                                this.maybe_send_pending(cx);
+                                                should_clear = true;
+                                                done = true;
+                                                break;
+                                            }
+                                            StreamChunk::ToolCalls(_) => {
+                                                // 纯聊天模式不使用工具，忽略。
+                                            }
+                                        },
+                                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                                        Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                             if let Some(idx) = this.ai_streaming_index {
                                                 this.messages[idx].streaming = false;
+                                                if this.messages[idx].text.is_empty() {
+                                                    this.messages[idx].text = format!(
+                                                        "{}: {}",
+                                                        i18n!(cx, "ai_assistant.error"),
+                                                        i18n!(cx, "ai_assistant.network_interrupted")
+                                                    );
+                                                }
                                                 this.update_message_input_states(idx, cx);
+                                                let total = ai_text_line_count(&this.messages[idx].text);
+                                                {
+                                                    let mut rev = this.ai_reveal_revealed.borrow_mut();
+                                                    if idx < rev.len() {
+                                                        rev[idx] = total;
+                                                    }
+                                                }
                                                 this.list_state.remeasure_items(idx..idx + 1);
                                             }
                                             this.ai_streaming_index = None;
@@ -2216,26 +2336,7 @@ impl AiAssistantPanel {
                                             this.maybe_send_pending(cx);
                                             should_clear = true;
                                             done = true;
-                                        }
-                                        StreamChunk::Error(e) => {
-                                            if let Some(idx) = this.ai_streaming_index {
-                                                this.messages[idx].text = format!(
-                                                    "{}: {}",
-                                                    i18n!(cx, "ai_assistant.error"),
-                                                    e
-                                                );
-                                                this.messages[idx].streaming = false;
-                                                this.update_message_input_states(idx, cx);
-                                                this.list_state.remeasure_items(idx..idx + 1);
-                                            }
-                                            this.ai_streaming_index = None;
-                                            this.save_current_sessions_to_disk();
-                                            this.maybe_send_pending(cx);
-                                            should_clear = true;
-                                            done = true;
-                                        }
-                                        StreamChunk::ToolCalls(_) => {
-                                            // 纯聊天模式不使用工具，忽略。
+                                            break;
                                         }
                                     }
                                 }
@@ -2568,7 +2669,15 @@ impl AiAssistantPanel {
                                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                                         if let Some(idx) = this.ai_streaming_index {
                                             this.messages[idx].streaming = false;
+                                            if this.messages[idx].text.is_empty() {
+                                                this.messages[idx].text = format!(
+                                                    "{}: {}",
+                                                    i18n!(cx, "ai_assistant.error"),
+                                                    i18n!(cx, "ai_assistant.network_interrupted")
+                                                );
+                                            }
                                             this.update_message_input_states(idx, cx);
+                                            this.list_state.remeasure_items(idx..idx + 1);
                                         }
                                         this.ai_streaming_index = None;
                                         done = true;
@@ -2587,7 +2696,15 @@ impl AiAssistantPanel {
                                 if agent_dead {
                                     if let Some(idx) = this.ai_streaming_index {
                                         this.messages[idx].streaming = false;
+                                        if this.messages[idx].text.is_empty() {
+                                            this.messages[idx].text = format!(
+                                                "{}: {}",
+                                                i18n!(cx, "ai_assistant.error"),
+                                                i18n!(cx, "ai_assistant.service_terminated")
+                                            );
+                                        }
                                         this.update_message_input_states(idx, cx);
+                                        this.list_state.remeasure_items(idx..idx + 1);
                                     }
                                     this.ai_streaming_index = None;
                                     done = true;
@@ -3010,6 +3127,7 @@ impl AiAssistantPanel {
     /// 右侧提供删除与编辑按钮。编辑态切换为独立多行输入框，可保存修改。
     fn render_ai_quote(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
+        let p = SemanticPalette::from_context(cx);
         let _this = cx.entity();
         let quote = self.ai_quote.clone().unwrap_or_default();
         let edit_tip = i18n!(cx, "ai_assistant.quote_edit");
@@ -3028,8 +3146,8 @@ impl AiAssistantPanel {
                     .w_full()
                     .rounded(px(6.0))
                     .border_l_2()
-                    .border_color(rgb(t.accent))
-                    .bg(surface_bg(t.bg_hover, cx))
+                    .border_color(p.surface_accent)
+                    .bg(p.surface_hover)
                     .overflow_hidden()
                     .child(
                         h_flex()
@@ -3050,7 +3168,7 @@ impl AiAssistantPanel {
                                         div()
                                             .id("ai-quote-content")
                                             .w_full()
-                                            .text_color(rgb(t.text_primary))
+                                            .text_color(p.text_primary)
                                             .text_size(ui_text_md(cx))
                                             .tooltip(move |_, cx| {
                                                 cx.new(|_| Tooltip::new(quote_tip.clone())).into()
@@ -4011,13 +4129,34 @@ impl AiAssistantPanel {
         cx.notify();
     }
 
-    fn render_sessions_popover(&self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_sessions_popover(&self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = SemanticPalette::from_context(cx);
         let t = theme(cx);
+        let is_search_focused = self
+            .ai_sessions_search_input
+            .as_ref()
+            .map(|inp| inp.read(cx).focus_handle(cx).is_focused(window))
+            .unwrap_or(false);
+        let ring = focus_ring_shadows(&t);
         let active_id = self.active_conversation_id.clone();
         let renaming_id = self.renaming_conversation_id.clone();
         let conv_count = self.ai_conversation_list.len();
         let panel_weak = cx.entity().downgrade();
+
+        let search_content = self.ai_sessions_search_content;
+        self.ai_sessions_search_scope_select.update(cx, |state, cx| {
+            state.set_options(
+                vec![
+                    SelectOption::new(false, i18n!(cx, "ai_assistant.search_scope_title")),
+                    SelectOption::new(true, i18n!(cx, "ai_assistant.search_scope_content")),
+                ],
+                cx,
+            );
+            state.set_text_size(Some(ui_text_md(cx)), cx);
+            if state.selected_value() != Some(&search_content) {
+                state.set_selected_value(Some(search_content), cx);
+            }
+        });
 
         let backdrop = div()
             .id("ai-sessions-backdrop")
@@ -4434,7 +4573,7 @@ impl AiAssistantPanel {
             .child(
                 h_flex()
                     .h(px(34.0))
-                    .px(SPACE_SM)
+                    .px(SPACE_XS)
                     .border_b_1()
                     .border_color(p.border_subtle)
                     .items_center()
@@ -4518,42 +4657,59 @@ impl AiAssistantPanel {
             // Sessions Search Bar
             .child({
                 let has_search_query = !self.ai_sessions_search_query.is_empty();
-                let search_content = self.ai_sessions_search_content;
-                let scope_title_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.search_scope_title").into_boxed_str());
-                let scope_content_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.search_scope_content").into_boxed_str());
-                let current_scope_tip = if search_content { scope_content_tip } else { scope_title_tip };
                 let panel_weak_search = panel_weak.clone();
 
                 h_flex()
-                    .h(px(32.0))
-                    .px(SPACE_SM)
-                    .py(px(2.0))
+                    .h(px(36.0))
+                    .px(SPACE_XS)
+                    .py(SPACE_XS)
                     .gap(SPACE_XS)
                     .items_center()
                     .border_b_1()
                     .border_color(p.border_subtle)
                     .child(
                         h_flex()
+                            .id("ai-sessions-search-input-group")
                             .flex_1()
-                            .h(px(26.0))
+                            .h(px(28.0))
                             .px(SPACE_XS)
-                            .bg(p.surface_base)
-                            .border_1()
-                            .border_color(p.border_subtle)
-                            .rounded(RADIUS_SM)
                             .items_center()
                             .gap(px(4.0))
+                            .rounded(RADIUS_STD)
+                            .bg(if is_search_focused {
+                                p.surface_hover
+                            } else {
+                                p.surface_card
+                            })
+                            .border_1()
+                            .border_color(if is_search_focused {
+                                p.border_active
+                            } else {
+                                p.border_subtle
+                            })
+                            .when(is_search_focused, |s| s.shadow(ring))
+                            .when(!is_search_focused, |s| {
+                                s.hover(|h| {
+                                    h.border_color(p.surface_accent.opacity(0.6))
+                                        .bg(p.surface_hover)
+                                })
+                            })
                             .child(AppIcon::Search.svg().size(ICON_MICRO).text_color(p.text_muted))
                             .child(
                                 div()
+                                    .id("ai-sessions-search-input-wrapper")
+                                    .key_context("AiSessionsSearchBar")
                                     .flex_1()
                                     .h_full()
                                     .flex()
                                     .items_center()
                                     .child(if let Some(ref s_input) = self.ai_sessions_search_input {
-                                        Input::new(s_input).borderless(true).into_any_element()
+                                        Input::new(s_input).borderless(true).text_size(ui_text_md(cx)).into_any_element()
                                     } else {
                                         div().into_any_element()
+                                    })
+                                    .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation();
                                     })
                             )
                             .when(has_search_query, |d| {
@@ -4580,48 +4736,11 @@ impl AiAssistantPanel {
                                 )
                             })
                     )
-                    .child({
-                        let panel_weak = panel_weak_search.clone();
+                    .child(
                         div()
-                            .id("ai-sessions-search-scope-toggle")
-                            .cursor_pointer()
-                            .px(px(6.0))
-                            .h(px(26.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(2.0))
-                            .rounded(RADIUS_SM)
-                            .border_1()
-                            .border_color(if search_content { p.surface_accent } else { p.border_subtle })
-                            .bg(if search_content { p.surface_accent.opacity(0.12) } else { gpui::transparent_black() })
-                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(current_scope_tip)).into())
-                            .on_click(move |_, _, cx| {
-                                cx.stop_propagation();
-                                if let Some(panel) = panel_weak.upgrade() {
-                                    panel.update(cx, |this, cx| {
-                                        this.ai_sessions_search_content = !this.ai_sessions_search_content;
-                                        this.refresh_sessions_search(cx);
-                                    });
-                                }
-                            })
-                            .child(
-                                AppIcon::File
-                                    .svg()
-                                    .size(ICON_MICRO)
-                                    .text_color(if search_content { p.surface_accent } else { p.text_muted })
-                            )
-                            .child(
-                                div()
-                                    .text_size(ui_text_xs(cx))
-                                    .font_weight(if search_content { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
-                                    .text_color(if search_content { p.surface_accent } else { p.text_muted })
-                                    .child(if search_content {
-                                        i18n!(cx, "ai_assistant.search_scope_content")
-                                    } else {
-                                        i18n!(cx, "ai_assistant.search_scope_title")
-                                    })
-                            )
-                    })
+                            .w(px(112.0))
+                            .child(Select::new(&self.ai_sessions_search_scope_select))
+                    )
             })
             // Scrollable List
             .child(
@@ -4629,13 +4748,15 @@ impl AiAssistantPanel {
                     .id("ai-sessions-scroll-list")
                     .flex_1()
                     .overflow_y_scroll()
-                    .p(px(2.0))
+                    .px(SPACE_XS)
+                    .py(SPACE_XS)
                     .children(list_items),
             )
             // Footer
             .child(
                 h_flex()
-                    .p(SPACE_XS)
+                    .px(SPACE_XS)
+                    .py(SPACE_XS)
                     .border_t_1()
                     .border_color(p.border_subtle)
                     .child(
@@ -6088,6 +6209,7 @@ fn render_ai_message(
     _reveal_changed: bool,
 ) -> (AnyElement, usize) {
     let is_user = msg.is_user;
+    let p = SemanticPalette::from_context(cx);
 
     // Whole-message search matches, used for the bubble-border highlight.
     // `flat_idx` is the running count of matches in earlier messages, so the
@@ -6125,15 +6247,15 @@ fn render_ai_message(
                         .px(px(6.0))
                         .py(px(2.0))
                         .rounded(px(4.0))
-                        .bg(surface_bg(t.bg_hover, cx))
+                        .bg(p.surface_hover)
                         .border_1()
-                        .border_color(rgb(t.border))
-                        .child(icon_path.size(px(11.0)).text_color(rgb(t.text_muted)))
+                        .border_color(p.border_subtle)
+                        .child(icon_path.size(px(11.0)).text_color(p.text_muted))
                         .child({
                             let n = name.clone();
                             div()
                                 .text_size(ui_text_xs(cx))
-                                .text_color(rgb(t.text_secondary))
+                                .text_color(p.text_secondary)
                                 .child(n)
                                 .into_any_element()
                         })
@@ -6168,8 +6290,8 @@ fn render_ai_message(
                     div()
                         .rounded(px(6.0))
                         .border_l_2()
-                        .border_color(rgb(t.accent))
-                        .bg(with_alpha(t.bg_secondary, 0.6))
+                        .border_color(p.surface_accent)
+                        .bg(p.surface_hover)
                         .overflow_hidden()
                         .child(
                             div()
@@ -6203,14 +6325,14 @@ fn render_ai_message(
                                         .gap(SPACE_XS)
                                         .flex_1()
                                         .min_w(px(0.0))
-                                        .child(AppIcon::Terminal.size(px(12.0)).text_color(rgb(t.text_muted)))
+                                        .child(AppIcon::Terminal.size(px(12.0)).text_color(p.text_muted))
                                         .child(
                                             div()
                                                 .flex_1()
                                                 .min_w(px(0.0))
                                                 .font_family(mono_font_family(cx))
-                                                .text_size(px(11.0))
-                                                .text_color(rgb(t.text_muted))
+                                                .text_size(ui_text_md(cx))
+                                                .text_color(p.text_muted)
                                                 .when(!expanded, |d| {
                                                     d.truncate().whitespace_nowrap().child(
                                                         quote_text.lines().collect::<Vec<_>>().join(" "),
@@ -6222,7 +6344,7 @@ fn render_ai_message(
                                 .child(
                                     div()
                                         .text_size(ui_text_xs(cx))
-                                        .text_color(rgb(t.text_muted))
+                                        .text_color(p.text_muted)
                                         .child(expand_label),
                                 ),
                         )
@@ -6335,7 +6457,43 @@ fn render_ai_message(
             }
         }
 
-        if is_loading {
+        // 错误状态卡片：当 AI 回复内容为错误信息时，以显著红色告警卡片展示。
+        let error_prefix = format!("{}:", i18n!(cx, "ai_assistant.error"));
+        let is_error = msg.text.starts_with(&error_prefix);
+
+        if is_error {
+            let is_multiline = msg.text.contains('\n') || msg.text.chars().count() > 36;
+            children.push(
+                h_flex()
+                    .w_full()
+                    .gap(SPACE_SM)
+                    .p(SPACE_SM)
+                    .rounded(RADIUS_MD)
+                    .bg(p.surface_danger.opacity(0.12))
+                    .border_1()
+                    .border_color(p.status_error)
+                    .when(is_multiline, |d| d.items_start())
+                    .when(!is_multiline, |d| d.items_center())
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .when(is_multiline, |d| d.pt(px(2.0)))
+                            .child(
+                                AppIcon::Ban
+                                    .size(px(14.0))
+                                    .text_color(p.status_error),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(ui_text_md(cx))
+                            .text_color(p.status_error)
+                            .child(msg.text.clone()),
+                    )
+                    .into_any_element(),
+            );
+        } else if is_loading {
             children.push(loading_indicator(t, cx, frame).into_any_element());
         } else {
             // 1. 如果有结构化工具调用（且 name 非空），渲染工具卡片
@@ -6369,11 +6527,18 @@ fn render_ai_message(
                                 .saturating_sub(text_line_offset)
                                 .min(seg_lines);
                             if reveal_in_seg > 0 {
-                                let revealed_text: String = s
+                                let mut revealed_text: String = s
                                     .split('\n')
                                     .take(reveal_in_seg)
                                     .collect::<Vec<_>>()
                                     .join("\n");
+                                let fence_count = revealed_text
+                                    .lines()
+                                    .filter(|l| l.trim_start().starts_with("```"))
+                                    .count();
+                                if fence_count % 2 != 0 {
+                                    revealed_text.push_str("\n```");
+                                }
                                 let active_sel = active_selection
                                     .as_ref()
                                     .filter(|s| s.msg_index == msg_index && s.seg_index == text_seg_idx);
@@ -6438,23 +6603,58 @@ fn render_ai_message(
             }
         }
 
-        if children.is_empty() && !msg.text.is_empty() {
-            let (el, cnt) = text_bubble(
-                &msg.text,
-                false,
-                t,
-                window,
-                cx,
-                search_query,
-                case_sensitive,
-                use_regex,
-                msg_index,
-                flat_idx,
-                current_match,
-                panel_entity,
-            );
-            let _ = cnt;
-            children.push(el);
+        if children.is_empty() {
+            if !msg.text.is_empty() {
+                let (el, cnt) = text_bubble(
+                    &msg.text,
+                    false,
+                    t,
+                    window,
+                    cx,
+                    search_query,
+                    case_sensitive,
+                    use_regex,
+                    msg_index,
+                    flat_idx,
+                    current_match,
+                    panel_entity,
+                );
+                let _ = cnt;
+                children.push(el);
+            } else if !msg.streaming {
+                let err_msg = format!("{}: {}", i18n!(cx, "ai_assistant.error"), i18n!(cx, "ai_assistant.empty_response"));
+                let is_multiline = err_msg.contains('\n') || err_msg.chars().count() > 36;
+                children.push(
+                    h_flex()
+                        .w_full()
+                        .gap(SPACE_SM)
+                        .p(SPACE_SM)
+                        .rounded(RADIUS_MD)
+                        .bg(p.surface_danger.opacity(0.12))
+                        .border_1()
+                        .border_color(p.status_error)
+                        .when(is_multiline, |d| d.items_start())
+                        .when(!is_multiline, |d| d.items_center())
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .when(is_multiline, |d| d.pt(px(2.0)))
+                                .child(
+                                    AppIcon::Ban
+                                        .size(px(14.0))
+                                        .text_color(p.status_error),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .text_size(ui_text_md(cx))
+                                .text_color(p.status_error)
+                                .child(err_msg),
+                        )
+                        .into_any_element(),
+                );
+            }
         }
 
         // 归并到本气泡的多次工具调用：默认折叠显示摘要，点击展开查看每个详情卡片。
@@ -6683,9 +6883,9 @@ fn render_ai_message(
                         .max_w(relative(0.92))
                         .p(SPACE_MD)
                         .rounded(RADIUS_LG)
-                        .bg(surface_bg(t.bg_hover, cx))
+                        .bg(p.surface_raised)
                         .border_1()
-                        .border_color(rgb(t.border))
+                        .border_color(p.border_subtle)
                         .flex()
                         .flex_col()
                         .gap(SPACE_SM)
@@ -6716,26 +6916,12 @@ fn render_ai_message(
             matches.len(),
         );
     } else {
-        // AI reply: avatar + name header above the bubble, hover copy on the left.
-        let name_label = i18n!(cx, "ai_assistant.title");
+        // AI reply: clean Antigravity style without avatar/name header, hover copy on the left.
         return (
             v_flex()
                 .w_full()
                 .gap(SPACE_SM)
                 .group(group_name.clone())
-                .child(
-                    h_flex()
-                        .gap(SPACE_MD)
-                        .items_center()
-                        .child(ai_avatar(t, msg.streaming, frame))
-                        .child(
-                            div()
-                                .text_size(ui_text_md(cx))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(rgb(t.text_secondary))
-                                .child(name_label),
-                        ),
-                )
                 .child(
                     div()
                         .w_full()
@@ -6758,35 +6944,11 @@ fn render_ai_message(
     }
 }
 
-/// A small circular avatar shown above AI assistant replies.
-/// 当 AI 正在回复（streaming）时，头像以呼吸节奏轻微明暗起伏，直观传达「工作中」。
-fn ai_avatar(t: &ThemeColors, streaming: bool, frame: u64) -> impl IntoElement {
-    let opacity = if streaming {
-        let wave = (frame as f32 / 30.0 * std::f32::consts::PI * 2.0).sin();
-        0.55 + 0.45 * ((wave + 1.0) / 2.0)
-    } else {
-        1.0
-    };
-    div()
-        .w(px(28.0))
-        .h(px(28.0))
-        .rounded(px(14.0))
-        .flex()
-        .items_center()
-        .justify_center()
-        .bg(rgb(t.accent))
-        .opacity(opacity)
-        .child(
-            AppIcon::AiAssistant
-                .size(px(18.0))
-                .text_color(rgb(0xffffff)),
-        )
-}
-
 // ── Loading Indicator ────────────────────────────────────────────────────
 
 /// 加载状态指示器：三个错相位呼吸跳动的圆点 + 文案，直观表达「等待回复中」。
-fn loading_indicator(t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement {
+fn loading_indicator(_t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement {
+    let p = SemanticPalette::from_context(cx);
     let label = i18n!(cx, "ai_assistant.thinking");
     let dots = (0..3).map(|i| {
         // 每个圆点相位错开，形成波浪式呼吸效果。
@@ -6797,7 +6959,7 @@ fn loading_indicator(t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement 
             .w(px(7.0))
             .h(px(7.0))
             .rounded(px(3.5))
-            .bg(rgb(t.accent))
+            .bg(p.surface_accent)
             .opacity(opacity)
     });
     div()
@@ -6809,7 +6971,7 @@ fn loading_indicator(t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement 
         .child(
             div()
                 .text_size(ui_text_md(cx))
-                .text_color(rgb(t.text_muted))
+                .text_color(p.text_muted)
                 .child(label),
         )
 }
@@ -6895,8 +7057,8 @@ fn msg_copy_btn(
 
 fn text_bubble(
     text: &str,
-    is_user: bool,
-    t: &ThemeColors,
+    _is_user: bool,
+    _t: &ThemeColors,
     _window: &mut Window,
     cx: &mut App,
     search_query: &str,
@@ -6907,12 +7069,7 @@ fn text_bubble(
     current_match: Option<usize>,
     panel_entity: &Entity<AiAssistantPanel>,
 ) -> (AnyElement, usize) {
-    let _bg_color = surface_bg(t.bg_hover, cx);
-    let text_color = if is_user {
-        rgb(0xffffff)
-    } else {
-        rgb(t.text_primary)
-    };
+    let p = SemanticPalette::from_context(cx);
 
     let matches = if !search_query.is_empty() {
         find_match_ranges(text, search_query, case_sensitive, use_regex)
@@ -6935,12 +7092,12 @@ fn text_bubble(
             range.clone(),
             HighlightStyle {
                 background_color: Some(if is_current {
-                    rgb(t.accent).into()
+                    p.surface_accent.into()
                 } else {
-                    rgb(t.accent).opacity(0.28).into()
+                    p.surface_accent.opacity(0.28).into()
                 }),
                 color: if is_current {
-                    Some(rgb(0xffffff).into())
+                    Some(p.text_on_accent.into())
                 } else {
                     None
                 },
@@ -6964,7 +7121,7 @@ fn text_bubble(
         })
         .child(
             div()
-                .text_color(text_color)
+                .text_color(p.text_primary)
                 .text_size(ui_text_md(cx))
                 .child(StyledText::new(text.to_string()).with_highlights(highlights)),
         )
