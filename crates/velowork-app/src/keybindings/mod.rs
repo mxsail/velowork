@@ -4,6 +4,7 @@ mod types;
 
 use gpui::*;
 use parking_lot::RwLock;
+use velowork_i18n::i18n;
 
 pub use config::{
     get_keybindings_path, load_keybindings, save_keybindings,
@@ -317,6 +318,96 @@ fn create_keybinding(action: &str, keystroke: &str, context: Option<&str>) -> Op
     }
 }
 
+/// Helper to check if a specific keybinding entry is customized relative to defaults.
+pub fn is_entry_customized(
+    action: &str,
+    entry_index: usize,
+    entry: &KeybindingEntry,
+    defaults: &KeybindingConfig,
+) -> bool {
+    if let Some(default_entries) = defaults.bindings.get(action) {
+        if let Some(default_entry) = default_entries.get(entry_index) {
+            return entry != default_entry;
+        }
+    }
+    true
+}
+
+/// Helper to check if an entry belongs to the current platform.
+/// Standard default macOS entries (`cmd-...`) are hidden on Linux/Windows.
+/// Standard default Linux/Windows entries (`ctrl-...` without `cmd-...`) are hidden on macOS.
+/// Any customized entry (modified by the user on this platform) is always shown.
+pub fn is_entry_matching_platform(
+    entry: &KeybindingEntry,
+    is_custom: bool,
+) -> bool {
+    if is_custom || entry.keystroke == "unset" || entry.keystroke.is_empty() {
+        return true;
+    }
+    let ks = entry.keystroke.to_lowercase();
+    if cfg!(target_os = "macos") {
+        if ks.contains("ctrl-") && !ks.contains("cmd-") {
+            return false;
+        }
+    } else if ks.contains("cmd-") {
+        return false;
+    }
+    true
+}
+
+/// Safely translate action name without leaking raw i18n keys
+pub fn translate_action_name(raw_name: &str, action_key: &str, cx: &App) -> String {
+    let key1 = format!("commands.{}", raw_name);
+    let trans1 = i18n!(cx, key1.as_str());
+    if trans1 != key1 && !trans1.is_empty() {
+        return trans1;
+    }
+    let key2 = format!("commands.{}", action_key);
+    let trans2 = i18n!(cx, key2.as_str());
+    if trans2 != key2 && !trans2.is_empty() {
+        return trans2;
+    }
+    raw_name.to_string()
+}
+
+/// Safely translate action description without leaking raw i18n keys
+pub fn translate_action_desc(raw_desc: &str, cx: &App) -> String {
+    if raw_desc.is_empty() {
+        return String::new();
+    }
+    let key = format!("commands.{}", raw_desc);
+    let trans = i18n!(cx, key.as_str());
+    if trans != key && !trans.is_empty() {
+        trans
+    } else {
+        raw_desc.to_string()
+    }
+}
+
+/// Helper to get i18n display name for categories.
+pub fn translate_category(category: &str, cx: &App) -> String {
+    match category {
+        "All" => i18n!(cx, "keybindings.tab_all"),
+        "Global" => i18n!(cx, "keybindings.tab_global"),
+        "Terminal" => i18n!(cx, "keybindings.tab_terminal"),
+        "Navigation" => i18n!(cx, "keybindings.tab_navigation"),
+        "View" => i18n!(cx, "keybindings.tab_view"),
+        "Search" => i18n!(cx, "keybindings.tab_search"),
+        "Fullscreen" => i18n!(cx, "keybindings.tab_fullscreen"),
+        "Project" => i18n!(cx, "keybindings.tab_project"),
+        "Other" => i18n!(cx, "keybindings.tab_other"),
+        other => {
+            let cat_key = format!("commands.cat.{}", other);
+            let trans = i18n!(cx, cat_key.as_str());
+            if trans != cat_key && !trans.is_empty() {
+                trans
+            } else {
+                other.to_string()
+            }
+        }
+    }
+}
+
 /// The shortcut currently bound to `action`, dynamically retrieved from
 /// the current runtime `KeybindingConfig` and formatted for display.
 ///
@@ -324,16 +415,22 @@ fn create_keybinding(action: &str, keystroke: &str, context: Option<&str>) -> Op
 pub fn shortcut_for_action(action: &str) -> Option<String> {
     let guard = KEYBINDING_CONFIG.read();
     let config = guard.as_ref()?;
+    let defaults = KeybindingConfig::defaults();
     let entries = config.bindings.get(action)?;
-    let chosen = if cfg!(target_os = "macos") {
-        entries.iter().find(|e| e.enabled)
+    let chosen = entries
+        .iter()
+        .enumerate()
+        .find(|(idx, e)| {
+            e.enabled && is_entry_matching_platform(e, is_entry_customized(action, *idx, e, &defaults))
+        })
+        .map(|(_, e)| e)
+        .or_else(|| entries.iter().find(|e| e.enabled))?;
+
+    if chosen.keystroke == "unset" || chosen.keystroke.is_empty() {
+        None
     } else {
-        entries
-            .iter()
-            .find(|e| e.enabled && e.keystroke.contains("ctrl"))
-            .or_else(|| entries.iter().find(|e| e.enabled))
-    }?;
-    Some(format_keystroke(&chosen.keystroke))
+        Some(format_keystroke(&chosen.keystroke))
+    }
 }
 
 /// The shortcut currently bound to `action`, dynamically retrieved from
@@ -344,16 +441,22 @@ pub fn shortcut_for_action(action: &str) -> Option<String> {
 pub fn shortcut_keys_for_action(action: &str) -> Option<Vec<String>> {
     let guard = KEYBINDING_CONFIG.read();
     let config = guard.as_ref()?;
+    let defaults = KeybindingConfig::defaults();
     let entries = config.bindings.get(action)?;
-    let chosen = if cfg!(target_os = "macos") {
-        entries.iter().find(|e| e.enabled)
+    let chosen = entries
+        .iter()
+        .enumerate()
+        .find(|(idx, e)| {
+            e.enabled && is_entry_matching_platform(e, is_entry_customized(action, *idx, e, &defaults))
+        })
+        .map(|(_, e)| e)
+        .or_else(|| entries.iter().find(|e| e.enabled))?;
+
+    if chosen.keystroke == "unset" || chosen.keystroke.is_empty() {
+        None
     } else {
-        entries
-            .iter()
-            .find(|e| e.enabled && e.keystroke.contains("ctrl"))
-            .or_else(|| entries.iter().find(|e| e.enabled))
-    }?;
-    Some(format_keystroke_to_parts(&chosen.keystroke))
+        Some(format_keystroke_to_parts(&chosen.keystroke))
+    }
 }
 
 /// Format a keystroke for display (convert to human-readable format).
@@ -420,6 +523,7 @@ pub fn format_single_keystroke_parts(k: &str) -> Vec<String> {
                 "ctrl" => "Ctrl".to_string(),
                 "shift" => "Shift".to_string(),
                 "alt" => "Alt".to_string(),
+                "cmd" | "super" | "win" => "Super".to_string(),
                 "escape" => "Esc".to_string(),
                 "pageup" => "PgUp".to_string(),
                 "pagedown" => "PgDn".to_string(),

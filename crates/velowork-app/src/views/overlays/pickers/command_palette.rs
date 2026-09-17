@@ -1,4 +1,7 @@
-use crate::keybindings::{Cancel, format_keystroke, get_action_descriptions, get_config};
+use crate::keybindings::{
+    get_action_descriptions, shortcut_for_action, translate_action_desc,
+    translate_action_name, translate_category, Cancel,
+};
 use crate::theme::{surface_bg_t, theme};
 use crate::ui::tokens::{ui_text_md, ui_text_ms};
 use crate::views::components::{
@@ -63,18 +66,13 @@ impl CommandPalette {
     ) -> Self {
         // Build command list from action descriptions
         let descriptions = get_action_descriptions();
-        let config_data = get_config();
 
         let mut commands: Vec<CommandEntry> = descriptions
             .iter()
             .filter(|(_, desc)| desc.show_in_palette)
             .map(|(action, desc)| {
-                // Get primary keybinding for this action
-                let keybinding = config_data
-                    .bindings
-                    .get(*action)
-                    .and_then(|entries| entries.iter().find(|e| e.enabled))
-                    .map(|e| format_keystroke(&e.keystroke));
+                // Get platform-aware primary keybinding for this action
+                let keybinding = shortcut_for_action(action);
 
                 CommandEntry {
                     action_key: action,
@@ -216,12 +214,15 @@ impl CommandPalette {
             let mut haystack = vec![
                 cmd.name.clone(),
                 cmd.category.clone(),
-                i18n!(cx, format!("commands.{}", cmd.name).as_str()),
-                i18n!(cx, format!("commands.cat.{}", cmd.category).as_str()),
+                translate_action_name(&cmd.name, cmd.action_key, cx),
+                translate_category(&cmd.category, cx),
             ];
             if !cmd.description.is_empty() {
                 haystack.push(cmd.description.clone());
-                haystack.push(i18n!(cx, format!("commands.{}", cmd.description).as_str()));
+                haystack.push(translate_action_desc(&cmd.description, cx));
+            }
+            if let Some(ref kb) = cmd.keybinding {
+                haystack.push(kb.clone());
             }
             haystack
         });
@@ -235,15 +236,16 @@ impl CommandPalette {
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let t = theme(cx);
+        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let command = &self.state.items[original_index];
         let is_selected = filtered_index == self.state.selected_index;
 
-        let name = i18n!(cx, format!("commands.{}", command.name).as_str());
-        let category = i18n!(cx, format!("commands.cat.{}", command.category).as_str());
+        let name = translate_action_name(&command.name, command.action_key, cx);
+        let category = translate_category(&command.category, cx);
         let description = if command.description.is_empty() {
             String::new()
         } else {
-            i18n!(cx, format!("commands.{}", command.description).as_str())
+            translate_action_desc(&command.description, cx)
         };
         let keybinding = command.keybinding.clone();
 
@@ -299,11 +301,16 @@ impl CommandPalette {
                     div()
                         .px(SPACE_MD)
                         .py(px(2.0))
+                        .flex()
+                        .items_center()
+                        .justify_center()
                         .rounded(RADIUS_STD)
-                        .bg(rgb(t.bg_secondary))
+                        .border_1()
+                        .border_color(p.border_subtle)
+                        .bg(p.surface_card)
                         .text_size(ui_text_ms(cx))
                         .font_family("monospace")
-                        .text_color(rgb(t.text_secondary))
+                        .text_color(p.text_secondary)
                         .child(kb)
                 })),
             )

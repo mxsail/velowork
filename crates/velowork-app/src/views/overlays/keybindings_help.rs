@@ -1,6 +1,8 @@
 use crate::keybindings::{
     format_keystroke, get_action_descriptions, get_config,
+    is_entry_customized, is_entry_matching_platform,
     keystroke_to_config_string, reset_to_defaults, update_config,
+    translate_action_desc, translate_action_name, translate_category,
     Cancel, ConflictKind, KeybindingConfig, KeybindingEntry, ShowKeybindings,
 };
 use crate::theme::{surface_bg_t, theme};
@@ -43,87 +45,7 @@ fn normalize_category(raw_category: &str) -> &'static str {
     }
 }
 
-/// Helper to check if a specific keybinding entry is customized relative to defaults.
-fn is_entry_customized(
-    action: &str,
-    entry_index: usize,
-    entry: &KeybindingEntry,
-    defaults: &KeybindingConfig,
-) -> bool {
-    if let Some(default_entries) = defaults.bindings.get(action) {
-        if let Some(default_entry) = default_entries.get(entry_index) {
-            return entry != default_entry;
-        }
-    }
-    true
-}
 
-/// Helper to check if an entry belongs to the current platform.
-/// Standard default macOS entries (`cmd-...`) are hidden on Linux/Windows.
-/// Standard default Linux/Windows entries (`ctrl-...` without `cmd-...`) are hidden on macOS.
-/// Any customized entry (modified by the user on this platform) is always shown.
-fn is_entry_matching_platform(
-    entry: &KeybindingEntry,
-    is_custom: bool,
-) -> bool {
-    if is_custom || entry.keystroke == "unset" || entry.keystroke.is_empty() {
-        return true;
-    }
-    let ks = entry.keystroke.to_lowercase();
-    if cfg!(target_os = "macos") {
-        if ks.contains("ctrl-") && !ks.contains("cmd-") {
-            return false;
-        }
-    } else if ks.contains("cmd-") {
-        return false;
-    }
-    true
-}
-
-/// Helper to get i18n display name for categories.
-fn category_i18n(category: &str, cx: &App) -> String {
-    match category {
-        "All" => i18n!(cx, "keybindings.tab_all"),
-        "Global" => i18n!(cx, "keybindings.tab_global"),
-        "Terminal" => i18n!(cx, "keybindings.tab_terminal"),
-        "Navigation" => i18n!(cx, "keybindings.tab_navigation"),
-        "View" => i18n!(cx, "keybindings.tab_view"),
-        "Search" => i18n!(cx, "keybindings.tab_search"),
-        "Fullscreen" => i18n!(cx, "keybindings.tab_fullscreen"),
-        "Project" => i18n!(cx, "keybindings.tab_project"),
-        "Other" => i18n!(cx, "keybindings.tab_other"),
-        other => other.to_string(),
-    }
-}
-
-/// Safely translate action name without leaking raw i18n keys
-fn translate_action_name(raw_name: &str, action_key: &str, cx: &App) -> String {
-    let key1 = format!("commands.{}", raw_name);
-    let trans1 = i18n!(cx, key1.as_str());
-    if trans1 != key1 && !trans1.is_empty() {
-        return trans1;
-    }
-    let key2 = format!("commands.{}", action_key);
-    let trans2 = i18n!(cx, key2.as_str());
-    if trans2 != key2 && !trans2.is_empty() {
-        return trans2;
-    }
-    raw_name.to_string()
-}
-
-/// Safely translate action description without leaking raw i18n keys
-fn translate_action_desc(raw_desc: &str, cx: &App) -> String {
-    if raw_desc.is_empty() {
-        return String::new();
-    }
-    let key = format!("commands.{}", raw_desc);
-    let trans = i18n!(cx, key.as_str());
-    if trans != key && !trans.is_empty() {
-        trans
-    } else {
-        raw_desc.to_string()
-    }
-}
 
 /// State for the keybinding currently being recorded
 #[derive(Clone, Debug)]
@@ -461,7 +383,7 @@ impl KeybindingsHelp {
                     let raw_ks = entry.keystroke.to_lowercase();
                     let matches_name = action_name.to_lowercase().contains(&query) || raw_name.to_lowercase().contains(&query);
                     let matches_desc = action_description.to_lowercase().contains(&query) || raw_desc.to_lowercase().contains(&query);
-                    let matches_cat = category.to_lowercase().contains(&query) || category_i18n(category, cx).to_lowercase().contains(&query);
+                    let matches_cat = category.to_lowercase().contains(&query) || translate_category(category, cx).to_lowercase().contains(&query);
                     let matches_ks = formatted_ks.contains(&query) || raw_ks.contains(&query);
                     matches_name || matches_desc || matches_cat || matches_ks
                 };
@@ -699,7 +621,7 @@ impl Render for KeybindingsHelp {
                             .child({
                                 let is_active = self.selected_tab.is_none();
                                 let total_count: usize = category_counts.values().sum();
-                                let tab_label = format!("{} ({})", category_i18n("All", cx), total_count);
+                                let tab_label = format!("{} ({})", translate_category("All", cx), total_count);
                                 tab_style(
                                     div().id("tab-all"),
                                     &t,
@@ -727,7 +649,7 @@ impl Render for KeybindingsHelp {
                                     return None;
                                 }
                                 let is_active = self.selected_tab == Some(cat);
-                                let tab_label = format!("{} ({})", category_i18n(cat, cx), count);
+                                let tab_label = format!("{} ({})", translate_category(cat, cx), count);
                                 Some(
                                     tab_style(
                                         div().id(ElementId::Name(format!("tab-{}", cat).into())),
