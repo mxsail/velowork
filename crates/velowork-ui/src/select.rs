@@ -31,7 +31,7 @@ use crate::scrollable::{Scrollbar, ScrollbarShow};
 use crate::theme::{surface_bg, theme, ThemeColors};
 use crate::tokens::{
     ui_icon_sm, ui_icon_std_ts, ui_text_md, ui_text_sm, ui_text_xs, DIALOG_LG, DIALOG_SM,
-    POPOVER_LIST_HEADER_H, POPOVER_LIST_ITEM_H, POPOVER_LIST_MAX_H, POPOVER_LIST_MIN_H,
+    POPOVER_LIST_HEADER_H, POPOVER_LIST_MAX_H, POPOVER_LIST_MIN_H,
     RADIUS_MD, RADIUS_SM, SELECT_WIDTH_MD, SPACE_2XL, SPACE_2XS,
     SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
 };
@@ -903,6 +903,8 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                 space_below.clamp(px(100.0), POPOVER_LIST_MAX_H)
             };
 
+            let opt_h = crate::menu::menu_item_height(cx);
+
             let popover_list = if filtered_groups.is_empty() {
                 let empty_tip = i18n!(cx, "dock.no_matches");
                 div()
@@ -944,7 +946,7 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                 let current_selected_val = current_selected_val.clone();
                 let row_items_clone = row_items.clone();
 
-                let list_h = ((POPOVER_LIST_ITEM_H + SPACE_2XS) * item_count as f32 + SPACE_MD).clamp(POPOVER_LIST_MIN_H, max_popover_h);
+                let list_h = ((opt_h + SPACE_2XS) * item_count as f32 + SPACE_MD).clamp(POPOVER_LIST_MIN_H, max_popover_h);
 
                 let ulist = uniform_list(
                     ElementId::Name(format!("select-ulist-{}", self.overlay_id).into()),
@@ -1001,7 +1003,7 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                                             let mut row = div()
                                                 .id(ElementId::Name(format!("select-opt-{}", item_idx).into()))
                                                 .w_full()
-                                                .h(POPOVER_LIST_ITEM_H)
+                                                .h(opt_h)
                                                 .flex()
                                                 .items_center()
                                                 .justify_between()
@@ -1155,16 +1157,18 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
 
                             let icon_el = opt.icon.map(|ic| ic.size(ui_icon_sm(cx)).text_color(text_color));
 
+                            let has_desc = opt.description.is_some();
                             let mut row = div()
                                 .id(ElementId::Name(format!("select-opt-{}", item_idx).into()))
                                 .w_full()
+                                .when(!has_desc, |d| d.h(opt_h))
+                                .when(has_desc, |d| d.min_h(opt_h).py(SPACE_SM))
                                 .flex()
                                 .items_center()
                                 .justify_between()
                                 .gap(SPACE_MD)
                                 .pl(SPACE_MD)
                                 .pr(SPACE_XL)
-                                .py(SPACE_SM)
                                 .rounded(RADIUS_SM)
                                 .bg(item_bg)
                                 .text_color(text_color)

@@ -376,6 +376,8 @@ impl PopupMenu {
             .on_mouse_move(|_, _, cx| cx.stop_propagation())
             .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
 
+        let item_h = super::menu_item_height(cx);
+
         for item in items {
             match item {
                 PopupMenuItem::Separator => {
@@ -399,8 +401,8 @@ impl PopupMenu {
                     let mut row = div()
                         .id(SharedString::from(format!("submenu-item-{}", data.id)))
                         .w_full()
+                        .h(item_h)
                         .px(SPACE_MD)
-                        .py(SPACE_SM)
                         .rounded(RADIUS_STD)
                         .flex()
                         .items_center()
@@ -516,6 +518,8 @@ impl Render for PopupMenu {
             (self.trigger_position, gpui::Anchor::TopLeft)
         };
 
+        let item_h = super::menu_item_height(cx);
+
         let mut items_container = div()
             .id("popup-menu-items")
             .w_full()
@@ -558,8 +562,8 @@ impl Render for PopupMenu {
                     let mut row = div()
                         .id(SharedString::from(format!("popup-item-{}", id)))
                         .w_full()
+                        .h(item_h)
                         .px(SPACE_MD)
-                        .py(SPACE_SM)
                         .rounded(RADIUS_STD)
                         .flex()
                         .items_center()
@@ -649,8 +653,8 @@ impl Render for PopupMenu {
                     let mut row = h_flex()
                         .id(SharedString::from(format!("popup-submenu-{}", id)))
                         .w_full()
+                        .h(item_h)
                         .px(SPACE_MD)
-                        .py(SPACE_SM)
                         .rounded(RADIUS_SM)
                         .items_center()
                         .justify_between()

@@ -3,7 +3,7 @@ use crate::design::semantic::SemanticPalette;
 use crate::overlay_registry::{ClosePolicy, OverlayInfo, OverlayRegistry};
 use crate::icon::AppIcon;
 use crate::theme::theme;
-use crate::tokens::{ICON_MICRO, ICON_STD, RADIUS_MD, RADIUS_SM, RADIUS_STD, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS, ui_text_md, ui_text_xs};
+use crate::tokens::{ICON_MICRO, ICON_STD, RADIUS_MD, RADIUS_SM, RADIUS_STD, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_XS, ui_text_md, ui_text_xs};
 use crate::tooltip::Tooltip;
 use crate::h_flex;
 use gpui::prelude::*;
@@ -165,7 +165,7 @@ impl OverlayMenu {
         } else {
             0.0
         };
-        let items_h = items.len() as f32 * 30.0;
+        let items_h = items.len() as f32 * 28.0;
         let estimated_height = px((search_h + items_h + 16.0).min(480.0));
 
         let overlay_registry = overlay_registry.map(|e| e.downgrade());
@@ -477,13 +477,14 @@ impl OverlayMenu {
                     );
                 }
                 OverlayMenuEntry::Item(item) => {
+                    let item_h = crate::menu::menu_item_height(cx);
                     let action = item.action.clone();
                     let close = on_close.clone();
                     let mut row = div()
                         .id(SharedString::from(format!("submenu-item-{}", item.id)))
                         .w_full()
+                        .h(item_h)
                         .px(SPACE_MD)
-                        .py(SPACE_SM)
                         .rounded(RADIUS_SM)
                         .flex()
                         .justify_between()
@@ -581,13 +582,14 @@ impl OverlayMenu {
                     panel = panel.child(row);
                 }
                 OverlayMenuEntry::CheckItem(item) => {
+                    let item_h = crate::menu::menu_item_height(cx);
                     let action = item.action.clone();
                     let close = on_close.clone();
                     let row = div()
                         .id(SharedString::from(format!("submenu-check-{}", item.id)))
                         .w_full()
+                        .h(item_h)
                         .px(SPACE_MD)
-                        .py(SPACE_SM)
                         .rounded(RADIUS_SM)
                         .flex()
                         .items_center()
@@ -747,6 +749,7 @@ impl Render for OverlayMenu {
             }
         }
 
+        let item_h = crate::menu::menu_item_height(cx);
         let p = self.animation_progress;
 
         // Quartic Ease-Out 缓动算法 (1 - (1 - t)^4)：
@@ -870,8 +873,8 @@ impl Render for OverlayMenu {
                                                     h_flex()
                                                         .id(format!("menu-submenu-{}", sub.id))
                                                         .w_full()
+                                                        .h(item_h)
                                                         .px(SPACE_MD)
-                                                        .py(SPACE_SM)
                                                         .rounded(RADIUS_SM)
                                                         .items_center()
                                                         .justify_between()
@@ -972,8 +975,8 @@ impl Render for OverlayMenu {
                                                     h_flex()
                                                         .id(format!("menu-item-{}", item.id))
                                                         .w_full()
+                                                        .h(item_h)
                                                         .px(SPACE_MD)
-                                                        .py(SPACE_SM)
                                                         .rounded(RADIUS_SM)
                                                         .items_center()
                                                         .justify_between()
@@ -1150,8 +1153,8 @@ impl Render for OverlayMenu {
                                                     h_flex()
                                                         .id(format!("menu-item-{}", item.id))
                                                         .w_full()
+                                                        .h(item_h)
                                                         .px(SPACE_MD)
-                                                        .py(SPACE_SM)
                                                         .rounded(RADIUS_SM)
                                                         .items_center()
                                                         .justify_between()

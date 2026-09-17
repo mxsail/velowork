@@ -45,7 +45,7 @@ pub enum ControlSize {
 
 impl ControlSize {
     /// Base height in logical pixels (before density offset + scale).
-    fn base_height(self) -> f32 {
+    pub fn base_height(self) -> f32 {
         match self {
             ControlSize::Compact => 24.0,
             ControlSize::Default => 28.0,
