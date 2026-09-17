@@ -384,26 +384,6 @@ impl KeybindingsHelp {
         self.start_recording(action.to_string(), new_index, cx);
     }
 
-    /// Clear or remove a binding entry.
-    /// If it's the sole binding for an action, clears it to "unset" so the action option remains.
-    fn remove_binding_entry(&mut self, action: &str, entry_index: usize, cx: &mut Context<Self>) {
-        update_config(|config| {
-            if let Some(entries) = config.bindings.get_mut(action) {
-                if entries.len() <= 1 {
-                    if let Some(entry) = entries.get_mut(entry_index) {
-                        entry.keystroke = "unset".to_string();
-                    }
-                } else if entry_index < entries.len() {
-                    entries.remove(entry_index);
-                }
-            }
-        });
-
-        self.pending_conflict = None;
-        cx.emit(KeybindingsHelpEvent::ReloadBindings);
-        cx.notify();
-    }
-
     /// Toggle enabled/disabled state
     fn toggle_binding_entry(&mut self, action: &str, entry_index: usize, cx: &mut Context<Self>) {
         update_config(|config| {
@@ -591,7 +571,6 @@ impl Render for KeybindingsHelp {
 
         // Precompute tooltips and localized strings for closures
         let tip_add = i18n!(cx, "keybindings.tip_add");
-        let tip_remove = i18n!(cx, "keybindings.tip_remove");
         let tip_reset_single = i18n!(cx, "keybindings.tip_reset_single");
         let tip_record = i18n!(cx, "keybindings.tip_record");
         let tip_enabled = i18n!(cx, "keybindings.tip_enabled");
@@ -722,6 +701,9 @@ impl Render for KeybindingsHelp {
                                 .child(tab_label)
                                 .when(is_active, |d| d.child(tab_active_indicator(rgb(t.border_active))))
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _window, cx| {
+                                    if this.editing.is_some() {
+                                        this.cancel_recording(cx);
+                                    }
                                     this.selected_tab = None;
                                     this.selected_index = 0;
                                     this.scroll_to_selected();
@@ -748,6 +730,9 @@ impl Render for KeybindingsHelp {
                                     .child(tab_label)
                                     .when(is_active, |d| d.child(tab_active_indicator(rgb(t.border_active))))
                                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _window, cx| {
+                                        if this.editing.is_some() {
+                                            this.cancel_recording(cx);
+                                        }
                                         this.selected_tab = Some(cat);
                                         this.selected_index = 0;
                                         this.scroll_to_selected();
@@ -815,7 +800,6 @@ impl Render for KeybindingsHelp {
                                         let is_selected = idx == self.selected_index;
                                         let action_name = row.action.clone();
                                         let action_for_toggle = row.action.clone();
-                                        let action_for_remove = row.action.clone();
                                         let action_for_reset = row.action.clone();
                                         let action_for_add = row.action.clone();
                                         let entry_idx = row.entry_index;
@@ -837,7 +821,6 @@ impl Render for KeybindingsHelp {
 
                                         let tip_toggle_str = if enabled { tip_enabled.clone() } else { tip_disabled.clone() };
                                         let tip_add_str = tip_add.clone();
-                                        let tip_remove_str = tip_remove.clone();
                                         let tip_reset_str = tip_reset_single.clone();
                                         let tip_record_str = tip_record.clone();
 
@@ -859,14 +842,9 @@ impl Render for KeybindingsHelp {
                                                     .border_color(p.border_subtle)
                                             })
                                             .on_mouse_down(MouseButton::Left, {
-                                                let action = action_name.clone();
                                                 cx.listener(move |this, _, _window, cx| {
                                                     this.selected_index = idx;
-                                                    if this.editing.as_ref().is_some_and(|e| e.action == action && e.entry_index == entry_idx) {
-                                                        this.cancel_recording(cx);
-                                                    } else {
-                                                        this.start_recording(action.clone(), entry_idx, cx);
-                                                    }
+                                                    cx.notify();
                                                 })
                                             })
                                             // Left: Action Name & Description & Badges (with truncation protection)
@@ -982,6 +960,7 @@ impl Render for KeybindingsHelp {
                                                             .on_mouse_down(MouseButton::Left, {
                                                                 let action = action_name.clone();
                                                                 cx.listener(move |this, _, _window, cx| {
+                                                                    cx.stop_propagation();
                                                                     if this.editing.as_ref().is_some_and(|e| e.action == action && e.entry_index == entry_idx) {
                                                                         this.cancel_recording(cx);
                                                                     } else {
@@ -1012,6 +991,7 @@ impl Render for KeybindingsHelp {
                                                             .on_mouse_down(MouseButton::Left, {
                                                                 let action = action_for_toggle.clone();
                                                                 cx.listener(move |this, _, _window, cx| {
+                                                                    cx.stop_propagation();
                                                                     this.toggle_binding_entry(&action, entry_idx, cx);
                                                                 })
                                                             }),
@@ -1039,6 +1019,7 @@ impl Render for KeybindingsHelp {
                                                                 let action = action_for_add.clone();
                                                                 let ctx = context_str.clone();
                                                                 cx.listener(move |this, _, _window, cx| {
+                                                                    cx.stop_propagation();
                                                                     this.add_binding_for_action(&action, ctx.clone(), cx);
                                                                 })
                                                             }),
@@ -1066,37 +1047,12 @@ impl Render for KeybindingsHelp {
                                                                 .on_mouse_down(MouseButton::Left, {
                                                                     let action = action_for_reset.clone();
                                                                     cx.listener(move |this, _, _window, cx| {
+                                                                        cx.stop_propagation();
                                                                         this.reset_single_action(&action, cx);
                                                                     })
                                                                 }),
                                                         )
-                                                    })
-                                                    // Remove / Clear Binding Button (×)
-                                                    .child(
-                                                        div()
-                                                            .id(ElementId::Name(format!("rm-{}-{}", action_for_remove, entry_idx).into()))
-                                                            .cursor_pointer()
-                                                            .w(px(24.0))
-                                                            .h(px(24.0))
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .rounded(RADIUS_MD)
-                                                            .bg(p.surface_card)
-                                                            .border_1()
-                                                            .border_color(p.border_subtle)
-                                                            .hover(|s| s.bg(p.surface_hover).border_color(rgb(t.error)).text_color(rgb(t.error)))
-                                                            .text_size(ui_text_lg(cx))
-                                                            .text_color(p.text_muted)
-                                                            .tooltip(move |_, cx| cx.new(|_| Tooltip::new(tip_remove_str.clone())).into())
-                                                            .child("×")
-                                                            .on_mouse_down(MouseButton::Left, {
-                                                                let action = action_for_remove.clone();
-                                                                cx.listener(move |this, _, _window, cx| {
-                                                                    this.remove_binding_entry(&action, entry_idx, cx);
-                                                                })
-                                                            }),
-                                                    ),
+                                                     }),
                                             )
                                     })),
                             )

@@ -2113,7 +2113,6 @@
     "tip_enabled": "Enabled, click to disable",
     "tip_disabled": "Disabled, click to enable",
     "tip_add": "Add keybinding for this action",
-    "tip_remove": "Remove this keybinding",
     "tip_reset_single": "Reset this action to default",
     "tip_record": "Click to record new keybinding",
     "hint_navigate": "Navigate",

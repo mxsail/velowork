@@ -2113,7 +2113,6 @@
     "tip_enabled": "快捷键已启用，点击禁用",
     "tip_disabled": "快捷键已禁用，点击启用",
     "tip_add": "为此动作添加快捷键",
-    "tip_remove": "删除此快捷键",
     "tip_reset_single": "恢复此动作默认快捷键",
     "tip_record": "点击录制新快捷键",
     "hint_navigate": "切换选择",
