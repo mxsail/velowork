@@ -1950,6 +1950,53 @@ impl AiAssistantPanel {
         cx.notify();
     }
 
+    /// Import multiple external conversation messages (from terminal inline AI popover)
+    /// and persist them into the active panel session.
+    pub fn import_external_messages(
+        &mut self,
+        _project_id: &str,
+        messages: &[crate::views::ai::types::ChatMessage],
+        cx: &mut Context<Self>,
+    ) {
+        if messages.is_empty() {
+            return;
+        }
+        if self.messages.len() == 1 && !self.messages[0].is_user {
+            self.messages.clear();
+            self.list_state.reset(0);
+        }
+        for m in messages {
+            if m.streaming && m.text.is_empty() {
+                continue;
+            }
+            let doc_views = if !m.is_user && !m.text.is_empty() {
+                let doc = cx.new(|cx| velowork_markdown::widgets::DocumentView::new(&m.text, cx));
+                vec![doc]
+            } else {
+                Vec::new()
+            };
+            let panel_msg = ChatMessage {
+                is_user: m.is_user,
+                text: m.text.clone(),
+                streaming: false,
+                document_views: std::cell::RefCell::new(doc_views),
+                tool_call: None,
+                thinking: None,
+                quote: m.quote.clone(),
+                attachments: m.attachments.iter().map(|a| crate::views::panels::ai_assistant_panel::ChatAttachment {
+                    path: a.path.clone(),
+                    name: a.name.clone(),
+                    is_image: a.is_image,
+                    text_content: a.text_content.clone(),
+                }).collect(),
+            };
+            self.push_message(panel_msg);
+        }
+        self.save_current_sessions_to_disk();
+        self.scroll_to_bottom();
+        cx.notify();
+    }
+
     fn send_ai_message(&mut self, cx: &mut Context<Self>) {
         let input_text = self
             .chat_input

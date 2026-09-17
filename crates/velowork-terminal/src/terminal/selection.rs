@@ -223,4 +223,92 @@ impl Terminal {
         self.send_bytes(&buf);
         true
     }
+
+    /// Get the most recent N lines of screen/history buffer as clean text.
+    pub fn get_recent_lines(&self, max_lines: usize) -> String {
+        let term = self.term.lock();
+        let grid = term.grid();
+        let mut lines = Vec::new();
+        let mut current_line = String::new();
+        let mut prev_line_idx: Option<i32> = None;
+
+        for indexed in grid.display_iter() {
+            let line_num = indexed.point.line.0;
+            if let Some(p) = prev_line_idx {
+                if line_num != p {
+                    lines.push(current_line.trim_end().to_string());
+                    current_line.clear();
+                }
+            }
+            prev_line_idx = Some(line_num);
+            current_line.push(indexed.cell.c);
+        }
+        if !current_line.is_empty() {
+            lines.push(current_line.trim_end().to_string());
+        }
+
+        let start_idx = lines.len().saturating_sub(max_lines);
+        lines[start_idx..].join("\n")
+    }
+
+    /// Get surrounding buffer lines around current selection (e.g. 20 lines before and after).
+    pub fn get_surrounding_selection_lines(&self, extra_lines: usize) -> Option<String> {
+        let term = self.term.lock();
+        let selection = term.selection.as_ref()?;
+        let range = selection.to_range(&*term)?;
+        let start_line = range.start.line.0;
+        let end_line = range.end.line.0;
+
+        let grid = term.grid();
+        let min_target_line = start_line - extra_lines as i32;
+        let max_target_line = end_line + extra_lines as i32;
+
+        let mut lines = Vec::new();
+        let mut current_line = String::new();
+        let mut prev_line_idx: Option<i32> = None;
+
+        for indexed in grid.display_iter() {
+            let line_num = indexed.point.line.0;
+            if line_num < min_target_line || line_num > max_target_line {
+                continue;
+            }
+            if let Some(p) = prev_line_idx {
+                if line_num != p {
+                    lines.push(current_line.trim_end().to_string());
+                    current_line.clear();
+                }
+            }
+            prev_line_idx = Some(line_num);
+            current_line.push(indexed.cell.c);
+        }
+        if !current_line.is_empty() {
+            lines.push(current_line.trim_end().to_string());
+        }
+
+        if lines.is_empty() {
+            None
+        } else {
+            Some(lines.join("\n"))
+        }
+    }
+
+    /// Get the text on the active cursor line (often containing prompt + unexecuted draft).
+    pub fn get_active_line(&self) -> Option<String> {
+        let term = self.term.lock();
+        let cursor = term.grid().cursor.point;
+        let mut line_str = String::new();
+        let cols = term.grid().columns();
+        for col in 0..cols {
+            let cell = &term.grid()[Point::new(cursor.line, Column(col))];
+            if !cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                line_str.push(cell.c);
+            }
+        }
+        let trimmed = line_str.trim_end().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    }
 }

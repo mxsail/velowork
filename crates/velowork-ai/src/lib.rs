@@ -52,7 +52,10 @@ use velowork_workspace::focus::FocusManager;
 use velowork_workspace::state::Workspace;
 
 pub use agent::{run_agent_turn, run_agent_turn_with_tool_channel, AgentEvent};
-pub use prompt::{render as render_prompt, ContextBundle, PromptScene};
+pub use context::{
+    capture_terminal_snapshot, head_tail_truncate, strip_ansi, TerminalContextSnapshot,
+};
+pub use prompt::{render as render_prompt, render_inline_prompt, ContextBundle, PromptScene};
 
 /// AI 能力门面。UI 层只通过它发起请求，不接触内部引擎。
 pub struct AiClient {

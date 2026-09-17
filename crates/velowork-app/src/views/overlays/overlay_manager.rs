@@ -1589,6 +1589,7 @@ impl OverlayManager {
         project_id: String,
         position: Point<Pixels>,
         selection_text: String,
+        snapshot: Option<velowork_ai::TerminalContextSnapshot>,
         cx: &mut Context<Self>,
     ) {
         let settings = settings_entity(cx).read(cx).settings.clone();
@@ -1604,6 +1605,7 @@ impl OverlayManager {
                 position,
                 selection_text,
                 reg,
+                snapshot,
                 cx,
             )
         });
@@ -1619,6 +1621,7 @@ impl OverlayManager {
         project_id: String,
         position: Point<Pixels>,
         selection_text: String,
+        snapshot: Option<velowork_ai::TerminalContextSnapshot>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1647,6 +1650,7 @@ impl OverlayManager {
                 position,
                 selection_text,
                 reg,
+                snapshot,
                 cx,
             )
         });

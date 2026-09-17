@@ -49,6 +49,7 @@ pub struct ChatAttachment {
 }
 
 /// 统一的高保真聊天消息结构体。
+#[derive(Debug)]
 pub struct ChatMessage {
     pub is_user: bool,
     pub text: String,

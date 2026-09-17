@@ -73,6 +73,14 @@ impl WindowView {
             }
         }
 
+        let snapshot = velowork_ai::capture_terminal_snapshot(
+            &terminal_id,
+            Some(&project_id),
+            &self.workspace,
+            &self.terminals,
+            cx,
+        );
+
         let vp = window.viewport_size();
         let pos = point(
             (vp.width - px(460.0)).max(px(20.0)) / 2.0,
@@ -85,6 +93,7 @@ impl WindowView {
                 project_id,
                 pos,
                 selection,
+                Some(snapshot),
                 window,
                 cx,
             );
@@ -479,8 +488,15 @@ impl WindowView {
                         terminal.send_bytes(cmd_with_nl.as_bytes());
                     }
                 }
-                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::ContinueInSidePanel { quote, reply: _ } => {
-                    if !quote.trim().is_empty() {
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::ContinueInSidePanel { project_id, quote, messages } => {
+                    if !messages.is_empty() {
+                        if let Some(ai) = self.find_ai_assistant_panel(cx) {
+                            ai.update(cx, |ai, cx| {
+                                ai.import_external_messages(&project_id, &messages, cx);
+                            });
+                        }
+                        self.pending_ai_open = true;
+                    } else if !quote.trim().is_empty() {
                         self.pending_ai_interpret = Some(quote.clone());
                     } else {
                         self.pending_ai_open = true;
@@ -1087,12 +1103,20 @@ impl WindowView {
                         self.toggle_sftp(cx);
                     }
                     ProjectOverlayKind::ShowAiFloatingToolbar { terminal_id, position, selection_text } => {
+                        let snapshot = velowork_ai::capture_terminal_snapshot(
+                            &terminal_id,
+                            Some(&project_id),
+                            &self.workspace,
+                            &self.terminals,
+                            cx,
+                        );
                         self.overlay_manager.update(cx, |om, cx| {
                             om.show_terminal_ai_floating_toolbar(
                                 terminal_id,
                                 project_id,
                                 position,
                                 selection_text,
+                                Some(snapshot),
                                 cx,
                             );
                         });

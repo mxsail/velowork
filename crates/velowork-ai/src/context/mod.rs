@@ -229,3 +229,133 @@ pub fn capture_live_context(
 
     live
 }
+
+/// 终端轻量上下文快照（供 Inline 浮窗与侧栏会话共享）。
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct TerminalContextSnapshot {
+    pub terminal_id: String,
+    pub session_name: String,
+    pub is_remote: bool,
+    pub remote_host: Option<String>,
+    pub os: String,
+    pub shell: String,
+    pub cwd: String,
+    pub selected_text: Option<String>,
+    pub surrounding_buffer: Option<String>,
+    pub active_input_draft: Option<String>,
+    pub last_command: Option<String>,
+}
+
+static RE_ANSI: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\].*?(\x07|\x1b\\)").expect("valid regex")
+});
+
+/// 彻底剥离终端 ANSI / VT100 控制转义码。
+pub fn strip_ansi(input: &str) -> String {
+    RE_ANSI.replace_all(input, "").to_string()
+}
+
+/// 超长文本双重预算截断算法（保留头部与尾部关键信息）。
+pub fn head_tail_truncate(input: &str, max_chars: usize, head_chars: usize, tail_chars: usize) -> String {
+    if input.len() <= max_chars {
+        return input.to_string();
+    }
+    let total_chars = input.chars().count();
+    if total_chars <= max_chars {
+        return input.to_string();
+    }
+    let head: String = input.chars().take(head_chars).collect();
+    let skip_count = total_chars.saturating_sub(tail_chars);
+    let tail: String = input.chars().skip(skip_count).collect();
+    let omitted = total_chars.saturating_sub(head_chars + tail_chars);
+    format!("{}\n\n[... omitted {} characters ...]\n\n{}", head, omitted, tail)
+}
+
+/// 从指定终端实体采集精准上下文快照。
+pub fn capture_terminal_snapshot(
+    terminal_id: &str,
+    project_id: Option<&str>,
+    ws: &Entity<Workspace>,
+    terms: &TerminalsRegistry,
+    cx: &App,
+) -> TerminalContextSnapshot {
+    let mut snapshot = TerminalContextSnapshot {
+        terminal_id: terminal_id.to_string(),
+        os: std::env::consts::OS.to_string(),
+        shell: detect_default_shell(),
+        ..Default::default()
+    };
+
+    let ws_read = ws.read(cx);
+    let project = if let Some(pid) = project_id {
+        ws_read.project(pid).cloned()
+    } else {
+        ws_read.find_project_for_terminal(terminal_id).cloned()
+    };
+
+    if let Some(p) = &project {
+        snapshot.session_name = p.name.clone();
+        snapshot.is_remote = p.is_remote;
+        if p.is_remote {
+            snapshot.remote_host = Some(p.path.clone());
+        }
+    }
+
+    let guard = terms.lock();
+    if let Some(term) = guard.get(terminal_id) {
+        snapshot.cwd = term.current_cwd();
+        if term.has_selection() {
+            if let Some(sel) = term.get_selected_text() {
+                let cleaned = strip_ansi(&sel);
+                let masked = mask_sensitive_data(&cleaned);
+                let truncated = head_tail_truncate(&masked, 8000, 3000, 4000);
+                snapshot.selected_text = Some(truncated);
+            }
+            if let Some(surrounding) = term.get_surrounding_selection_lines(20) {
+                let cleaned = strip_ansi(&surrounding);
+                let masked = mask_sensitive_data(&cleaned);
+                let truncated = head_tail_truncate(&masked, 4000, 1500, 2000);
+                snapshot.surrounding_buffer = Some(truncated);
+            }
+        } else {
+            let recent = term.get_recent_lines(50);
+            if !recent.trim().is_empty() {
+                let cleaned = strip_ansi(&recent);
+                let masked = mask_sensitive_data(&cleaned);
+                let truncated = head_tail_truncate(&masked, 4000, 1500, 2000);
+                snapshot.surrounding_buffer = Some(truncated);
+            }
+        }
+        if let Some(active_line) = term.get_active_line() {
+            let cleaned = strip_ansi(&active_line);
+            snapshot.active_input_draft = Some(cleaned);
+        }
+    }
+
+    snapshot
+}
+
+fn detect_default_shell() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if std::env::var("PSModulePath").is_ok() {
+            "powershell".to_string()
+        } else {
+            "cmd".to_string()
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(shell_path) = std::env::var("SHELL") {
+            if shell_path.contains("zsh") {
+                "zsh".to_string()
+            } else if shell_path.contains("fish") {
+                "fish".to_string()
+            } else {
+                "bash".to_string()
+            }
+        } else {
+            "bash".to_string()
+        }
+    }
+}

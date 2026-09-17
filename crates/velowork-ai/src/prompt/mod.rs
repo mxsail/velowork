@@ -105,6 +105,83 @@ fn scene_instruction(scene: PromptScene) -> &'static str {
     }
 }
 
+/// 渲染终端 Inline AI 气泡浮窗的场景化 system prompt。
+///
+/// 遵循 Prompt Caching 最佳实践排序：
+/// 1. 静态基础角色与格式指令
+/// 2. 场景化目标与代码块强约束
+/// 3. 运行环境元数据 (OS, Shell, CWD, Remote)
+/// 4. 终端选区与关联上下文快照
+pub fn render_inline_prompt(
+    scene: PromptScene,
+    snapshot: &crate::context::TerminalContextSnapshot,
+) -> String {
+    let mut p = String::new();
+    p.push_str(inline_base_instruction());
+    p.push('\n');
+    p.push_str(inline_scene_instruction(scene));
+    p.push_str("\n\n# Runtime Environment\n");
+    p.push_str(&format!("- OS: {}\n", snapshot.os));
+    p.push_str(&format!("- Shell: {}\n", snapshot.shell));
+    if !snapshot.cwd.is_empty() {
+        p.push_str(&format!("- Working Directory: {}\n", snapshot.cwd));
+    }
+    if snapshot.is_remote {
+        let host = snapshot.remote_host.as_deref().unwrap_or("remote-host");
+        p.push_str(&format!("- Session: {} (SSH Remote: {})\n", snapshot.session_name, host));
+    } else if !snapshot.session_name.is_empty() {
+        p.push_str(&format!("- Session: {} (Local)\n", snapshot.session_name));
+    }
+    if let Some(ref draft) = snapshot.active_input_draft {
+        if !draft.trim().is_empty() {
+            p.push_str(&format!("- Active Prompt / Unexecuted Command Draft: `{}`\n", draft));
+        }
+    }
+    if let Some(ref last_cmd) = snapshot.last_command {
+        if !last_cmd.trim().is_empty() {
+            p.push_str(&format!("- Last Executed Command: `{}`\n", last_cmd));
+        }
+    }
+
+    if let Some(ref sel) = snapshot.selected_text {
+        if !sel.trim().is_empty() {
+            p.push_str(&format!("\n# Selected Terminal Text\n```\n{}\n```\n", sel));
+        }
+    }
+
+    if let Some(ref buf) = snapshot.surrounding_buffer {
+        if !buf.trim().is_empty() {
+            p.push_str(&format!("\n# Recent Terminal Buffer Context\n```\n{}\n```\n", buf));
+        }
+    }
+
+    p
+}
+
+fn inline_base_instruction() -> &'static str {
+    "You are Velowork Terminal Inline AI, a fast, lightweight terminal coding assistant. \
+     You provide precise, concise help tailored to the user's active shell and operating system. \
+     Keep responses brief and avoid conversational fluff. When suggesting terminal commands, \
+     always format them in fenced code blocks (e.g. ```bash ... ```) so they can be run directly."
+}
+
+fn inline_scene_instruction(scene: PromptScene) -> &'static str {
+    match scene {
+        PromptScene::CommandGen => {
+            "Goal: Generate the most accurate shell command for the user's intent. Return the executable command directly."
+        }
+        PromptScene::ErrorDiagnosis => {
+            "Goal: Diagnose the selected error or failure. Explain root cause in 1-2 sentences, then provide the exact fix command."
+        }
+        PromptScene::LogExplain => {
+            "Goal: Explain the selected log output concisely, highlighting the critical warning/error message."
+        }
+        _ => {
+            "Goal: Answer the user's terminal question directly and concisely, providing accurate commands."
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

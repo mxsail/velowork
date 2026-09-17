@@ -10,7 +10,9 @@ use std::collections::HashSet;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
-use velowork_ai::{provider, StreamChunk};
+use velowork_ai::{
+    provider, render_inline_prompt, PromptScene, StreamChunk, TerminalContextSnapshot,
+};
 use velowork_i18n::i18n;
 use velowork_markdown::{
     find_line_boundaries, find_word_boundaries, MarkdownSelectionEvent,
@@ -125,8 +127,9 @@ pub enum TerminalAiInlineEvent {
     },
     /// Escalate conversation to the right AI assistant dock panel.
     ContinueInSidePanel {
+        project_id: String,
         quote: String,
-        reply: String,
+        messages: Vec<ChatMessage>,
     },
     /// Append a completed conversation turn to the project's session.
     AppendConversation {
@@ -174,6 +177,7 @@ pub struct TerminalAiInline {
     pub scroll_handle: ScrollHandle,
     pub focus_handle: FocusHandle,
     pub animation_frame: u64,
+    pub cached_snapshot: Option<TerminalContextSnapshot>,
 }
 
 impl TerminalAiInline {
@@ -184,6 +188,7 @@ impl TerminalAiInline {
         position: Point<Pixels>,
         selection_text: String,
         overlay_registry: Option<Entity<OverlayRegistry>>,
+        snapshot: Option<TerminalContextSnapshot>,
         cx: &mut Context<Self>,
     ) -> Self {
         let (model_select, selected_model_id, has_no_model) =
@@ -257,6 +262,7 @@ impl TerminalAiInline {
             scroll_handle: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
             animation_frame: 0,
+            cached_snapshot: snapshot,
         }
     }
 
@@ -390,6 +396,7 @@ impl TerminalAiInline {
         position: Point<Pixels>,
         selection_text: String,
         overlay_registry: Option<Entity<OverlayRegistry>>,
+        snapshot: Option<TerminalContextSnapshot>,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut inline = Self::new_toolbar(
@@ -398,6 +405,7 @@ impl TerminalAiInline {
             position,
             selection_text.clone(),
             overlay_registry,
+            snapshot,
             cx,
         );
         inline.enter_start = Instant::now();
@@ -544,7 +552,35 @@ impl TerminalAiInline {
         self._stream_task = None;
         self.stream_rx = None;
 
-        let rx = provider::stream_api_reply(&cfg.base_url, &cfg.api_key, &cfg.model_id, &api_messages);
+        let scene = if quote.is_some() {
+            PromptScene::ErrorDiagnosis
+        } else {
+            PromptScene::CommandGen
+        };
+
+        if self.cached_snapshot.is_none() {
+            self.cached_snapshot = Some(TerminalContextSnapshot {
+                terminal_id: self.terminal_id.clone(),
+                selected_text: quote.clone(),
+                os: std::env::consts::OS.to_string(),
+                shell: if cfg!(target_os = "windows") { "powershell".to_string() } else { "bash".to_string() },
+                ..Default::default()
+            });
+        }
+
+        let system_prompt = if let Some(ref snapshot) = self.cached_snapshot {
+            render_inline_prompt(scene, snapshot)
+        } else {
+            String::new()
+        };
+
+        let rx = provider::stream_api_reply_with_system(
+            &cfg.base_url,
+            &cfg.api_key,
+            &cfg.model_id,
+            if system_prompt.is_empty() { None } else { Some(&system_prompt) },
+            &api_messages,
+        );
         let rx_arc = Arc::new(parking_lot::Mutex::new(rx));
         self.stream_rx = Some(rx_arc);
 
@@ -916,8 +952,6 @@ impl TerminalAiInline {
         let close_tip: &'static str =
             Box::leak(i18n!(cx, "common.close").into_boxed_str());
 
-        let quote = self.selection_text.clone();
-
         capsule_toolbar_container("terminal-ai-toolbar", cx)
             .child(
                 capsule_icon_button("ai-tb-explain", AppIcon::AiAssistant, cx)
@@ -936,10 +970,11 @@ impl TerminalAiInline {
             .child(
                 capsule_icon_button("ai-tb-to-panel", AppIcon::ExternalLink, cx)
                     .tooltip(move |_, cx| cx.new(|_| Tooltip::new(to_panel_tip)).into())
-                    .on_click(cx.listener(move |_, _, _, cx| {
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         cx.emit(TerminalAiInlineEvent::ContinueInSidePanel {
-                            quote: quote.clone(),
-                            reply: String::new(),
+                            project_id: this.project_id.clone(),
+                            quote: this.selection_text.clone(),
+                            messages: Vec::new(),
                         });
                         cx.emit(TerminalAiInlineEvent::Close);
                     })),
@@ -1050,12 +1085,6 @@ impl TerminalAiInline {
         let elapsed = self.enter_start.elapsed();
         let t_norm = (elapsed.as_secs_f32() / DURATION_PANEL.as_secs_f32()).clamp(0.0, 1.0);
         let motion_progress = ease_out_cubic(t_norm);
-
-        let last_user_msg = self.messages.iter().rfind(|m| m.is_user);
-        let quote = last_user_msg
-            .and_then(|m| m.quote.clone())
-            .unwrap_or_else(|| self.selection_text.clone());
-        let reply = self.reply_text.clone();
 
         let to_panel_tip: &'static str =
             Box::leak(i18n!(cx, "terminal.inline_ai_continue_in_side_panel").into_boxed_str());
@@ -1187,10 +1216,11 @@ impl TerminalAiInline {
                             .child(
                                 icon_button_sized("btn-popover-to-panel", AppIcon::ExternalLink, 22.0, 13.0, &t)
                                     .tooltip(move |_, cx| cx.new(|_| Tooltip::new(to_panel_tip)).into())
-                                    .on_click(cx.listener(move |_, _, _, cx| {
+                                    .on_click(cx.listener(move |this, _, _, cx| {
                                         cx.emit(TerminalAiInlineEvent::ContinueInSidePanel {
-                                            quote: quote.clone(),
-                                            reply: reply.clone(),
+                                            project_id: this.project_id.clone(),
+                                            quote: this.selection_text.clone(),
+                                            messages: this.messages.clone(),
                                         });
                                         cx.emit(TerminalAiInlineEvent::Close);
                                     })),

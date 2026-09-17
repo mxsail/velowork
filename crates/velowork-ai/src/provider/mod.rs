@@ -410,15 +410,32 @@ pub fn stream_api_reply(
     model_id: &str,
     messages: &[(String, bool)],
 ) -> mpsc::Receiver<StreamChunk> {
-    let api_messages: Vec<serde_json::Value> = messages
-        .iter()
-        .map(|(text, is_user)| {
-            json!({
-                "role": if *is_user { "user" } else { "assistant" },
-                "content": text,
-            })
-        })
-        .collect();
+    stream_api_reply_with_system(base_url, api_key, model_id, None, messages)
+}
+
+/// 向 OpenAI 兼容的 chat completions 端点发起带 system prompt 的流式请求（纯文本，无工具）。
+pub fn stream_api_reply_with_system(
+    base_url: &str,
+    api_key: &str,
+    model_id: &str,
+    system_prompt: Option<&str>,
+    messages: &[(String, bool)],
+) -> mpsc::Receiver<StreamChunk> {
+    let mut api_messages: Vec<serde_json::Value> = Vec::new();
+    if let Some(sys) = system_prompt {
+        if !sys.trim().is_empty() {
+            api_messages.push(json!({
+                "role": "system",
+                "content": sys,
+            }));
+        }
+    }
+    for (text, is_user) in messages {
+        api_messages.push(json!({
+            "role": if *is_user { "user" } else { "assistant" },
+            "content": text,
+        }));
+    }
     stream_api_raw(base_url, api_key, model_id, api_messages, &[], std::time::Duration::from_secs(30))
 }
 
