@@ -790,12 +790,7 @@ impl Render for WindowView {
         // Deferred activation of the AI assistant panel with an injected terminal quote.
         // (Panel activation needs a Window, which is only available here in render.)
         if let Some(quote) = self.pending_ai_interpret.take() {
-            // 右侧 dock 为按需创建（IDEA Tool Window 模式）：若用户从未展开过 AI
-            // 面板，self.right_dock 为 None，必须先创建并展开 dock 实体，否则 quote
-            // 会被 take 后直接丢弃。复用工具栏点击逻辑创建专属面板并展开。
-            if self.right_dock.is_none() {
-                self.handle_right_toolbar_click("ai_assistant", window, cx);
-            }
+            self.show_right_dock("ai_assistant", window, cx);
             if let Some(dock) = self.right_dock.clone() {
                 dock.update(cx, |dp, cx| {
                     dp.activate_or_add_panel("ai_assistant", window, cx);
@@ -806,7 +801,10 @@ impl Render for WindowView {
                         .clone()
                         .downcast::<crate::views::panels::ai_assistant_panel::AiAssistantPanel>(
                     ) {
-                        ai.update(cx, |ai, cx| ai.set_quote(quote, cx));
+                        ai.update(cx, |ai, cx| {
+                            ai.set_quote(quote, cx);
+                            ai.focus_input(window, cx);
+                        });
                     }
                 }
             }
@@ -814,9 +812,7 @@ impl Render for WindowView {
 
         if self.pending_ai_open {
             self.pending_ai_open = false;
-            if self.right_dock.is_none() {
-                self.handle_right_toolbar_click("ai_assistant", window, cx);
-            }
+            self.show_right_dock("ai_assistant", window, cx);
             if let Some(dock) = self.right_dock.clone() {
                 dock.update(cx, |dp, cx| {
                     dp.activate_or_add_panel("ai_assistant", window, cx);

@@ -777,6 +777,7 @@ impl OverlayManager {
         self.tunnel_context_menu.close();
         self.service_context_menu.close();
         self.transfer_popup.close();
+        self.terminal_ai_inline.close();
     }
 
     /// Force-close every interactive floating surface currently open in this
@@ -1407,6 +1408,7 @@ impl OverlayManager {
     ) {
         self.close_modal(cx);
         self.close_all_context_menus();
+        self.dismiss_terminal_ai_inline(cx);
         self.last_terminal_context = Some((terminal_id.clone(), project_id.clone(), layout_path.clone()));
 
         let settings = settings_entity(cx).read(cx).settings.clone();

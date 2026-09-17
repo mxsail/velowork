@@ -546,6 +546,7 @@ impl TerminalContent {
             return;
         };
         terminal.clear_selection();
+        cx.emit(TerminalContentEvent::DismissAiFloatingToolbar);
 
         match click_count {
             2 => {
@@ -919,6 +920,7 @@ impl Render for TerminalContent {
                     }
                     let tvs = crate::terminal_view_settings(cx);
                     if tvs.terminal_right_click_paste && !event.modifiers.shift {
+                        cx.emit(TerminalContentEvent::DismissAiFloatingToolbar);
                         if let Some(terminal) = &this.terminal {
                             let item = cx.read_from_clipboard();
                             if let Some(text) = item.and_then(|i| i.text()) {
@@ -927,6 +929,7 @@ impl Render for TerminalContent {
                         }
                         return;
                     }
+                    cx.emit(TerminalContentEvent::DismissAiFloatingToolbar);
                     let has_selection = this.terminal.as_ref().map(|t| t.has_selection()).unwrap_or(false);
                     let link_url = this.cell_at(event.position, cx).and_then(|(col, row, _side)| {
                         this.url_detector.find_at(col, row)
@@ -954,6 +957,7 @@ impl Render for TerminalContent {
                     if this.try_forward_mouse_press(1, event.position, &event.modifiers) {
                         cx.notify();
                     } else {
+                        cx.emit(TerminalContentEvent::DismissAiFloatingToolbar);
                         #[cfg(target_os = "linux")]
                         if let Some(ref terminal) = this.terminal
                             && let Some(item) = cx.read_from_primary()

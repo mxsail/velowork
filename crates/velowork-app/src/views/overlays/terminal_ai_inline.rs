@@ -688,9 +688,23 @@ impl TerminalAiInline {
         self.start_turn(user_text, Some(self.selection_text.clone()), cx);
     }
 
-    pub fn trigger_generate_command(&mut self, cx: &mut Context<Self>) {
-        let user_text = i18n!(cx, "terminal.ai_toolbar_gen_command");
-        self.start_turn(user_text, Some(self.selection_text.clone()), cx);
+    pub fn trigger_search_in_browser(&mut self, cx: &mut Context<Self>) {
+        let query = self.selection_text.trim();
+        if !query.is_empty() {
+            let settings = crate::settings::settings_entity(cx).read(cx).settings.clone();
+            let url = if let Some(engine) = settings.search_engines.iter().find(|e| e.enabled) {
+                engine.build_url(query)
+            } else {
+                velowork_workspace::settings::SearchEngineConfig::new(
+                    "Google".to_string(),
+                    "https://www.google.com/search?q=%s".to_string(),
+                    String::new(),
+                )
+                .build_url(query)
+            };
+            cx.open_url(&url);
+        }
+        cx.emit(TerminalAiInlineEvent::Close);
     }
 
     pub fn submit_followup(&mut self, cx: &mut Context<Self>) {
@@ -725,7 +739,7 @@ impl Render for TerminalAiInline {
         };
 
         let pos = match self.mode {
-            InlineAiMode::Toolbar => point(self.position.x, (self.position.y - px(38.0)).max(px(4.0))),
+            InlineAiMode::Toolbar => point(self.position.x, (self.position.y - px(42.0)).max(px(4.0))),
             InlineAiMode::Popover => point(self.position.x, self.position.y + px(4.0)),
         };
 
@@ -878,8 +892,8 @@ impl TerminalAiInline {
         let explain_tip: &'static str =
             Box::leak(i18n!(cx, "terminal.ai_toolbar_explain_tip").into_boxed_str());
 
-        let gen_cmd_tip: &'static str =
-            Box::leak(i18n!(cx, "terminal.ai_toolbar_gen_command_tip").into_boxed_str());
+        let search_tip: &'static str =
+            Box::leak(i18n!(cx, "terminal.ai_toolbar_search_tip").into_boxed_str());
 
         let to_panel_tip: &'static str =
             Box::leak(i18n!(cx, "terminal.ai_toolbar_send_to_side_panel_tip").into_boxed_str());
@@ -898,10 +912,10 @@ impl TerminalAiInline {
                     })),
             )
             .child(
-                capsule_icon_button("ai-tb-gen-cmd", AppIcon::Terminal, cx)
-                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(gen_cmd_tip)).into())
+                capsule_icon_button("ai-tb-search", AppIcon::Search, cx)
+                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(search_tip)).into())
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.trigger_generate_command(cx);
+                        this.trigger_search_in_browser(cx);
                     })),
             )
             .child(
@@ -918,8 +932,8 @@ impl TerminalAiInline {
             .child(capsule_divider(cx))
             .child(
                 div()
-                    .w(px(150.0))
-                    .h(px(22.0))
+                    .w(px(160.0))
+                    .h(px(28.0))
                     .flex()
                     .items_center()
                     .on_key_down(cx.listener(|_, event: &KeyDownEvent, _window, cx| {
@@ -931,7 +945,7 @@ impl TerminalAiInline {
                     .child(
                         SimpleInput::new(&self.toolbar_input)
                             .compact()
-                            .h(px(22.0))
+                            .h(px(28.0))
                             .text_size(ui_text_md(cx)),
                     ),
             )

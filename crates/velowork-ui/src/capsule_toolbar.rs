@@ -5,7 +5,9 @@
 
 use crate::design::semantic::SemanticPalette;
 use crate::icon::AppIcon;
-use crate::tokens::{elevation_menu_shadow, ui_text_md, RADIUS_MD, RADIUS_SM, SPACE_SM, SPACE_XS};
+use crate::tokens::{
+    elevation_menu_shadow, ui_text_md, ICON_STD, RADIUS_LG, RADIUS_STD, SPACE_SM, SPACE_XS,
+};
 use gpui::*;
 
 /// Styled capsule toolbar container.
@@ -20,13 +22,13 @@ pub fn capsule_toolbar_container(id: impl Into<ElementId>, cx: &App) -> Stateful
         .occlude()
         .flex()
         .items_center()
-        .h(px(32.0))
+        .h(px(36.0))
         .px(SPACE_SM)
         .gap(SPACE_XS)
         .bg(p.surface_overlay)
         .border_1()
         .border_color(p.border_subtle)
-        .rounded(RADIUS_MD)
+        .rounded(RADIUS_LG)
         .shadow(elevation_menu_shadow())
         .text_size(ui_text_md(cx))
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
@@ -56,15 +58,15 @@ pub fn capsule_action_button(
         .flex()
         .items_center()
         .gap(px(4.0))
-        .h(px(24.0))
-        .px(px(6.0))
-        .rounded(RADIUS_SM)
+        .h(px(28.0))
+        .px(px(8.0))
+        .rounded(RADIUS_STD)
         .text_size(text_size)
         .text_color(p.text_secondary)
         .hover(|s| s.bg(p.surface_hover).text_color(p.text_primary))
         .active(|s| s.bg(p.surface_accent))
         .cursor_pointer()
-        .child(icon.size(text_size).text_color(p.text_secondary))
+        .child(icon.size(ICON_STD).text_color(p.text_secondary))
         .child(lbl)
 }
 
@@ -75,25 +77,24 @@ pub fn capsule_icon_button(
     cx: &App,
 ) -> Stateful<Div> {
     let p = SemanticPalette::from_context(cx);
-    let icon_size = ui_text_md(cx);
 
     div()
         .id(id)
         .flex()
         .items_center()
         .justify_center()
-        .w(px(24.0))
-        .h(px(24.0))
-        .rounded(RADIUS_SM)
+        .w(px(28.0))
+        .h(px(28.0))
+        .rounded(RADIUS_STD)
         .text_color(p.text_secondary)
         .hover(|s| s.bg(p.surface_hover).text_color(p.text_primary))
         .active(|s| s.bg(p.surface_accent))
         .cursor_pointer()
-        .child(icon.size(icon_size).text_color(p.text_secondary))
+        .child(icon.size(ICON_STD).text_color(p.text_secondary))
 }
 
 /// Vertical hairline divider separating button groups in the capsule bar.
 pub fn capsule_divider(cx: &App) -> Div {
     let p = SemanticPalette::from_context(cx);
-    div().w(px(1.0)).h(px(14.0)).bg(p.border_subtle)
+    div().w(px(1.0)).h(px(16.0)).bg(p.border_subtle)
 }

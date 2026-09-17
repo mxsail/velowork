@@ -478,8 +478,12 @@ impl WindowView {
                         terminal.send_bytes(cmd_with_nl.as_bytes());
                     }
                 }
-                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::ContinueInSidePanel { quote: _, reply: _ } => {
-                    self.pending_ai_open = true;
+                crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::ContinueInSidePanel { quote, reply: _ } => {
+                    if !quote.trim().is_empty() {
+                        self.pending_ai_interpret = Some(quote.clone());
+                    } else {
+                        self.pending_ai_open = true;
+                    }
                     cx.notify();
                 }
                 crate::views::overlays::terminal_ai_inline::TerminalAiInlineEvent::AppendConversation { project_id, user_message, quote, assistant_reply } => {

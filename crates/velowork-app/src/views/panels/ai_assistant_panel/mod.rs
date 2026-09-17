@@ -3010,10 +3010,8 @@ impl AiAssistantPanel {
     /// 右侧提供删除与编辑按钮。编辑态切换为独立多行输入框，可保存修改。
     fn render_ai_quote(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = SemanticPalette::from_context(cx);
         let _this = cx.entity();
         let quote = self.ai_quote.clone().unwrap_or_default();
-        let quote_label = i18n!(cx, "ai_assistant.quote");
         let edit_tip = i18n!(cx, "ai_assistant.quote_edit");
         let delete_tip = i18n!(cx, "ai_assistant.quote_delete");
         let save_tip = i18n!(cx, "ai_assistant.quote_save");
@@ -3028,15 +3026,16 @@ impl AiAssistantPanel {
             .child(
                 div()
                     .w_full()
-                    .rounded(RADIUS_STD)
-                    .border_l(px(3.0))
-                    .border_color(p.surface_accent)
-                    .bg(p.surface_raised)
+                    .rounded(px(6.0))
+                    .border_l_2()
+                    .border_color(rgb(t.accent))
+                    .bg(surface_bg(t.bg_hover, cx))
                     .overflow_hidden()
                     .child(
                         h_flex()
                             .w_full()
-                            .items_start()
+                            .when(self.ai_quote_editing, |d| d.items_start())
+                            .when(!self.ai_quote_editing, |d| d.items_center())
                             .gap(SPACE_SM)
                             .px(SPACE_MD)
                             .py(SPACE_SM)
@@ -3097,18 +3096,7 @@ impl AiAssistantPanel {
                                         |this, _window, cx| this.clear_ai_quote(cx),
                                     )),
                             ),
-                    )
-                    .when(!self.ai_quote_editing, |d| {
-                        d.child(
-                            div()
-                                .w_full()
-                                .px(SPACE_MD)
-                                .pb(px(4.0))
-                                .text_color(rgb(t.text_muted))
-                                .text_size(ui_text_xs(cx))
-                                .child(quote_label),
-                        )
-                    }),
+                    ),
             )
     }
 
