@@ -93,107 +93,84 @@ pub fn create_sync_provider(
     }
 }
 
-/// 将底层冗长复杂的同步/存储网络错误精简为易于用户理解的业务短语。
-/// 详细的原始技术错误（URL、Socket 堆栈等）应完整记录于系统运行日志中。
+fn extract_xml_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let open = format!("<{}>", tag);
+    let close = format!("</{}>", tag);
+    let start = text.find(&open)? + open.len();
+    let end = text[start..].find(&close)? + start;
+    let val = text[start..end].trim();
+    if val.is_empty() { None } else { Some(val) }
+}
+
+/// 直接从底层错误信息中裁剪出精简、语言中立（天然兼容国际化）的核心原因。
+/// 消除 XML 报文冗余、重复的前缀嵌套与底层调用链噪声，详细原始报文依然完整输出至运行日志。
 pub fn simplify_sync_error(raw: &str) -> String {
-    let lower = raw.to_lowercase();
+    let mut s = raw.trim();
 
-    // 1. 地址与 URL 格式解析错误
-    if lower.contains("invalid ipv4 address")
-        || lower.contains("invalid ipv6 address")
-        || lower.contains("relative url without a base")
-        || lower.contains("empty host")
-        || lower.contains("cannot be a base")
-        || lower.contains("invalid port")
-        || lower.contains("url parse")
-    {
-        return "服务地址或端口格式无效".to_string();
+    // 1. 剥离重复的嵌套失败前缀（支持中英文）
+    for prefix in &[
+        "连接失败:", "连接失败：",
+        "连接 S3 失败:", "连接 S3 失败：",
+        "连接 WebDAV 失败:", "连接 WebDAV 失败：",
+        "Connection failed:", "Connect failed:",
+    ] {
+        while let Some(stripped) = s.strip_prefix(prefix) {
+            s = stripped.trim();
+        }
     }
 
-    // 2. 连接拒绝 / 服务未启动 / TCP 连接失败
-    if lower.contains("connection refused")
-        || lower.contains("tcp connect error")
-        || lower.contains("network unreachable")
-        || lower.contains("host is down")
-        || lower.contains("no route to host")
-    {
-        return "网络连接被拒绝，请检查服务是否启动或防火墙设置".to_string();
+    // 2. 如果包含 S3 / WebDAV XML 错误载荷：Got HTTP 401 with content '<?xml...><Code>...</Code><Message>...</Message>'
+    if let Some(code) = extract_xml_tag(s, "Code") {
+        // 提取 HTTP 状态码，如 "HTTP 401"
+        let http_prefix = if let Some(idx) = s.find("HTTP ") {
+            let part = &s[idx..];
+            part.split_whitespace().take(2).collect::<Vec<_>>().join(" ")
+        } else {
+            String::new()
+        };
+
+        let message = extract_xml_tag(s, "Message");
+
+        return match (http_prefix.is_empty(), message) {
+            (false, Some(msg)) => {
+                // 如果 message 包含过长细节，截取逗号前第一句
+                let clean_msg = msg.split(',').next().unwrap_or(msg).trim();
+                format!("{http_prefix} ({code}): {clean_msg}")
+            }
+            (false, None) => format!("{http_prefix} ({code})"),
+            (true, Some(msg)) => {
+                let clean_msg = msg.split(',').next().unwrap_or(msg).trim();
+                format!("{code}: {clean_msg}")
+            }
+            (true, None) => code.to_string(),
+        };
     }
 
-    // 3. DNS 域名解析失败
-    if lower.contains("failed to lookup address")
-        || lower.contains("dns error")
-        || lower.contains("name or service not known")
-        || lower.contains("nodename nor servname provided")
-    {
-        return "域名解析失败，请检查服务地址是否正确".to_string();
+    // 3. 如果包含 "with content '"，说明有未解析的原始响应体，直接剔除 'with content ...'
+    if let Some(idx) = s.find(" with content '") {
+        let prefix = s[..idx].trim();
+        if !prefix.is_empty() {
+            let clean = prefix.strip_prefix("Got ").unwrap_or(prefix);
+            return clean.to_string();
+        }
     }
 
-    // 4. 超时
-    if lower.contains("timed out")
-        || lower.contains("timeout")
-        || lower.contains("deadline has elapsed")
-    {
-        return "网络请求超时，请检查服务器连接质量".to_string();
+    // 4. 如果是多级链式错误（如 A: B: C），提取末尾最直接的根因
+    // 例如："builder error: failed to resolve address '...': url parse: invalid IPv4 address" -> "url parse: invalid IPv4 address"
+    if let Some(pos) = s.rfind(": ") {
+        let last_part = s[pos + 2..].trim();
+        if !last_part.is_empty() && last_part.len() <= 60 {
+            return last_part.to_string();
+        }
     }
 
-    // 5. 认证与权限拒绝 (401 / 403 / AccessDenied / SignatureDoesNotMatch / InvalidAccessKeyId)
-    if lower.contains("invalidaccesskeyid")
-        || lower.contains("signaturedoesnotmatch")
-        || lower.contains("accessdenied")
-        || lower.contains("401")
-        || lower.contains("unauthorized")
-        || lower.contains("403")
-        || lower.contains("forbidden")
-    {
-        return "身份认证失败，请检查账号密码或访问密钥".to_string();
+    // 5. 限制最大长度（保持单行紧凑，不超过 60 字符）
+    if s.chars().count() > 60 {
+        let truncated: String = s.chars().take(60).collect();
+        format!("{truncated}…")
+    } else {
+        s.to_string()
     }
-
-    // 6. 存储桶 / 路径不存在 (404 / NoSuchBucket)
-    if lower.contains("nosuchbucket") || lower.contains("404") || lower.contains("not found") {
-        return "存储桶或远程路径不存在".to_string();
-    }
-
-    // 7. SSL / TLS 证书错误
-    if lower.contains("certificate")
-        || lower.contains("unknownissuer")
-        || lower.contains("certverify")
-        || lower.contains("handshake failure")
-    {
-        return "SSL/TLS 证书验证失败".to_string();
-    }
-
-    // 8. 5xx 服务器端错误
-    if lower.contains("502 bad gateway") || lower.contains("bad gateway") {
-        return "服务器网关错误 (HTTP 502)".to_string();
-    }
-    if lower.contains("503 service unavailable") {
-        return "服务暂不可用 (HTTP 503)".to_string();
-    }
-    if lower.contains("500 internal server error") {
-        return "服务器内部错误 (HTTP 500)".to_string();
-    }
-
-    // 9. 如果已经是结构化中文业务提示（清理冗余前缀如“连接 S3 失败：”、“连接失败：”）
-    let cleaned = raw
-        .trim()
-        .trim_start_matches("连接 S3 失败：")
-        .trim_start_matches("连接 S3 失败:")
-        .trim_start_matches("连接失败：")
-        .trim_start_matches("连接失败:")
-        .trim();
-
-    // 如果清理后的中文说明长度在合理范围（<= 45 字符），直接展示
-    if !cleaned.is_empty()
-        && cleaned.chars().count() <= 45
-        && !cleaned.contains("builder error")
-        && !cleaned.contains("dispatch failure")
-    {
-        return cleaned.to_string();
-    }
-
-    // 10. 兜底精简
-    "网络请求异常，详情见运行日志".to_string()
 }
 
 #[cfg(test)]
@@ -201,41 +178,41 @@ mod tests {
     use super::simplify_sync_error;
 
     #[test]
+    fn test_simplify_s3_xml_error() {
+        let err = "Got HTTP 401 with content '<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>UnauthorizedAccess</Code><Message>Your account is not signed up2, access_key: rustfsadmin1</Message></Error>'";
+        assert_eq!(
+            simplify_sync_error(err),
+            "HTTP 401 (UnauthorizedAccess): Your account is not signed up2"
+        );
+    }
+
+    #[test]
+    fn test_simplify_nested_prefix() {
+        let err = "连接失败: 连接 S3 失败：Got HTTP 401 with content '<?xml version=\"1.0\" encoding=\"UTF-8\"?><Error><Code>UnauthorizedAccess</Code><Message>Your account is not signed up2, access_key: rustfsadmin1</Message></Error>'";
+        assert_eq!(
+            simplify_sync_error(err),
+            "HTTP 401 (UnauthorizedAccess): Your account is not signed up2"
+        );
+    }
+
+    #[test]
     fn test_simplify_url_parse_error() {
         let err = "builder error: failed to resolve address 'http://192.168.2.22:9000': url parse: invalid IPv4 address";
-        assert_eq!(simplify_sync_error(err), "服务地址或端口格式无效");
+        assert_eq!(simplify_sync_error(err), "invalid IPv4 address");
     }
 
     #[test]
     fn test_simplify_connection_refused() {
         let err = "dispatch failure: connection error: tcp connect error: Connection refused (os error 111)";
-        assert_eq!(
-            simplify_sync_error(err),
-            "网络连接被拒绝，请检查服务是否启动或防火墙设置"
-        );
+        assert_eq!(simplify_sync_error(err), "Connection refused (os error 111)");
     }
 
     #[test]
-    fn test_simplify_auth_error() {
-        let err = "InvalidAccessKeyId: The AWS Access Key Id you provided does not exist";
+    fn test_simplify_bucket_not_found_xml() {
+        let err = "Got HTTP 404 with content '<?xml version=\"1.0\"?><Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist</Message></Error>'";
         assert_eq!(
             simplify_sync_error(err),
-            "身份认证失败，请检查账号密码或访问密钥"
-        );
-    }
-
-    #[test]
-    fn test_simplify_bucket_not_found() {
-        let err = "NoSuchBucket: The specified bucket does not exist";
-        assert_eq!(simplify_sync_error(err), "存储桶或远程路径不存在");
-    }
-
-    #[test]
-    fn test_simplify_clean_chinese() {
-        let err = "连接 S3 失败：存储桶不存在，请先在云服务商创建存储桶";
-        assert_eq!(
-            simplify_sync_error(err),
-            "存储桶不存在，请先在云服务商创建存储桶"
+            "HTTP 404 (NoSuchBucket): The specified bucket does not exist"
         );
     }
 }
