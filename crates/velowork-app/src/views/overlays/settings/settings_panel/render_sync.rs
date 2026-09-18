@@ -974,13 +974,20 @@ impl SettingsPanel {
 
     /// 重置同步连接测试状态（例如输入框变更时调用，中断后台任务并恢复闲置状态）
     pub(super) fn reset_sync_test(&mut self, cx: &mut Context<Self>) {
+        let had_abort = self.sync_test_abort_handle.is_some();
+        let was_not_idle = self.sync_test_status != SyncTestStatus::Idle;
+
         if let Some(handle) = self.sync_test_abort_handle.take() {
             handle.abort();
         }
         self.sync_test_task = None;
         self.sync_test_status = SyncTestStatus::Idle;
         self.sync_test_detail = None;
-        cx.notify();
+
+        // 仅当确实中止了进行中的任务，或原先状态非 Idle 时，才触发重绘
+        if had_abort || was_not_idle {
+            cx.notify();
+        }
     }
 
     fn do_test_connection(&mut self, sync: SyncSettings, secret: Option<String>, cx: &mut Context<Self>) {

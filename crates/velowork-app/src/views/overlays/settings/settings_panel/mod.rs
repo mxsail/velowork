@@ -222,6 +222,51 @@ pub struct SettingsPanel {
     pub(super) pending_scroll_focus_handle: Option<FocusHandle>,
 }
 
+/// 为设置面板输入框绑定防抖 (300ms) + 失焦 (Blur) + 回车 (PressEnter) 提交逻辑。
+/// 彻底阻断打字期间频繁触发全局 settings_entity.update 导致的整窗与主应用级连锁重绘。
+fn bind_debounced_input<T: 'static, F>(
+    input: &Entity<InputState>,
+    cx: &mut Context<T>,
+    on_change_extra: Option<Rc<dyn Fn(&mut T, &mut Context<T>)>>,
+    on_commit: F,
+) where
+    F: Fn(&str, &mut T, &mut Context<T>) + 'static,
+{
+    let on_commit = Rc::new(on_commit);
+    let debounce_task: Rc<RefCell<Option<Task<()>>>> = Rc::new(RefCell::new(None));
+    let dt_clone = debounce_task.clone();
+
+    cx.subscribe(input, move |this, entity, event: &InputEvent, cx| match event {
+        InputEvent::Change => {
+            if let Some(extra) = on_change_extra.as_ref() {
+                extra(this, cx);
+            }
+            let val = entity.read(cx).text().to_string();
+            let dt = dt_clone.clone();
+            let commit = on_commit.clone();
+            let task = cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(300))
+                    .await;
+                this.update(cx, |this, cx| {
+                    dt.borrow_mut().take();
+                    commit(&val, this, cx);
+                })
+                .ok();
+            });
+            *dt_clone.borrow_mut() = Some(task);
+        }
+        InputEvent::Blur | InputEvent::PressEnter => {
+            if dt_clone.borrow_mut().take().is_some() {
+                let val = entity.read(cx).text().to_string();
+                on_commit(&val, this, cx);
+            }
+        }
+        _ => {}
+    })
+    .detach();
+}
+
 impl SettingsPanel {
     pub fn new(workspace: Entity<Workspace>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let s = settings_entity(cx).read(cx).settings.clone();
@@ -234,17 +279,9 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
-            &file_opener_input,
-            |_this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_file_opener(val, cx));
-            },
-        )
-        .detach();
+        bind_debounced_input(&file_opener_input, cx, None, |val, _, cx| {
+            settings_entity(cx).update(cx, |state, cx| state.set_file_opener(val.to_string(), cx));
+        });
 
         // SFTP default file permission input
         let sftp_file_mode_input = cx.new(|cx| {
@@ -254,18 +291,10 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
-            &sftp_file_mode_input,
-            |_this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx)
-                    .update(cx, |state, cx| state.set_sftp_default_file_mode(val, cx));
-            },
-        )
-        .detach();
+        bind_debounced_input(&sftp_file_mode_input, cx, None, |val, _, cx| {
+            settings_entity(cx)
+                .update(cx, |state, cx| state.set_sftp_default_file_mode(val.to_string(), cx));
+        });
 
         // SFTP default directory permission input
         let sftp_dir_mode_input = cx.new(|cx| {
@@ -275,18 +304,10 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
-            &sftp_dir_mode_input,
-            |_this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx)
-                    .update(cx, |state, cx| state.set_sftp_default_dir_mode(val, cx));
-            },
-        )
-        .detach();
+        bind_debounced_input(&sftp_dir_mode_input, cx, None, |val, _, cx| {
+            settings_entity(cx)
+                .update(cx, |state, cx| state.set_sftp_default_dir_mode(val.to_string(), cx));
+        });
 
         // Proxy host input
         let proxy_host_input = cx.new(|cx| {
@@ -296,17 +317,9 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
-            &proxy_host_input,
-            |_this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_proxy_host(val, cx));
-            },
-        )
-        .detach();
+        bind_debounced_input(&proxy_host_input, cx, None, |val, _, cx| {
+            settings_entity(cx).update(cx, |state, cx| state.set_proxy_host(val.to_string(), cx));
+        });
 
         // Data Root / Storage configuration inputs
         let current_dr = velowork_core::data_root::current();
@@ -447,18 +460,10 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
-            &word_selection_delimiters_input,
-            |_this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx)
-                    .update(cx, |state, cx| state.set_word_selection_delimiters(val, cx));
-            },
-        )
-        .detach();
+        bind_debounced_input(&word_selection_delimiters_input, cx, None, |val, _, cx| {
+            settings_entity(cx)
+                .update(cx, |state, cx| state.set_word_selection_delimiters(val.to_string(), cx));
+        });
 
         // Command history ignored bare commands input
         let command_history_ignored_commands_input = cx.new(|cx| {
@@ -469,23 +474,15 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
-            &command_history_ignored_commands_input,
-            |_this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let raw = entity.read(cx).text().to_string();
-                let list: Vec<String> = raw
-                    .split(|c| c == ',' || c == '，')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                settings_entity(cx)
-                    .update(cx, |state, cx| state.set_command_history_ignored_commands(list, cx));
-            },
-        )
-        .detach();
+        bind_debounced_input(&command_history_ignored_commands_input, cx, None, |raw, _, cx| {
+            let list: Vec<String> = raw
+                .split(|c| c == ',' || c == '，')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            settings_entity(cx)
+                .update(cx, |state, cx| state.set_command_history_ignored_commands(list, cx));
+        });
 
         // Sync inputs
         let sync_server_url_input = cx.new(|cx| {
@@ -495,18 +492,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_server_url_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_webdav_server_url(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_webdav_server_url(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         let sync_username_input = cx.new(|cx| {
             let mut state = InputState::new(cx).placeholder("username");
@@ -515,18 +508,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_username_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_webdav_username(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_webdav_username(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         let initial_sync_password =
             velowork_workspace::secure_storage::load_webdav_password().unwrap_or_default();
@@ -536,34 +525,33 @@ impl SettingsPanel {
                 .masked(true)
                 .default_value(initial_sync_password)
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_password_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                if val.is_empty() {
-                    // 用户清空密码：从密钥库删除并清除“已保存”标志
-                    if let Err(e) = velowork_workspace::secure_storage::delete_webdav_password() {
-                        log::warn!("[webdav] 清除已保存的 WebDAV 密码失败: {}", e);
-                    }
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                let val_str = val.to_string();
+                if val_str.is_empty() {
                     settings_entity(cx)
                         .update(cx, |state, cx| state.set_webdav_password_stored(false, cx));
-                } else {
-                    // 用户正在输入密码：实时持久化到密钥库，供后续自动同步免交互使用
-                    match velowork_workspace::secure_storage::store_webdav_password(&val) {
-                        Ok(_) => {
-                            settings_entity(cx)
-                                .update(cx, |state, cx| state.set_webdav_password_stored(true, cx));
+                    smol::spawn(smol::unblock(move || {
+                        if let Err(e) = velowork_workspace::secure_storage::delete_webdav_password() {
+                            log::warn!("[webdav] 清除已保存的 WebDAV 密码失败: {}", e);
                         }
-                        Err(e) => log::warn!("[webdav] 保存 WebDAV 密码失败: {}", e),
-                    }
+                    }))
+                    .detach();
+                } else {
+                    settings_entity(cx)
+                        .update(cx, |state, cx| state.set_webdav_password_stored(true, cx));
+                    smol::spawn(smol::unblock(move || {
+                        if let Err(e) = velowork_workspace::secure_storage::store_webdav_password(&val_str) {
+                            log::warn!("[webdav] 保存 WebDAV 密码失败: {}", e);
+                        }
+                    }))
+                    .detach();
                 }
-                this.reset_sync_test(cx);
             },
-        )
-        .detach();
+        );
 
         let sync_remote_path_input = cx.new(|cx| {
             let mut state = InputState::new(cx).placeholder("/velowork/");
@@ -572,18 +560,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_remote_path_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_webdav_remote_path(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_webdav_remote_path(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         // S3 inputs
         let sync_s3_endpoint_input = cx.new(|cx| {
@@ -593,18 +577,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_s3_endpoint_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_s3_endpoint(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_endpoint(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         let sync_s3_bucket_input = cx.new(|cx| {
             let mut state = InputState::new(cx).placeholder("my-velowork-bucket");
@@ -613,18 +593,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_s3_bucket_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_s3_bucket(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_bucket(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         let sync_s3_region_input = cx.new(|cx| {
             let mut state = InputState::new(cx).placeholder("us-east-1 (or auto)");
@@ -633,18 +609,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_s3_region_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_s3_region(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_region(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         let sync_s3_access_key_input = cx.new(|cx| {
             let mut state = InputState::new(cx).placeholder("AKIAIOSFODNN7EXAMPLE");
@@ -653,18 +625,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_s3_access_key_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_s3_access_key_id(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_access_key_id(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         let initial_s3_secret_key =
             velowork_workspace::secure_storage::load_s3_secret_key().unwrap_or_default();
@@ -674,32 +642,33 @@ impl SettingsPanel {
                 .masked(true)
                 .default_value(initial_s3_secret_key)
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_s3_secret_key_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                if val.is_empty() {
-                    if let Err(e) = velowork_workspace::secure_storage::delete_s3_secret_key() {
-                        log::warn!("[s3] 清除已保存的 S3 Secret Key 失败: {}", e);
-                    }
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                let val_str = val.to_string();
+                if val_str.is_empty() {
                     settings_entity(cx)
                         .update(cx, |state, cx| state.set_s3_secret_key_stored(false, cx));
-                } else {
-                    match velowork_workspace::secure_storage::store_s3_secret_key(&val) {
-                        Ok(_) => {
-                            settings_entity(cx)
-                                .update(cx, |state, cx| state.set_s3_secret_key_stored(true, cx));
+                    smol::spawn(smol::unblock(move || {
+                        if let Err(e) = velowork_workspace::secure_storage::delete_s3_secret_key() {
+                            log::warn!("[s3] 清除已保存的 S3 Secret Key 失败: {}", e);
                         }
-                        Err(e) => log::warn!("[s3] 保存 S3 Secret Key 失败: {}", e),
-                    }
+                    }))
+                    .detach();
+                } else {
+                    settings_entity(cx)
+                        .update(cx, |state, cx| state.set_s3_secret_key_stored(true, cx));
+                    smol::spawn(smol::unblock(move || {
+                        if let Err(e) = velowork_workspace::secure_storage::store_s3_secret_key(&val_str) {
+                            log::warn!("[s3] 保存 S3 Secret Key 失败: {}", e);
+                        }
+                    }))
+                    .detach();
                 }
-                this.reset_sync_test(cx);
             },
-        )
-        .detach();
+        );
 
         let sync_s3_prefix_input = cx.new(|cx| {
             let mut state = InputState::new(cx).placeholder("velowork (optional prefix)");
@@ -708,18 +677,14 @@ impl SettingsPanel {
             }
             state
         });
-        cx.subscribe(
+        bind_debounced_input(
             &sync_s3_prefix_input,
-            |this, entity, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let val = entity.read(cx).text().to_string();
-                settings_entity(cx).update(cx, |state, cx| state.set_s3_prefix(val, cx));
-                this.reset_sync_test(cx);
+            cx,
+            Some(Rc::new(|this, cx| this.reset_sync_test(cx))),
+            |val, _, cx| {
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_prefix(val.to_string(), cx));
             },
-        )
-        .detach();
+        );
 
         let cur_sync_provider = if s.sync.enabled {
             Some(s.sync.provider)
@@ -762,29 +727,45 @@ impl SettingsPanel {
         let nav_search_input =
             cx.new(|cx| InputState::new(cx).placeholder(i18n!(cx, "settings.search_placeholder")));
         let ns_entity = nav_search_input.clone();
+        let search_debounce_task: Rc<RefCell<Option<Task<()>>>> = Rc::new(RefCell::new(None));
+        let sdt_clone = search_debounce_task.clone();
         cx.subscribe(
             &nav_search_input,
-            move |this, _entity, _: &InputEvent, cx| {
+            move |this, _entity, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
                 let q = ns_entity.read(cx).text().to_string();
                 this.nav_search = q.clone();
                 let ql = q.to_lowercase();
-                if !ql.is_empty() {
-                    let cats = this.ordered_categories(cx);
-                    let mut first_matched = None;
-                    for cat in cats.iter() {
-                        if cat.matches_search(&ql, cx) {
-                            this.expanded_categories.insert(cat.clone());
-                            if first_matched.is_none() {
-                                first_matched = Some(cat.clone());
+                let sdt = sdt_clone.clone();
+                let task = cx.spawn(async move |this, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(150))
+                        .await;
+                    this.update(cx, |this, cx| {
+                        sdt.borrow_mut().take();
+                        if !ql.is_empty() {
+                            let cats = this.ordered_categories(cx);
+                            let mut first_matched = None;
+                            for cat in cats.iter() {
+                                if cat.matches_search(&ql, cx) {
+                                    this.expanded_categories.insert(cat.clone());
+                                    if first_matched.is_none() {
+                                        first_matched = Some(cat.clone());
+                                    }
+                                }
+                            }
+                            if let Some(target) = first_matched {
+                                this.active_category = target.clone();
+                                *this.pending_scroll.borrow_mut() = Some(target);
                             }
                         }
-                    }
-                    if let Some(target) = first_matched {
-                        this.active_category = target.clone();
-                        *this.pending_scroll.borrow_mut() = Some(target);
-                    }
-                }
-                cx.notify();
+                        cx.notify();
+                    })
+                    .ok();
+                });
+                *sdt_clone.borrow_mut() = Some(task);
             },
         )
         .detach();
@@ -1247,47 +1228,27 @@ impl SettingsPanel {
 
         let ai_max_context_tokens_input =
             cx.new(|cx| InputState::new(cx).default_value(s.ai_max_context_tokens.to_string()));
-        cx.subscribe(
-            &ai_max_context_tokens_input,
-            |this, _, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
+        bind_debounced_input(&ai_max_context_tokens_input, cx, None, |text, _, cx| {
+            if let Ok(val) = text.trim().parse::<usize>() {
+                if val >= 1024 {
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_ai_max_context_tokens(val, cx);
+                    });
                 }
-                let text = this.ai_max_context_tokens_input.read(cx).text().to_string();
-                if let Ok(val) = text.trim().parse::<usize>() {
-                    if val >= 1024 {
-                        settings_entity(cx).update(cx, |state, cx| {
-                            state.set_ai_max_context_tokens(val, cx);
-                        });
-                    }
-                }
-            },
-        )
-        .detach();
+            }
+        });
 
         let ai_max_history_messages_input =
             cx.new(|cx| InputState::new(cx).default_value(s.ai_max_history_messages.to_string()));
-        cx.subscribe(
-            &ai_max_history_messages_input,
-            |this, _, event: &InputEvent, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
+        bind_debounced_input(&ai_max_history_messages_input, cx, None, |text, _, cx| {
+            if let Ok(val) = text.trim().parse::<usize>() {
+                if val >= 2 {
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_ai_max_history_messages(val, cx);
+                    });
                 }
-                let text = this
-                    .ai_max_history_messages_input
-                    .read(cx)
-                    .text()
-                    .to_string();
-                if let Ok(val) = text.trim().parse::<usize>() {
-                    if val >= 2 {
-                        settings_entity(cx).update(cx, |state, cx| {
-                            state.set_ai_max_history_messages(val, cx);
-                        });
-                    }
-                }
-            },
-        )
-        .detach();
+            }
+        });
 
         let panel = Self {
             _workspace: workspace,
@@ -1614,7 +1575,62 @@ impl SettingsPanel {
             .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
     }
 
-    fn close(&self, cx: &mut Context<Self>) {
+    /// 将所有输入框当前的最新值立即同步到全局设置中（兜底保障，避免防抖尚未到期时关闭弹窗导致数据丢失）
+    pub(super) fn flush_inputs_to_settings(&mut self, cx: &mut Context<Self>) {
+        let file_opener = self.file_opener_input.read(cx).text().to_string();
+        let sftp_file_mode = self.sftp_file_mode_input.read(cx).text().to_string();
+        let sftp_dir_mode = self.sftp_dir_mode_input.read(cx).text().to_string();
+        let proxy_host = self.proxy_host_input.read(cx).text().to_string();
+        let delimiters = self.word_selection_delimiters_input.read(cx).text().to_string();
+        let ignored_cmds: Vec<String> = self
+            .command_history_ignored_commands_input
+            .read(cx)
+            .text()
+            .split(|c| c == ',' || c == '，')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let webdav_url = self.sync_server_url_input.read(cx).text().to_string();
+        let webdav_user = self.sync_username_input.read(cx).text().to_string();
+        let webdav_path = self.sync_remote_path_input.read(cx).text().to_string();
+        let s3_endpoint = self.sync_s3_endpoint_input.read(cx).text().to_string();
+        let s3_bucket = self.sync_s3_bucket_input.read(cx).text().to_string();
+        let s3_region = self.sync_s3_region_input.read(cx).text().to_string();
+        let s3_ak = self.sync_s3_access_key_input.read(cx).text().to_string();
+        let s3_prefix = self.sync_s3_prefix_input.read(cx).text().to_string();
+
+        let ai_ctx_text = self.ai_max_context_tokens_input.read(cx).text().to_string();
+        let ai_ctx = ai_ctx_text.trim().parse::<usize>().ok().filter(|v| *v >= 1024);
+
+        let ai_history_text = self.ai_max_history_messages_input.read(cx).text().to_string();
+        let ai_history = ai_history_text.trim().parse::<usize>().ok().filter(|v| *v >= 2);
+
+        settings_entity(cx).update(cx, |state, cx| {
+            state.set_file_opener(file_opener, cx);
+            state.set_sftp_default_file_mode(sftp_file_mode, cx);
+            state.set_sftp_default_dir_mode(sftp_dir_mode, cx);
+            state.set_proxy_host(proxy_host, cx);
+            state.set_word_selection_delimiters(delimiters, cx);
+            state.set_command_history_ignored_commands(ignored_cmds, cx);
+            state.set_webdav_server_url(webdav_url, cx);
+            state.set_webdav_username(webdav_user, cx);
+            state.set_webdav_remote_path(webdav_path, cx);
+            state.set_s3_endpoint(s3_endpoint, cx);
+            state.set_s3_bucket(s3_bucket, cx);
+            state.set_s3_region(s3_region, cx);
+            state.set_s3_access_key_id(s3_ak, cx);
+            state.set_s3_prefix(s3_prefix, cx);
+            if let Some(ctx_tokens) = ai_ctx {
+                state.set_ai_max_context_tokens(ctx_tokens, cx);
+            }
+            if let Some(hist) = ai_history {
+                state.set_ai_max_history_messages(hist, cx);
+            }
+        });
+    }
+
+    fn close(&mut self, cx: &mut Context<Self>) {
+        self.flush_inputs_to_settings(cx);
         cx.emit(SettingsPanelEvent::Close);
     }
 
