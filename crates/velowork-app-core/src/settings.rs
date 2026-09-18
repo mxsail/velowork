@@ -792,6 +792,69 @@ impl SettingsState {
         self.save_and_notify(cx);
     }
 
+    /// Set S3 endpoint URL
+    pub fn set_s3_endpoint(&mut self, value: String, cx: &mut Context<Self>) {
+        if self.settings.sync.s3.endpoint == value {
+            return;
+        }
+        self.settings.sync.s3.endpoint = value;
+        self.save_and_notify(cx);
+    }
+
+    /// Set S3 bucket
+    pub fn set_s3_bucket(&mut self, value: String, cx: &mut Context<Self>) {
+        if self.settings.sync.s3.bucket == value {
+            return;
+        }
+        self.settings.sync.s3.bucket = value;
+        self.save_and_notify(cx);
+    }
+
+    /// Set S3 region
+    pub fn set_s3_region(&mut self, value: String, cx: &mut Context<Self>) {
+        if self.settings.sync.s3.region == value {
+            return;
+        }
+        self.settings.sync.s3.region = value;
+        self.save_and_notify(cx);
+    }
+
+    /// Set S3 access key ID
+    pub fn set_s3_access_key_id(&mut self, value: String, cx: &mut Context<Self>) {
+        if self.settings.sync.s3.access_key_id == value {
+            return;
+        }
+        self.settings.sync.s3.access_key_id = value;
+        self.save_and_notify(cx);
+    }
+
+    /// 标记 S3 Secret Access Key 是否已持久化到系统密钥库
+    pub fn set_s3_secret_key_stored(&mut self, value: bool, cx: &mut Context<Self>) {
+        if self.settings.sync.s3.secret_key_stored == value {
+            return;
+        }
+        self.settings.sync.s3.secret_key_stored = value;
+        self.save_and_notify(cx);
+    }
+
+    /// Set S3 path prefix
+    pub fn set_s3_prefix(&mut self, value: String, cx: &mut Context<Self>) {
+        if self.settings.sync.s3.prefix == value {
+            return;
+        }
+        self.settings.sync.s3.prefix = value;
+        self.save_and_notify(cx);
+    }
+
+    /// Set S3 path style toggle
+    pub fn set_s3_path_style(&mut self, value: bool, cx: &mut Context<Self>) {
+        if self.settings.sync.s3.path_style == value {
+            return;
+        }
+        self.settings.sync.s3.path_style = value;
+        self.save_and_notify(cx);
+    }
+
     /// Enable/disable auto-sync
     pub fn set_auto_sync(&mut self, value: bool, cx: &mut Context<Self>) {
         if self.settings.sync.auto_sync == value {

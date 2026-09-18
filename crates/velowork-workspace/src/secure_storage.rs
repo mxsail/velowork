@@ -336,6 +336,8 @@ fn aes_decrypt(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>> {
 
 /// WebDAV 密码在 `SecurityService` 中的固定凭据 id（按当前 Profile 隔离）。
 const WEBDAV_CREDENTIAL_ID: &str = "webdav:password";
+/// S3 Secret Key 在 `SecurityService` 中的固定凭据 id（按当前 Profile 隔离）。
+const S3_SECRET_KEY_ID: &str = "s3:secret_key";
 /// 同步加密口令在 `SecurityService` 中的固定凭据 id。
 const SYNC_CREDENTIAL_ID: &str = "sync:passphrase";
 
@@ -380,6 +382,49 @@ pub fn delete_webdav_password() -> Result<()> {
     if let Ok(mut svc) = crate::security::current_security_service() {
         if svc.is_unlocked() || (svc.mode() == velowork_security::key_provider::SecurityMode::Standard && svc.unlock("").is_ok()) {
             let _ = svc.delete(WEBDAV_CREDENTIAL_ID);
+        }
+    }
+    Ok(())
+}
+
+/// 将 S3 Secret Access Key 持久化到安全服务（Level 1 SQLite，DEK 加密）。
+pub fn store_s3_secret_key(secret_key: &str) -> Result<()> {
+    let mut svc = crate::security::current_security_service()
+        .map_err(|e| anyhow::anyhow!("获取安全服务失败: {e}"))?;
+    if svc.is_unlocked() || (svc.mode() == velowork_security::key_provider::SecurityMode::Standard && svc.unlock("").is_ok()) {
+        svc.put(Credential {
+            id: S3_SECRET_KEY_ID.to_string(),
+            kind: SecretKind::S3,
+            name: Some("S3 Secret Key".to_string()),
+            value: SecretValue::password(secret_key),
+            metadata: serde_json::Value::Null,
+        })
+        .map_err(|e| anyhow::anyhow!("保存 S3 Secret Key 失败: {e}"))?;
+        Ok(())
+    } else {
+        bail!("安全服务未解锁，无法保存 S3 Secret Key");
+    }
+}
+
+/// 从安全服务读取已持久化的 S3 Secret Access Key；未存储或损坏时返回 `None`。
+pub fn load_s3_secret_key() -> Option<String> {
+    if let Ok(mut svc) = crate::security::current_security_service() {
+        if svc.is_unlocked() || (svc.mode() == velowork_security::key_provider::SecurityMode::Standard && svc.unlock("").is_ok()) {
+            if let Ok(cred) = svc.get(S3_SECRET_KEY_ID) {
+                if let Some(s) = cred.value.as_str() {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 删除已持久化的 S3 Secret Access Key。
+pub fn delete_s3_secret_key() -> Result<()> {
+    if let Ok(mut svc) = crate::security::current_security_service() {
+        if svc.is_unlocked() || (svc.mode() == velowork_security::key_provider::SecurityMode::Standard && svc.unlock("").is_ok()) {
+            let _ = svc.delete(S3_SECRET_KEY_ID);
         }
     }
     Ok(())

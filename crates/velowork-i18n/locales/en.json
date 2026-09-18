@@ -368,13 +368,28 @@
       "enabled": "Enable Data Sync",
       "provider": {
         "label": "Sync Provider",
-        "webdav": "WebDAV"
+        "webdav": "WebDAV",
+        "s3": "S3-Compatible Storage"
       },
       "webdav": {
         "server": "Server URL",
         "username": "Username",
         "password": "Password",
         "path": "Remote Path"
+      },
+      "s3": {
+        "endpoint": "Endpoint",
+        "bucket": "Bucket Name",
+        "region": "Region",
+        "access_key": "Access Key ID",
+        "secret_key": "Secret Access Key",
+        "prefix": "Path Prefix",
+        "path_style": "Force Path-Style Access",
+        "path_style_desc": "Required for MinIO, Ceph, and private object stores without Virtual-Hosted DNS",
+        "error_endpoint_empty": "S3 Endpoint cannot be empty",
+        "error_endpoint_invalid": "S3 Endpoint must start with http:// or https://",
+        "error_bucket_empty": "S3 Bucket name cannot be empty",
+        "error_access_key_empty": "S3 Access Key ID cannot be empty"
       },
       "scope_title": "Sync Data Scope",
       "select_all": "Select All",

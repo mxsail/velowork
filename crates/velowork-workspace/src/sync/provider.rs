@@ -28,6 +28,9 @@ pub trait SyncProvider {
     /// 该后端的能力。
     fn capabilities(&self) -> Capabilities;
 
+    /// 连通性与权限探针（验证鉴权、服务可达性、Bucket 或目录可写）
+    async fn test_connection(&self) -> Result<()>;
+
     /// 推送一个封口 Bundle 到远端。
     async fn push(&self, bundle: &SealedBundle) -> Result<()>;
 

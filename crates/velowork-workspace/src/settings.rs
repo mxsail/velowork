@@ -385,6 +385,7 @@ impl FileSortBy {
 pub enum SyncProvider {
     #[default]
     WebDav,
+    S3,
 }
 
 /// 本地与云端配置冲突时的处理策略。
@@ -426,17 +427,19 @@ impl SyncProvider {
     pub fn display_name(self) -> &'static str {
         match self {
             SyncProvider::WebDav => "WebDAV",
+            SyncProvider::S3 => "S3",
         }
     }
 
     pub fn translation_key(self) -> &'static str {
         match self {
             SyncProvider::WebDav => "settings.sync.provider.webdav",
+            SyncProvider::S3 => "settings.sync.provider.s3",
         }
     }
 
     pub fn all_variants() -> &'static [SyncProvider] {
-        &[SyncProvider::WebDav]
+        &[SyncProvider::WebDav, SyncProvider::S3]
     }
 }
 
@@ -527,6 +530,54 @@ fn default_webdav_path() -> String {
     "/velowork/".to_string()
 }
 
+fn default_s3_prefix() -> String {
+    "velowork/".to_string()
+}
+
+fn default_s3_region() -> String {
+    "us-east-1".to_string()
+}
+
+/// S3 兼容对象存储配置
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct S3Config {
+    /// S3 服务端点 URL（如 https://s3.amazonaws.com 或 http://127.0.0.1:9000）
+    #[serde(default)]
+    pub endpoint: String,
+    /// 存储桶名称
+    #[serde(default)]
+    pub bucket: String,
+    /// 存储区域（默认 us-east-1）
+    #[serde(default = "default_s3_region")]
+    pub region: String,
+    /// Access Key ID
+    #[serde(default)]
+    pub access_key_id: String,
+    /// 标记 Secret Access Key 是否已安全持久化至系统密钥库
+    #[serde(default)]
+    pub secret_key_stored: bool,
+    /// 远端存储前缀路径（默认 velowork/）
+    #[serde(default = "default_s3_prefix")]
+    pub prefix: String,
+    /// 是否强制使用路径样式（Path-Style，MinIO/本地私有云存储推荐）
+    #[serde(default)]
+    pub path_style: bool,
+}
+
+impl Default for S3Config {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            bucket: String::new(),
+            region: default_s3_region(),
+            access_key_id: String::new(),
+            secret_key_stored: false,
+            prefix: default_s3_prefix(),
+            path_style: false,
+        }
+    }
+}
+
 fn default_scope_true() -> bool {
     true
 }
@@ -591,6 +642,9 @@ pub struct SyncSettings {
     /// WebDAV configuration
     #[serde(default)]
     pub webdav: WebDavConfig,
+    /// S3 configuration
+    #[serde(default)]
+    pub s3: S3Config,
     /// Whether to auto-sync on startup
     #[serde(default)]
     pub auto_sync: bool,
@@ -614,6 +668,7 @@ impl Default for SyncSettings {
             enabled: false,
             provider: SyncProvider::default(),
             webdav: WebDavConfig::default(),
+            s3: S3Config::default(),
             auto_sync: false,
             sync_interval_secs: default_sync_interval(),
             last_sync_at: None,
@@ -632,6 +687,14 @@ pub enum SyncConfigError {
     MissingServerUrl,
     #[error("WebDAV server URL must start with http:// or https://")]
     InvalidServerUrl,
+    #[error("S3 endpoint is empty")]
+    MissingS3Endpoint,
+    #[error("S3 endpoint must start with http:// or https://")]
+    InvalidS3Endpoint,
+    #[error("S3 bucket name is empty")]
+    MissingS3Bucket,
+    #[error("S3 access key is empty")]
+    MissingS3AccessKey,
 }
 
 impl SyncConfigError {
@@ -641,6 +704,10 @@ impl SyncConfigError {
             Self::Disabled => "settings.sync.error_sync_disabled",
             Self::MissingServerUrl => "settings.sync.error_server_url_empty",
             Self::InvalidServerUrl => "settings.sync.error_server_url_invalid",
+            Self::MissingS3Endpoint => "settings.sync.s3.error_endpoint_empty",
+            Self::InvalidS3Endpoint => "settings.sync.s3.error_endpoint_invalid",
+            Self::MissingS3Bucket => "settings.sync.s3.error_bucket_empty",
+            Self::MissingS3AccessKey => "settings.sync.s3.error_access_key_empty",
         }
     }
 }
@@ -660,6 +727,22 @@ impl SyncSettings {
                 }
                 if !url.starts_with("http://") && !url.starts_with("https://") {
                     return Err(SyncConfigError::InvalidServerUrl);
+                }
+                Ok(())
+            }
+            SyncProvider::S3 => {
+                let ep = self.s3.endpoint.trim();
+                if ep.is_empty() {
+                    return Err(SyncConfigError::MissingS3Endpoint);
+                }
+                if !ep.starts_with("http://") && !ep.starts_with("https://") {
+                    return Err(SyncConfigError::InvalidS3Endpoint);
+                }
+                if self.s3.bucket.trim().is_empty() {
+                    return Err(SyncConfigError::MissingS3Bucket);
+                }
+                if self.s3.access_key_id.trim().is_empty() {
+                    return Err(SyncConfigError::MissingS3AccessKey);
                 }
                 Ok(())
             }
@@ -1990,6 +2073,22 @@ mod tests {
         assert!(sync.validate_configuration().is_ok());
 
         sync.webdav.server_url = "http://192.168.1.100:8080".into();
+        assert!(sync.validate_configuration().is_ok());
+
+        // 5. S3 验证
+        sync.provider = SyncProvider::S3;
+        assert_eq!(sync.validate_configuration(), Err(SyncConfigError::MissingS3Endpoint));
+
+        sync.s3.endpoint = "s3.amazonaws.com".into();
+        assert_eq!(sync.validate_configuration(), Err(SyncConfigError::InvalidS3Endpoint));
+
+        sync.s3.endpoint = "https://s3.amazonaws.com".into();
+        assert_eq!(sync.validate_configuration(), Err(SyncConfigError::MissingS3Bucket));
+
+        sync.s3.bucket = "my-bucket".into();
+        assert_eq!(sync.validate_configuration(), Err(SyncConfigError::MissingS3AccessKey));
+
+        sync.s3.access_key_id = "AKIAEXAMPLE".into();
         assert!(sync.validate_configuration().is_ok());
     }
 

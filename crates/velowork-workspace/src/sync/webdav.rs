@@ -345,6 +345,10 @@ impl SyncProvider for WebDavSync {
         }
     }
 
+    async fn test_connection(&self) -> Result<()> {
+        self.test_connection().await
+    }
+
     async fn push(&self, bundle: &SealedBundle) -> Result<()> {
         let id = &bundle.manifest.snapshot_id;
         if id.is_empty() {

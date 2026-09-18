@@ -44,6 +44,7 @@ pub enum SecretKind {
     OAuth,
     WebDav,
     Git,
+    S3,
     Plugin,
     Custom(String),
 }
@@ -57,6 +58,7 @@ impl SecretKind {
             SecretKind::ApiKey => 3,
             SecretKind::OAuth => 4,
             SecretKind::Git => 5,
+            SecretKind::S3 => 6,
             SecretKind::Plugin => 100,
             SecretKind::Custom(_) => 999, // 具体名称存 metadata
         }
@@ -69,6 +71,8 @@ impl SecretKind {
             3 => SecretKind::ApiKey,
             4 => SecretKind::OAuth,
             5 => SecretKind::Git,
+            6 => SecretKind::S3,
+            72..=100 if v == 100 => SecretKind::Plugin,
             100 => SecretKind::Plugin,
             999 => SecretKind::Custom("custom".to_string()),
             other => return Err(SecurityError::invalid(format!("unknown secret kind {other}"))),
@@ -370,9 +374,12 @@ mod tests {
         assert_eq!(SecretKind::SshPassword.to_db(), 1);
         assert_eq!(SecretKind::WebDav.to_db(), 2);
         assert_eq!(SecretKind::ApiKey.to_db(), 3);
+        assert_eq!(SecretKind::Git.to_db(), 5);
+        assert_eq!(SecretKind::S3.to_db(), 6);
         assert_eq!(SecretKind::Plugin.to_db(), 100);
         assert_eq!(SecretKind::Custom("x".into()).to_db(), 999);
         assert_eq!(SecretKind::from_db(1).unwrap(), SecretKind::SshPassword);
+        assert_eq!(SecretKind::from_db(6).unwrap(), SecretKind::S3);
         assert_eq!(SecretKind::from_db(999).unwrap(), SecretKind::Custom("custom".into()));
     }
 }

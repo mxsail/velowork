@@ -112,8 +112,8 @@ impl SettingsCategory {
                 "安全", "主密码", "锁屏", "自动锁定", "空闲", "密钥环",
             ],
             Self::Sync => &[
-                "sync", "cloud", "webdav", "remote", "provider", "backup", "restore",
-                "同步", "网盘", "云同步", "远程", "备份", "恢复", "凭证",
+                "sync", "cloud", "webdav", "s3", "minio", "r2", "oss", "cos", "bucket", "remote", "provider", "backup", "restore",
+                "同步", "网盘", "云同步", "对象存储", "存储桶", "远程", "备份", "恢复", "凭证",
             ],
             Self::AiAssistant => &[
                 "ai", "assistant", "model", "token", "context", "history", "provider", "openai", "claude", "ollama",

@@ -110,13 +110,20 @@ pub struct SettingsPanel {
     pub(super) bg_image_show_success: bool,
     pub(super) bg_image_last_loaded_key: Option<(String, bool)>,
     pub(super) bg_image_success_seq: usize,
-    // Sync inputs
+    // Sync inputs (WebDAV)
     pub(super) sync_server_url_input: Entity<InputState>,
     pub(super) sync_username_input: Entity<InputState>,
     pub(super) sync_password_input: Entity<InputState>,
     pub(super) sync_remote_path_input: Entity<InputState>,
+    // Sync inputs (S3)
+    pub(super) sync_s3_endpoint_input: Entity<InputState>,
+    pub(super) sync_s3_bucket_input: Entity<InputState>,
+    pub(super) sync_s3_region_input: Entity<InputState>,
+    pub(super) sync_s3_access_key_input: Entity<InputState>,
+    pub(super) sync_s3_secret_key_input: Entity<InputState>,
+    pub(super) sync_s3_prefix_input: Entity<InputState>,
     pub(super) sync_provider_select: Entity<SelectState<Option<SyncProvider>>>,
-    /// WebDAV 测试连接结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
+    /// 提供商测试连接结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
     pub(super) sync_test_result: Option<Result<String, String>>,
     pub(super) sync_test_in_progress: bool,
     /// 立即同步结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
@@ -568,6 +575,148 @@ impl SettingsPanel {
         )
         .detach();
 
+        // S3 inputs
+        let sync_s3_endpoint_input = cx.new(|cx| {
+            let mut state = InputState::new(cx).placeholder("https://s3.amazonaws.com");
+            if !s.sync.s3.endpoint.is_empty() {
+                state.set_value(s.sync.s3.endpoint.clone(), cx);
+            }
+            state
+        });
+        cx.subscribe(
+            &sync_s3_endpoint_input,
+            |this, entity, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let val = entity.read(cx).text().to_string();
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_endpoint(val, cx));
+                this.sync_test_result = None;
+                cx.notify();
+            },
+        )
+        .detach();
+
+        let sync_s3_bucket_input = cx.new(|cx| {
+            let mut state = InputState::new(cx).placeholder("my-velowork-bucket");
+            if !s.sync.s3.bucket.is_empty() {
+                state.set_value(s.sync.s3.bucket.clone(), cx);
+            }
+            state
+        });
+        cx.subscribe(
+            &sync_s3_bucket_input,
+            |this, entity, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let val = entity.read(cx).text().to_string();
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_bucket(val, cx));
+                this.sync_test_result = None;
+                cx.notify();
+            },
+        )
+        .detach();
+
+        let sync_s3_region_input = cx.new(|cx| {
+            let mut state = InputState::new(cx).placeholder("us-east-1 (or auto)");
+            if !s.sync.s3.region.is_empty() {
+                state.set_value(s.sync.s3.region.clone(), cx);
+            }
+            state
+        });
+        cx.subscribe(
+            &sync_s3_region_input,
+            |this, entity, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let val = entity.read(cx).text().to_string();
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_region(val, cx));
+                this.sync_test_result = None;
+                cx.notify();
+            },
+        )
+        .detach();
+
+        let sync_s3_access_key_input = cx.new(|cx| {
+            let mut state = InputState::new(cx).placeholder("AKIAIOSFODNN7EXAMPLE");
+            if !s.sync.s3.access_key_id.is_empty() {
+                state.set_value(s.sync.s3.access_key_id.clone(), cx);
+            }
+            state
+        });
+        cx.subscribe(
+            &sync_s3_access_key_input,
+            |this, entity, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let val = entity.read(cx).text().to_string();
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_access_key_id(val, cx));
+                this.sync_test_result = None;
+                cx.notify();
+            },
+        )
+        .detach();
+
+        let initial_s3_secret_key =
+            velowork_workspace::secure_storage::load_s3_secret_key().unwrap_or_default();
+        let sync_s3_secret_key_input = cx.new(|cx| {
+            InputState::new(cx)
+                .placeholder("Secret Access Key")
+                .masked(true)
+                .default_value(initial_s3_secret_key)
+        });
+        cx.subscribe(
+            &sync_s3_secret_key_input,
+            |this, entity, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let val = entity.read(cx).text().to_string();
+                if val.is_empty() {
+                    if let Err(e) = velowork_workspace::secure_storage::delete_s3_secret_key() {
+                        log::warn!("[s3] 清除已保存的 S3 Secret Key 失败: {}", e);
+                    }
+                    settings_entity(cx)
+                        .update(cx, |state, cx| state.set_s3_secret_key_stored(false, cx));
+                } else {
+                    match velowork_workspace::secure_storage::store_s3_secret_key(&val) {
+                        Ok(_) => {
+                            settings_entity(cx)
+                                .update(cx, |state, cx| state.set_s3_secret_key_stored(true, cx));
+                        }
+                        Err(e) => log::warn!("[s3] 保存 S3 Secret Key 失败: {}", e),
+                    }
+                }
+                this.sync_test_result = None;
+                cx.notify();
+            },
+        )
+        .detach();
+
+        let sync_s3_prefix_input = cx.new(|cx| {
+            let mut state = InputState::new(cx).placeholder("velowork (optional prefix)");
+            if !s.sync.s3.prefix.is_empty() {
+                state.set_value(s.sync.s3.prefix.clone(), cx);
+            }
+            state
+        });
+        cx.subscribe(
+            &sync_s3_prefix_input,
+            |this, entity, event: &InputEvent, cx| {
+                if !matches!(event, InputEvent::Change) {
+                    return;
+                }
+                let val = entity.read(cx).text().to_string();
+                settings_entity(cx).update(cx, |state, cx| state.set_s3_prefix(val, cx));
+                this.sync_test_result = None;
+                cx.notify();
+            },
+        )
+        .detach();
+
         let cur_sync_provider = if s.sync.enabled {
             Some(s.sync.provider)
         } else {
@@ -578,6 +727,7 @@ impl SettingsPanel {
                 .options(vec![
                     SelectOption::new(None, i18n!(cx, "common.none")),
                     SelectOption::new(Some(SyncProvider::WebDav), "WebDAV"),
+                    SelectOption::new(Some(SyncProvider::S3), i18n!(cx, "settings.sync.provider.s3")),
                 ])
                 .selected(Some(cur_sync_provider))
                 .placement(SelectPlacement::Below)
@@ -1192,6 +1342,12 @@ impl SettingsPanel {
             sync_username_input,
             sync_password_input,
             sync_remote_path_input,
+            sync_s3_endpoint_input,
+            sync_s3_bucket_input,
+            sync_s3_region_input,
+            sync_s3_access_key_input,
+            sync_s3_secret_key_input,
+            sync_s3_prefix_input,
             sync_provider_select,
             sync_test_result: None,
             sync_test_in_progress: false,
@@ -2019,11 +2175,24 @@ impl SettingsPanel {
             }
             SettingsCategory::Sync => {
                 handles.push(self.sync_provider_select.read(cx).focus_handle().clone());
-                if s.sync.enabled && s.sync.provider == SyncProvider::WebDav {
-                    handles.push(self.sync_server_url_input.read(cx).focus_handle(cx));
-                    handles.push(self.sync_username_input.read(cx).focus_handle(cx));
-                    handles.push(self.sync_password_input.read(cx).focus_handle(cx));
-                    handles.push(self.sync_remote_path_input.read(cx).focus_handle(cx));
+                if s.sync.enabled {
+                    match s.sync.provider {
+                        SyncProvider::WebDav => {
+                            handles.push(self.sync_server_url_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_username_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_password_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_remote_path_input.read(cx).focus_handle(cx));
+                        }
+                        SyncProvider::S3 => {
+                            handles.push(self.sync_s3_endpoint_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_s3_bucket_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_s3_region_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_s3_access_key_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_s3_secret_key_input.read(cx).focus_handle(cx));
+                            handles.push(self.sync_s3_prefix_input.read(cx).focus_handle(cx));
+                            handles.push(self.get_or_create_toggle_focus_handle("sync-s3-path-style", cx));
+                        }
+                    }
                     handles.push(self.get_or_create_button_focus_handle("sync-test-conn-btn", cx));
                     handles.push(self.get_or_create_toggle_focus_handle("sync-scope-sessions", cx));
                     handles.push(self.get_or_create_toggle_focus_handle("sync-scope-tunnels", cx));

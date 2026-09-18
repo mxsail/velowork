@@ -368,13 +368,28 @@
       "enabled": "启用数据同步",
       "provider": {
         "label": "同步方式",
-        "webdav": "WebDAV"
+        "webdav": "WebDAV",
+        "s3": "S3 兼容对象存储"
       },
       "webdav": {
         "server": "服务器地址",
         "username": "用户名",
         "password": "密码",
         "path": "远程路径"
+      },
+      "s3": {
+        "endpoint": "终端节点 (Endpoint)",
+        "bucket": "存储桶名称 (Bucket)",
+        "region": "区域 (Region)",
+        "access_key": "Access Key ID",
+        "secret_key": "Secret Access Key",
+        "prefix": "路径前缀 (Prefix)",
+        "path_style": "强制使用 Path-Style 路径",
+        "path_style_desc": "适用于 MinIO、自建 Ceph 等不支持 Virtual-Hosted 域名的私有存储",
+        "error_endpoint_empty": "S3 Endpoint 不能为空",
+        "error_endpoint_invalid": "S3 Endpoint 必须以 http:// 或 https:// 开头",
+        "error_bucket_empty": "存储桶名称不能为空",
+        "error_access_key_empty": "Access Key ID 不能为空"
       },
       "scope_title": "同步数据范围",
       "select_all": "全选",

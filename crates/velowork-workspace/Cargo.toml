@@ -36,8 +36,9 @@ zeroize = { version = "1.8", features = ["derive"] }
 keyring = "4.1"
 thiserror = "1.0"
 
-# WebDAV sync
+# WebDAV & S3 sync
 reqwest_dav = "0.3"
+rust-s3 = { version = "0.37", default-features = false, features = ["fail-on-err", "tokio-rustls-tls"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # Sync bundle compression + hashing

@@ -22,8 +22,10 @@ use velowork_terminal::pty_manager::get_tokio_runtime;
 use velowork_workspace::repositories::credential::CredentialApplicationService;
 use velowork_workspace::secure_storage::load_sync_passphrase;
 use velowork_workspace::security::current_security_service;
-use velowork_workspace::settings::{SyncConflictStrategy, WebDavConfig};
-use velowork_workspace::sync::{register_sync_signal, sync_snapshot, SyncResult, WebDavSync};
+use velowork_workspace::settings::{SyncProvider, SyncSettings};
+use velowork_workspace::sync::{
+    create_sync_provider, register_sync_signal, sync_snapshot, AnySyncProvider, SyncResult,
+};
 use velowork_workspace::toast::{Toast, ToastAction, ToastActionStyle, ToastManager};
 
 /// 防止手动同步与自动同步并发执行同一份基线文件。
@@ -148,11 +150,8 @@ pub fn trigger_manual_sync(cx: &mut App) {
     }
     set_syncing_flag(cx, true);
 
-    let config = sync.webdav.clone();
-    let strategy = sync.conflict_strategy;
-    let scope = sync.data_scope.clone();
     cx.spawn(async move |cx| {
-        let result = run_auto_sync(config, strategy, scope).await;
+        let result = run_auto_sync(sync).await;
         SYNCING.store(false, Ordering::SeqCst);
         // 回到主线程：更新状态圆点 + 记录时间 + Toast 提示（手动触发始终提示）。
         let _ = cx.update(|cx| {
@@ -190,12 +189,7 @@ pub fn start_sync_engine(cx: &App) {
                 if is_unlocked && !SYNCING.swap(true, Ordering::SeqCst) {
                     // 标记「同步中」，状态栏切换为刷新图标
                     let _ = cx.update(|cx| set_syncing_flag(cx, true));
-                    let result = run_auto_sync(
-                        sync.webdav.clone(),
-                        sync.conflict_strategy,
-                        sync.data_scope.clone(),
-                    )
-                    .await;
+                    let result = run_auto_sync(sync).await;
                     SYNCING.store(false, Ordering::SeqCst);
                     // 回到主线程更新状态圆点（后台自动同步静默执行，仅失败时提示）
                     let _ = cx.update(|cx| {
@@ -209,48 +203,54 @@ pub fn start_sync_engine(cx: &App) {
     .detach();
 }
 
-/// 解析同步加密口令：优先使用持久化的同步加密口令，否则回退到 WebDAV 服务器密码
-/// （用户已为同步提供的同一份密钥，跨设备一致）。
+/// 解析同步加密口令：优先使用持久化的同步加密口令，否则回退到提供商认证密钥
+/// （用户已为同步提供的密钥，跨设备一致）。
 ///
 /// **不再使用固定默认口令兜底**：默认口令等于把所有人同步 Bundle 用同一已知密钥
 /// 加密，是安全隐患。若两者皆空，同步必须失败并提示用户设置同步加密口令，而非
 /// 静默用弱默认密钥加密。
-fn resolve_sync_passphrase(webdav_password: &str) -> anyhow::Result<String> {
-    if let Some(p) = load_sync_passphrase() {
-        if !p.is_empty() {
-            return Ok(p);
-        }
+fn resolve_sync_passphrase(fallback_secret: &str) -> anyhow::Result<String> {
+    if let Some(p) = load_sync_passphrase()
+        && !p.is_empty()
+    {
+        return Ok(p);
     }
-    if !webdav_password.is_empty() {
-        return Ok(webdav_password.to_string());
+    if !fallback_secret.is_empty() {
+        return Ok(fallback_secret.to_string());
     }
     anyhow::bail!(
-        "未配置同步加密口令：请在设置中设置「同步加密口令」，或将 WebDAV 密码用于同步加密"
+        "未配置同步加密口令：请在设置中设置「同步加密口令」，或配置提供商访问凭证用于同步加密"
     )
 }
 
 /// 构建同步所需的运行时上下文（provider / profile / cred / db / passphrase）。
 ///
-/// `webdav_password` 为已解析的 WebDAV 服务器密码（来自输入框或系统密钥库）。
+/// `override_secret` 为已解析的提供商密钥（来自输入框或系统密钥库）。
+/// 若为 `None`，则从安全存储中自动加载。
 /// 返回的 `profile` 为进程级 `&'static` 引用，可直接传入 `sync_snapshot`。
 pub(crate) fn build_sync_context(
-    config: &WebDavConfig,
-    webdav_password: &str,
+    sync: &SyncSettings,
+    override_secret: Option<&str>,
 ) -> anyhow::Result<(
-    WebDavSync,
+    AnySyncProvider,
     &'static ProfilePaths,
     CredentialApplicationService,
     Option<Arc<Database>>,
     String,
 )> {
-    let provider = WebDavSync::new(
-        config,
-        if webdav_password.is_empty() {
-            None
-        } else {
-            Some(webdav_password)
+    let secret = match override_secret {
+        Some(s) => s.to_string(),
+        None => match sync.provider {
+            SyncProvider::WebDav => {
+                velowork_workspace::secure_storage::load_webdav_password().unwrap_or_default()
+            }
+            SyncProvider::S3 => {
+                velowork_workspace::secure_storage::load_s3_secret_key().unwrap_or_default()
+            }
         },
-    )?;
+    };
+
+    let provider = create_sync_provider(sync, if secret.is_empty() { None } else { Some(&secret) })?;
     let profile = velowork_core::profiles::current();
     let db = database().or_else(|| {
         Database::open(&profile.database_path())
@@ -268,7 +268,7 @@ pub(crate) fn build_sync_context(
     // 凭据明文经 SecurityService（Level 1 SQLite，DEK 加密）读写。
     let security = current_security_service()?;
     let cred = CredentialApplicationService::new(cred_db, security);
-    let passphrase = resolve_sync_passphrase(webdav_password)?;
+    let passphrase = resolve_sync_passphrase(&secret)?;
     Ok((provider, profile, cred, db, passphrase))
 }
 
@@ -276,16 +276,10 @@ pub(crate) fn build_sync_context(
 ///
 /// 不持有 `cx`：网络调用与结果展示解耦，避免 `&mut AsyncApp` 跨 `.await` 导致
 /// 的生命周期错误。结果由调用方在 `cx.update` 中展示。
-async fn run_auto_sync(
-    config: WebDavConfig,
-    strategy: SyncConflictStrategy,
-    scope: velowork_workspace::settings::SyncDataScope,
-) -> anyhow::Result<SyncResult> {
-    // 后台同步无法弹出输入框，直接从系统密钥库读取 WebDAV 密码。
-    let webdav_password = velowork_workspace::secure_storage::load_webdav_password().unwrap_or_default();
-
-    let (provider, profile, cred, db, passphrase) =
-        build_sync_context(&config, &webdav_password)?;
+async fn run_auto_sync(sync: SyncSettings) -> anyhow::Result<SyncResult> {
+    let strategy = sync.conflict_strategy;
+    let scope = sync.data_scope.clone();
+    let (provider, profile, cred, db, passphrase) = build_sync_context(&sync, None)?;
 
     get_tokio_runtime()
         .spawn(async move {
