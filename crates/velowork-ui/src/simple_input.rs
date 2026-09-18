@@ -602,6 +602,10 @@ impl SimpleInputState {
         window.focus(&self.focus_handle, cx);
     }
 
+    pub fn is_focused(&self) -> bool {
+        self.is_focused
+    }
+
     pub fn on_focus(&mut self, cx: &mut Context<Self>) {
         if self.is_focused {
             return;
@@ -1647,6 +1651,10 @@ impl SimpleInputState {
 
 // IME support implementation
 impl EntityInputHandler for SimpleInputState {
+    fn accepts_text_input(&self, _window: &mut Window, _cx: &mut Context<Self>) -> bool {
+        !self.read_only
+    }
+
     fn text_for_range(
         &mut self,
         range_utf16: Range<usize>,
@@ -2813,6 +2821,7 @@ impl Render for SimpleInputState {
         div()
             .id(ElementId::from(&focus_handle))
             .track_focus(&focus_handle)
+            .key_context("TextInput")
             .relative()
             .flex()
             .when(multiline, |d| d.items_start())
