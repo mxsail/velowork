@@ -237,67 +237,22 @@ fn bind_debounced_input<T: 'static, F>(
     F: Fn(&str, &mut T, &mut Context<T>) + 'static,
 {
     let on_commit = Rc::new(on_commit);
-    let last_change_time = Rc::new(Cell::new(Instant::now()));
-    let is_timer_running = Rc::new(Cell::new(false));
     let last_committed_val = Rc::new(RefCell::new(None::<String>));
-
-    let time_clone = last_change_time.clone();
-    let timer_clone = is_timer_running.clone();
     let committed_clone = last_committed_val.clone();
-    let input_entity = input.clone();
 
     cx.subscribe(input, move |this, entity, event: &InputEvent, cx| match event {
         InputEvent::Change => {
+            // 对齐 Zed SettingsInputField 设计：打字期间纯本地内存编辑，
+            // 绝不启动异步 Task，绝不触发写盘，绝不调用外层面板重绘
             if let Some(extra) = on_change_extra.as_ref() {
                 extra(this, cx);
             }
-            // 实时驱动宿主面板在当前 VSync 帧重绘，与欢迎界面对齐 60fps 丝滑逐字输入
-            cx.notify();
-            // 每次击键仅刷新纳秒级时间戳，零堆内存分配，零 Task 创建与销毁！
-            time_clone.set(Instant::now());
-
-            if !timer_clone.get() {
-                timer_clone.set(true);
-                let last_time = time_clone.clone();
-                let is_running = timer_clone.clone();
-                let last_commit = committed_clone.clone();
-                let commit = on_commit.clone();
-                let input_weak = input_entity.downgrade();
-
-                cx.spawn(async move |this, cx| {
-                    loop {
-                        let elapsed = last_time.get().elapsed();
-                        if elapsed < std::time::Duration::from_millis(300) {
-                            let remain = std::time::Duration::from_millis(300) - elapsed;
-                            cx.background_executor().timer(remain).await;
-                        }
-
-                        if !is_running.get() {
-                            break;
-                        }
-
-                        if last_time.get().elapsed() >= std::time::Duration::from_millis(300) {
-                            is_running.set(false);
-                            let _ = this.update(cx, |this, cx| {
-                                if let Some(input) = input_weak.upgrade() {
-                                    let val = input.read(cx).text().to_string();
-                                    *last_commit.borrow_mut() = Some(val.clone());
-                                    commit(&val, this, cx);
-                                }
-                            });
-                            break;
-                        }
-                    }
-                })
-                .detach();
-            }
         }
         InputEvent::Blur | InputEvent::PressEnter => {
+            // 严格在失焦 (FocusOut / Blur) 或按回车 (PressEnter) 时持久化提交
             let val = entity.read(cx).text().to_string();
-            let need_commit = timer_clone.get()
-                || committed_clone.borrow().as_deref() != Some(&val);
-            if need_commit {
-                timer_clone.set(false);
+            let has_changed = committed_clone.borrow().as_deref() != Some(&val);
+            if has_changed {
                 *committed_clone.borrow_mut() = Some(val.clone());
                 on_commit(&val, this, cx);
             }
@@ -392,12 +347,14 @@ impl SettingsPanel {
                 p.set_value_quiet(current_dr.root().to_string_lossy().to_string(), _cx);
             }
         });
+        let inner_dr_input = data_root_custom_input.read(cx).input().clone();
         cx.subscribe(
-            &data_root_custom_input,
-            |this, _, event: &crate::views::components::PathAutoCompleteEvent, cx| {
-                let crate::views::components::PathAutoCompleteEvent::Change(_) = event;
-                this.recompute_data_root_error(cx);
-                cx.notify();
+            &inner_dr_input,
+            |this, _, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Blur | InputEvent::PressEnter) {
+                    this.recompute_data_root_error(cx);
+                    cx.notify();
+                }
             },
         )
         .detach();
@@ -428,18 +385,26 @@ impl SettingsPanel {
         {
             terminal_bg_image_input.update(cx, |p, cx| p.set_value_quiet(img.clone(), cx));
         }
+        let inner_bg_input = terminal_bg_image_input.read(cx).input().clone();
+        let committed_bg_img = Rc::new(RefCell::new(s.terminal_background_image.clone()));
+        let committed_bg_clone = committed_bg_img.clone();
         cx.subscribe(
-            &terminal_bg_image_input,
-            |this, _, event: &crate::views::components::PathAutoCompleteEvent, cx| {
-                let crate::views::components::PathAutoCompleteEvent::Change(val) = event;
-                this.bg_image_show_success = false;
-                let opt = if val.trim().is_empty() {
-                    None
-                } else {
-                    Some(val.clone())
-                };
-                settings_entity(cx)
-                    .update(cx, |state, cx| state.set_terminal_background_image(opt, cx));
+            &inner_bg_input,
+            move |this, entity, event: &InputEvent, cx| {
+                if matches!(event, InputEvent::Blur | InputEvent::PressEnter) {
+                    let val = entity.read(cx).text().to_string();
+                    let opt = if val.trim().is_empty() {
+                        None
+                    } else {
+                        Some(val.clone())
+                    };
+                    if *committed_bg_clone.borrow() != opt {
+                        *committed_bg_clone.borrow_mut() = opt.clone();
+                        this.bg_image_show_success = false;
+                        settings_entity(cx)
+                            .update(cx, |state, cx| state.set_terminal_background_image(opt, cx));
+                    }
+                }
             },
         )
         .detach();
@@ -778,7 +743,6 @@ impl SettingsPanel {
                 if !matches!(event, InputEvent::Change) {
                     return;
                 }
-                cx.notify();
                 slc_clone.set(Instant::now());
                 if !str_clone.get() {
                     str_clone.set(true);
@@ -1599,8 +1563,17 @@ impl SettingsPanel {
     /// （用于「未输入密码时隐藏启用按钮」等按内容显隐的交互）。
     fn with_security_input_subscription(self, cx: &mut Context<Self>) -> Self {
         let input = self.security_new_password_input.clone();
-        cx.subscribe(&input, |_, _, _: &InputEvent, cx| cx.notify())
-            .detach();
+        let was_empty = Rc::new(Cell::new(true));
+        cx.subscribe(&input, move |_, entity, event: &InputEvent, cx| {
+            if matches!(event, InputEvent::Change) {
+                let is_empty = entity.read(cx).text().is_empty();
+                if was_empty.get() != is_empty {
+                    was_empty.set(is_empty);
+                    cx.notify();
+                }
+            }
+        })
+        .detach();
         self
     }
 
