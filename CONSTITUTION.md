@@ -51,4 +51,4 @@
 
 1. **安全第一 (Safety First)**：充分发挥 Rust 所有权与类型系统优势，严格限制 `unsafe`，凭据（密码、私钥）必须通过 OS Keyring 安全存储。
 2. **显式优于隐式 (Explicit over Implicit)**：状态变更通过 GPUI Entity 显式通知（`cx.notify()`），避免隐晦的副作用与竞态条件。
-3. **可维护性与测试驱动 (Testability & Verification)**：核心业务状态与协议流转必须具备单元测试，提交前必须通过 `cargo check`、`cargo clippy` 与 `cargo test`。
+3. **可维护性与测试驱动 (Testability & Verification)**：核心业务状态与协议流转必须具备单元测试；提交前必须通过 `cargo check`；非必要或未获显式指令严禁在本地执行耗时全量单测，重型测试统一由 CI 远端流水线保障。

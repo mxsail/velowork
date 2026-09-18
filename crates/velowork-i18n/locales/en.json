@@ -442,6 +442,8 @@
       "test_connection_failed": "Connection failed",
       "test_connection_copy_tooltip": "Click to copy full error message",
       "test_connection_copied": "Error message copied to clipboard",
+      "cancel_test": "Cancel Test",
+      "test_cancelled": "Test cancelled",
       "error_server_url_empty": "Server URL cannot be empty",
       "error_server_url_invalid": "Server URL must start with http:// or https://",
       "error_sync_disabled": "Sync is disabled",
