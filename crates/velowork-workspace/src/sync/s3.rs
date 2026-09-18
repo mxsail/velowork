@@ -81,7 +81,10 @@ impl S3Sync {
         let mut bucket = Bucket::new(bucket_name, region, credentials)
             .context("初始化 S3 Bucket 失败")?;
 
-        if config.path_style {
+        // 智能自适应：当 Endpoint 为 IP 地址（如 192.168.x.x）或 localhost 时，
+        // 虚拟主机风格（{bucket}.{ip}）在网络规范中必然报错（invalid IPv4 address）。
+        // 此时自动强制开启 Path-Style，域名则遵从用户配置，兼顾自建 MinIO 与公有云兼容性。
+        if config.path_style || is_ip_or_localhost(endpoint_raw) {
             bucket.set_path_style();
         }
 
@@ -263,5 +266,37 @@ impl SyncProvider for S3Sync {
         let m: BundleManifest = serde_json::from_slice(manifest_resp.bytes())
             .context("解析远端 S3 manifest 失败")?;
         Ok(Some(m))
+    }
+}
+
+/// 判断 Endpoint 的 host 是否为 IP 地址或 localhost
+fn is_ip_or_localhost(endpoint_raw: &str) -> bool {
+    let clean = endpoint_raw
+        .trim_start_matches("http://")
+        .trim_start_matches("https://");
+    let host = if clean.starts_with('[') && let Some(bracket_end) = clean.find(']') {
+        &clean[1..bracket_end]
+    } else {
+        clean.split([':', '/']).next().unwrap_or("")
+    };
+    host.eq_ignore_ascii_case("localhost") || host.parse::<std::net::IpAddr>().is_ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_ip_or_localhost() {
+        assert!(is_ip_or_localhost("http://192.168.2.22:9000"));
+        assert!(is_ip_or_localhost("https://192.168.2.22:9000/"));
+        assert!(is_ip_or_localhost("192.168.2.22"));
+        assert!(is_ip_or_localhost("http://127.0.0.1:9000"));
+        assert!(is_ip_or_localhost("http://localhost:9000"));
+        assert!(is_ip_or_localhost("http://[::1]:9000"));
+
+        assert!(!is_ip_or_localhost("https://s3.us-west-2.amazonaws.com"));
+        assert!(!is_ip_or_localhost("https://my-bucket.r2.cloudflarestorage.com"));
+        assert!(!is_ip_or_localhost("https://oss-cn-hangzhou.aliyuncs.com"));
     }
 }
