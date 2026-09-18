@@ -207,6 +207,8 @@ pub struct SettingsPanel {
     pub(super) nav_search: String,
     /// 动态按 ID 缓存数字步进器输入框实体
     pub(super) stepper_inputs: HashMap<String, Entity<InputState>>,
+    /// 已绑定单次提交防抖逻辑的步进器输入框 ID 集合（防止 render 期重复注册泄漏）
+    pub(super) bound_stepper_inputs: HashSet<String>,
     /// 背景透明度滑块实体（懒初始化，避免每次渲染重建导致拖动状态丢失）。
     pub(super) bg_opacity_slider: Option<Entity<SliderState>>,
     /// 左侧导航列表整体聚焦句柄（单一 Tab stop）。
@@ -1481,6 +1483,7 @@ impl SettingsPanel {
                 }
                 map
             },
+            bound_stepper_inputs: HashSet::new(),
             bg_opacity_slider: Some(cx.new(|cx| {
                 velowork_ui::slider::SliderState::new(cx)
                     .min(10.0)
@@ -2090,7 +2093,8 @@ impl SettingsPanel {
     /// 收集指定分类下所有可见/可交互控件的焦点句柄（严格与界面视觉顺序保持 100% 一致）
     pub fn category_focus_handles(&self, cat: &SettingsCategory, cx: &App) -> Vec<FocusHandle> {
         let mut handles = Vec::new();
-        let s = settings_entity(cx).read(cx).settings.clone();
+        let settings_state = settings_entity(cx);
+        let s = &settings_state.read(cx).settings;
 
         match cat {
             SettingsCategory::General => {

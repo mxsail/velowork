@@ -1,3 +1,6 @@
+use std::cell::Cell;
+use std::rc::Rc;
+use std::time::Instant;
 use crate::settings::{settings_entity, SettingsState};
 use crate::terminal::session_backend::SessionBackend;
 use crate::terminal::shell_config::ShellType;
@@ -84,29 +87,87 @@ impl SettingsPanel {
         let val_display = format_val(current_val);
         let input_entity = self.get_or_create_stepper_input(id, &val_display, window, cx);
 
-        // Commit on Enter / Blur: format text box to clamped & formatted string, update SettingsState
-        let input_commit = input_entity.clone();
-        let update_fn_commit = commit_fn;
-        let format_val_commit = format_val.clone();
-        let do_commit = move |text: &str, _window: &mut Window, cx: &mut App| {
-            let final_val = parse_val(text).unwrap_or(current_val).clamp(min, max);
-            let formatted = format_val_commit(final_val);
-            input_commit.update(cx, |s, cx| s.set_value(&formatted, cx));
-            let update_fn_commit = update_fn_commit.clone();
-            settings_entity(cx).update(cx, |state, cx| {
-                update_fn_commit(state, final_val, cx);
-            });
-        };
+        if !input_entity.read(cx).is_focused() {
+            let cur_text = input_entity.read(cx).text().to_string();
+            if cur_text.is_empty() {
+                input_entity.update(cx, |s, cx| s.set_value(&val_display, cx));
+            }
+        }
 
-        // 3. Hook focus loss (blur / click outside)
-        let focus_handle = input_entity.focus_handle(cx);
-        let input_blur = input_entity.clone();
-        let do_commit_blur = do_commit.clone();
-        cx.on_blur(&focus_handle, window, move |_this, window, cx| {
-            let text = input_blur.read(cx).text().to_string();
-            do_commit_blur(&text, window, cx);
-        })
-        .detach();
+        // 仅在首次创建/遇到此步进器时绑定一次防抖 + 失焦/回车提交逻辑，杜绝 render 递归雪崩
+        if self.bound_stepper_inputs.insert(id.to_string()) {
+            let input_sub = input_entity.clone();
+            let commit_sub = commit_fn;
+            let format_val_sub = format_val.clone();
+            let parse_val_sub = parse_val;
+
+            let last_change_time = Rc::new(Cell::new(Instant::now()));
+            let is_timer_running = Rc::new(Cell::new(false));
+            let time_clone = last_change_time.clone();
+            let timer_clone = is_timer_running.clone();
+            let input_weak = input_entity.downgrade();
+
+            cx.subscribe(&input_entity, move |_this, _entity, event: &InputEvent, cx| {
+                match event {
+                    InputEvent::Change => {
+                        time_clone.set(Instant::now());
+                        if !timer_clone.get() {
+                            timer_clone.set(true);
+                            let last_time = time_clone.clone();
+                            let is_running = timer_clone.clone();
+                            let input_weak = input_weak.clone();
+                            let commit_sub = commit_sub.clone();
+                            let format_val_sub = format_val_sub.clone();
+
+                            cx.spawn(async move |_this, cx| {
+                                loop {
+                                    let elapsed = last_time.get().elapsed();
+                                    if elapsed < std::time::Duration::from_millis(300) {
+                                        let remain = std::time::Duration::from_millis(300) - elapsed;
+                                        cx.background_executor().timer(remain).await;
+                                    }
+                                    if !is_running.get() {
+                                        break;
+                                    }
+                                    if last_time.get().elapsed() >= std::time::Duration::from_millis(300) {
+                                        is_running.set(false);
+                                        let _ = cx.update(|cx| {
+                                            if let Some(input) = input_weak.upgrade() {
+                                                let text = input.read(cx).text().to_string();
+                                                let cleaned = text.trim_end_matches('%').trim_end_matches("px").trim();
+                                                if let Ok(parsed) = cleaned.parse::<f32>() {
+                                                    let final_val = parsed.clamp(min, max);
+                                                    let formatted = format_val_sub(final_val);
+                                                    input.update(cx, |s, cx| s.set_value(&formatted, cx));
+                                                    settings_entity(cx).update(cx, |state, cx| {
+                                                        commit_sub(state, final_val, cx);
+                                                    });
+                                                }
+                                            }
+                                        });
+                                        break;
+                                    }
+                                }
+                            })
+                            .detach();
+                        }
+                    }
+                    InputEvent::PressEnter | InputEvent::Blur => {
+                        timer_clone.set(false);
+                        let text = input_sub.read(cx).text().to_string();
+                        let final_val = parse_val_sub(&text).unwrap_or(current_val).clamp(min, max);
+                        let formatted = format_val_sub(final_val);
+                        input_sub.update(cx, |s, cx| s.set_value(&formatted, cx));
+                        let commit_sub = commit_sub.clone();
+                        settings_entity(cx).update(cx, |state, cx| {
+                            commit_sub(state, final_val, cx);
+                        });
+                    }
+                    _ => {}
+                }
+            })
+            .detach();
+        }
 
         let input_dec = input_entity.clone();
         let input_inc = input_entity.clone();
@@ -136,9 +197,6 @@ impl SettingsPanel {
                     settings_entity(cx).update(cx, |state, cx| {
                         inc_fn(state, new_val, cx);
                     });
-                }))
-                .on_commit(cx.listener(move |_, text: &str, window, cx| {
-                    do_commit(text, window, cx);
                 })),
         )
     }
@@ -173,41 +231,84 @@ impl SettingsPanel {
         let val_display = current_val.to_string();
         let input_entity = self.get_or_create_stepper_input(id, &val_display, window, cx);
 
-        let update_fn_sub = commit_fn.clone();
-        let input_sub = input_entity.clone();
-        cx.subscribe(&input_entity, move |_this, _entity, _: &InputEvent, cx| {
-            let text = input_sub.read(cx).text().to_string();
-            if let Some(parsed) = parse_val(&text) {
-                let clamped = parsed.clamp(min, max);
-                let update_fn_sub = update_fn_sub.clone();
-                settings_entity(cx).update(cx, |state, cx| {
-                    update_fn_sub(state, clamped, cx);
-                });
+        if !input_entity.read(cx).is_focused() {
+            let cur_text = input_entity.read(cx).text().to_string();
+            if cur_text.is_empty() {
+                input_entity.update(cx, |s, cx| s.set_value(&val_display, cx));
             }
-        })
-        .detach();
+        }
 
-        let input_commit = input_entity.clone();
-        let update_fn_commit = commit_fn;
-        let do_commit = move |text: &str, _window: &mut Window, cx: &mut App| {
-            let final_val = parse_val(text).unwrap_or(current_val).clamp(min, max);
-            let formatted = final_val.to_string();
-            input_commit.update(cx, |s, cx| s.set_value(&formatted, cx));
-            let update_fn_commit = update_fn_commit.clone();
-            settings_entity(cx).update(cx, |state, cx| {
-                update_fn_commit(state, final_val, cx);
-            });
-        };
+        // 仅在首次创建/遇到此步进器时绑定一次防抖 + 失焦/回车提交逻辑，杜绝 render 递归雪崩
+        if self.bound_stepper_inputs.insert(id.to_string()) {
+            let input_sub = input_entity.clone();
+            let commit_sub = commit_fn;
 
-        // Hook focus loss (blur / click outside)
-        let focus_handle = input_entity.focus_handle(cx);
-        let input_blur = input_entity.clone();
-        let do_commit_blur = do_commit.clone();
-        cx.on_blur(&focus_handle, window, move |_this, window, cx| {
-            let text = input_blur.read(cx).text().to_string();
-            do_commit_blur(&text, window, cx);
-        })
-        .detach();
+            let last_change_time = Rc::new(Cell::new(Instant::now()));
+            let is_timer_running = Rc::new(Cell::new(false));
+            let time_clone = last_change_time.clone();
+            let timer_clone = is_timer_running.clone();
+            let input_weak = input_entity.downgrade();
+
+            cx.subscribe(&input_entity, move |_this, _entity, event: &InputEvent, cx| {
+                match event {
+                    InputEvent::Change => {
+                        time_clone.set(Instant::now());
+                        if !timer_clone.get() {
+                            timer_clone.set(true);
+                            let last_time = time_clone.clone();
+                            let is_running = timer_clone.clone();
+                            let input_weak = input_weak.clone();
+                            let commit_sub = commit_sub.clone();
+
+                            cx.spawn(async move |_this, cx| {
+                                loop {
+                                    let elapsed = last_time.get().elapsed();
+                                    if elapsed < std::time::Duration::from_millis(300) {
+                                        let remain = std::time::Duration::from_millis(300) - elapsed;
+                                        cx.background_executor().timer(remain).await;
+                                    }
+                                    if !is_running.get() {
+                                        break;
+                                    }
+                                    if last_time.get().elapsed() >= std::time::Duration::from_millis(300) {
+                                        is_running.set(false);
+                                        let _ = cx.update(|cx| {
+                                            if let Some(input) = input_weak.upgrade() {
+                                                let text = input.read(cx).text().to_string();
+                                                let cleaned = text.trim();
+                                                if let Ok(parsed) = cleaned.parse::<u32>() {
+                                                    let final_val = parsed.clamp(min, max);
+                                                    let formatted = final_val.to_string();
+                                                    input.update(cx, |s, cx| s.set_value(&formatted, cx));
+                                                    settings_entity(cx).update(cx, |state, cx| {
+                                                        commit_sub(state, final_val, cx);
+                                                    });
+                                                }
+                                            }
+                                        });
+                                        break;
+                                    }
+                                }
+                            })
+                            .detach();
+                        }
+                    }
+                    InputEvent::PressEnter | InputEvent::Blur => {
+                        timer_clone.set(false);
+                        let text = input_sub.read(cx).text().to_string();
+                        let final_val = parse_val(&text).unwrap_or(current_val).clamp(min, max);
+                        let formatted = final_val.to_string();
+                        input_sub.update(cx, |s, cx| s.set_value(&formatted, cx));
+                        let commit_sub = commit_sub.clone();
+                        settings_entity(cx).update(cx, |state, cx| {
+                            commit_sub(state, final_val, cx);
+                        });
+                    }
+                    _ => {}
+                }
+            })
+            .detach();
+        }
 
         let input_dec = input_entity.clone();
         let input_inc = input_entity.clone();
@@ -233,9 +334,6 @@ impl SettingsPanel {
                     settings_entity(cx).update(cx, |state, cx| {
                         inc_fn(state, new_val, cx);
                     });
-                }))
-                .on_commit(cx.listener(move |_, text: &str, window, cx| {
-                    do_commit(text, window, cx);
                 })),
         )
     }
@@ -272,40 +370,84 @@ impl SettingsPanel {
         let val_display = current_val.to_string();
         let input_entity = self.get_or_create_stepper_input(id, &val_display, window, cx);
 
-        let update_fn_sub = commit_fn.clone();
-        let input_sub = input_entity.clone();
-        cx.subscribe(&input_entity, move |_this, _entity, _: &InputEvent, cx| {
-            let text = input_sub.read(cx).text().to_string();
-            if let Some(parsed) = parse_val(&text) {
-                let clamped = parsed.clamp(min, max);
-                let update_fn_sub = update_fn_sub.clone();
-                settings_entity(cx).update(cx, |state, cx| {
-                    update_fn_sub(state, clamped, cx);
-                });
+        if !input_entity.read(cx).is_focused() {
+            let cur_text = input_entity.read(cx).text().to_string();
+            if cur_text.is_empty() {
+                input_entity.update(cx, |s, cx| s.set_value(&val_display, cx));
             }
-        })
-        .detach();
+        }
 
-        let input_commit = input_entity.clone();
-        let update_fn_commit = commit_fn;
-        let do_commit = move |text: &str, _window: &mut Window, cx: &mut App| {
-            let final_val = parse_val(text).unwrap_or(current_val).clamp(min, max);
-            let formatted = final_val.to_string();
-            input_commit.update(cx, |s, cx| s.set_value(&formatted, cx));
-            let update_fn_commit = update_fn_commit.clone();
-            settings_entity(cx).update(cx, |state, cx| {
-                update_fn_commit(state, final_val, cx);
-            });
-        };
+        // 仅在首次创建/遇到此步进器时绑定一次防抖 + 失焦/回车提交逻辑，杜绝 render 递归雪崩
+        if self.bound_stepper_inputs.insert(id.to_string()) {
+            let input_sub = input_entity.clone();
+            let commit_sub = commit_fn;
 
-        let focus_handle = input_entity.focus_handle(cx);
-        let input_blur = input_entity.clone();
-        let do_commit_blur = do_commit.clone();
-        cx.on_blur(&focus_handle, window, move |_this, window, cx| {
-            let text = input_blur.read(cx).text().to_string();
-            do_commit_blur(&text, window, cx);
-        })
-        .detach();
+            let last_change_time = Rc::new(Cell::new(Instant::now()));
+            let is_timer_running = Rc::new(Cell::new(false));
+            let time_clone = last_change_time.clone();
+            let timer_clone = is_timer_running.clone();
+            let input_weak = input_entity.downgrade();
+
+            cx.subscribe(&input_entity, move |_this, _entity, event: &InputEvent, cx| {
+                match event {
+                    InputEvent::Change => {
+                        time_clone.set(Instant::now());
+                        if !timer_clone.get() {
+                            timer_clone.set(true);
+                            let last_time = time_clone.clone();
+                            let is_running = timer_clone.clone();
+                            let input_weak = input_weak.clone();
+                            let commit_sub = commit_sub.clone();
+
+                            cx.spawn(async move |_this, cx| {
+                                loop {
+                                    let elapsed = last_time.get().elapsed();
+                                    if elapsed < std::time::Duration::from_millis(300) {
+                                        let remain = std::time::Duration::from_millis(300) - elapsed;
+                                        cx.background_executor().timer(remain).await;
+                                    }
+                                    if !is_running.get() {
+                                        break;
+                                    }
+                                    if last_time.get().elapsed() >= std::time::Duration::from_millis(300) {
+                                        is_running.set(false);
+                                        let _ = cx.update(|cx| {
+                                            if let Some(input) = input_weak.upgrade() {
+                                                let text = input.read(cx).text().to_string();
+                                                let cleaned = text.trim();
+                                                if let Ok(parsed) = cleaned.parse::<u32>() {
+                                                    let final_val = parsed.clamp(min, max);
+                                                    let formatted = final_val.to_string();
+                                                    input.update(cx, |s, cx| s.set_value(&formatted, cx));
+                                                    settings_entity(cx).update(cx, |state, cx| {
+                                                        commit_sub(state, final_val, cx);
+                                                    });
+                                                }
+                                            }
+                                        });
+                                        break;
+                                    }
+                                }
+                            })
+                            .detach();
+                        }
+                    }
+                    InputEvent::PressEnter | InputEvent::Blur => {
+                        timer_clone.set(false);
+                        let text = input_sub.read(cx).text().to_string();
+                        let final_val = parse_val(&text).unwrap_or(current_val).clamp(min, max);
+                        let formatted = final_val.to_string();
+                        input_sub.update(cx, |s, cx| s.set_value(&formatted, cx));
+                        let commit_sub = commit_sub.clone();
+                        settings_entity(cx).update(cx, |state, cx| {
+                            commit_sub(state, final_val, cx);
+                        });
+                    }
+                    _ => {}
+                }
+            })
+            .detach();
+        }
 
         let input_dec = input_entity.clone();
         let input_inc = input_entity.clone();
@@ -331,9 +473,6 @@ impl SettingsPanel {
                     settings_entity(cx).update(cx, |state, cx| {
                         inc_fn(state, new_val, cx);
                     });
-                }))
-                .on_commit(cx.listener(move |_, text: &str, window, cx| {
-                    do_commit(text, window, cx);
                 })),
         )
     }
