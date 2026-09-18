@@ -11,6 +11,7 @@ use velowork_ui::design::appearance::ControlVariant;
 use velowork_ui::input::Input;
 use velowork_ui::select::Select;
 use velowork_ui::switch::Switch;
+use velowork_ui::tooltip::{format_soft_break_text, Tooltip};
 use crate::workspace::persistence;
 use crate::workspace::settings::{SyncProvider, SyncSettings};
 use crate::workspace::state::GlobalWorkspace;
@@ -295,52 +296,78 @@ impl SettingsPanel {
                                         }),
                                 )
                         })
-                        // 测试连接按钮（右侧对齐，左侧显示状态）
+                        // 测试连接按钮（右侧对齐，左侧显示状态，长文本防溢出与换行折行保护）
                         .child(
                             div()
                                 .flex()
                                 .items_center()
                                 .justify_between()
+                                .gap(SPACE_MD)
                                 .pt(SPACE_XS)
                                 .child(
                                     div()
                                         .flex_1()
+                                        .min_w(px(0.0))
+                                        .max_h(px(60.0))
+                                        .overflow_hidden()
                                         .children(
                                             match &self.sync_test_result {
                                                 Some(Ok(msg)) => Some(
                                                     div()
+                                                        .id("sync-test-result-success")
+                                                        .whitespace_normal()
                                                         .text_size(ui_text_sm(cx))
                                                         .text_color(rgb(t.success))
-                                                        .child(msg.clone()),
+                                                        .child(format_soft_break_text(msg)),
                                                 ),
-                                                Some(Err(msg)) => Some(
-                                                    div()
-                                                        .text_size(ui_text_sm(cx))
-                                                        .text_color(rgb(t.error))
-                                                        .child(msg.clone()),
-                                                ),
+                                                Some(Err(msg)) => {
+                                                    let raw_msg = msg.clone();
+                                                    let copy_msg = msg.clone();
+                                                    let copy_tip = i18n!(cx, "settings.sync.test_connection_copy_tooltip");
+                                                    let copied_toast = i18n!(cx, "settings.sync.test_connection_copied");
+                                                    Some(
+                                                        div()
+                                                            .id("sync-test-result-error")
+                                                            .whitespace_normal()
+                                                            .text_size(ui_text_sm(cx))
+                                                            .text_color(rgb(t.error))
+                                                            .cursor_pointer()
+                                                            .tooltip(move |_, cx| {
+                                                                cx.new(|_| Tooltip::new(format!("{}\n({})", raw_msg, copy_tip))).into()
+                                                            })
+                                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                                                cx.write_to_clipboard(ClipboardItem::new_string(copy_msg.clone()));
+                                                                ToastManager::post(Toast::info(copied_toast.clone()), cx);
+                                                            }))
+                                                            .child(format_soft_break_text(msg)),
+                                                    )
+                                                }
                                                 None => None,
                                             },
                                         ),
                                 )
-                                .child({
-                                    let test_fh = self.get_or_create_button_focus_handle("sync-test-conn-btn", cx);
-                                    Button::new("sync-test-conn-btn", &t)
-                                        .variant(ControlVariant::Secondary)
-                                        .label(if self.sync_test_in_progress {
-                                            test_connection_testing_label
-                                        } else {
-                                            test_connection_label
-                                        })
-                                        .loading(self.sync_test_in_progress)
-                                        .disabled(self.sync_test_in_progress)
-                                        .focus_handle(&test_fh)
-                                        .on_click(cx.listener(|this, _, _window, cx| {
-                                            if !this.sync_test_in_progress {
-                                                this.test_sync_connection(cx);
-                                            }
-                                        }))
-                                }),
+                                .child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .child({
+                                            let test_fh = self.get_or_create_button_focus_handle("sync-test-conn-btn", cx);
+                                            Button::new("sync-test-conn-btn", &t)
+                                                .variant(ControlVariant::Secondary)
+                                                .label(if self.sync_test_in_progress {
+                                                    test_connection_testing_label
+                                                } else {
+                                                    test_connection_label
+                                                })
+                                                .loading(self.sync_test_in_progress)
+                                                .disabled(self.sync_test_in_progress)
+                                                .focus_handle(&test_fh)
+                                                .on_click(cx.listener(|this, _, _window, cx| {
+                                                    if !this.sync_test_in_progress {
+                                                        this.test_sync_connection(cx);
+                                                    }
+                                                }))
+                                        }),
+                                ),
                         ),
                  )
                  // 2. 同步数据范围卡片（带边框，圆角与弹窗保持一致）
@@ -586,11 +613,16 @@ impl SettingsPanel {
                                 .flex()
                                 .items_center()
                                 .justify_between()
+                                .gap(SPACE_MD)
                                 .pt(SPACE_MD)
                                 .border_t_1()
                                 .border_color(p.border_subtle)
                                 .child(
                                     div()
+                                        .flex_1()
+                                        .min_w(px(0.0))
+                                        .max_h(px(60.0))
+                                        .overflow_hidden()
                                         .flex()
                                         .flex_col()
                                         .gap(SPACE_XS)
@@ -608,38 +640,60 @@ impl SettingsPanel {
                                             match &self.sync_result {
                                                 Some(Ok(msg)) => Some(
                                                     div()
+                                                        .id("sync-result-success")
+                                                        .whitespace_normal()
                                                         .text_size(ui_text_sm(cx))
                                                         .text_color(rgb(t.success))
-                                                        .child(msg.clone()),
+                                                        .child(format_soft_break_text(msg)),
                                                 ),
-                                                Some(Err(msg)) => Some(
-                                                    div()
-                                                        .text_size(ui_text_sm(cx))
-                                                        .text_color(rgb(t.error))
-                                                        .child(msg.clone()),
-                                                ),
+                                                Some(Err(msg)) => {
+                                                    let raw_msg = msg.clone();
+                                                    let copy_msg = msg.clone();
+                                                    let copy_tip = i18n!(cx, "settings.sync.test_connection_copy_tooltip");
+                                                    let copied_toast = i18n!(cx, "settings.sync.test_connection_copied");
+                                                    Some(
+                                                        div()
+                                                            .id("sync-result-error")
+                                                            .whitespace_normal()
+                                                            .text_size(ui_text_sm(cx))
+                                                            .text_color(rgb(t.error))
+                                                            .cursor_pointer()
+                                                            .tooltip(move |_, cx| {
+                                                                cx.new(|_| Tooltip::new(format!("{}\n({})", raw_msg, copy_tip))).into()
+                                                            })
+                                                            .on_click(cx.listener(move |_, _, _, cx| {
+                                                                cx.write_to_clipboard(ClipboardItem::new_string(copy_msg.clone()));
+                                                                ToastManager::post(Toast::info(copied_toast.clone()), cx);
+                                                            }))
+                                                            .child(format_soft_break_text(msg)),
+                                                    )
+                                                }
                                                 None => None,
-                                             },
+                                            },
                                         ),
                                 )
-                                .child({
-                                    let sync_now_fh = self.get_or_create_button_focus_handle("sync-now-btn", cx);
-                                    Button::new("sync-now-btn", &t)
-                                        .variant(ControlVariant::Primary)
-                                        .label(if self.sync_in_progress {
-                                            i18n!(cx, "settings.sync.syncing")
-                                        } else {
-                                            sync_now_label
-                                        })
-                                        .loading(self.sync_in_progress)
-                                        .disabled(self.sync_in_progress)
-                                        .focus_handle(&sync_now_fh)
-                                        .on_click(cx.listener(|this, _, _window, cx| {
-                                            if !this.sync_in_progress {
-                                                this.sync_now(cx);
-                                            }
-                                        }))
-                                }),
+                                .child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .child({
+                                            let sync_now_fh = self.get_or_create_button_focus_handle("sync-now-btn", cx);
+                                            Button::new("sync-now-btn", &t)
+                                                .variant(ControlVariant::Primary)
+                                                .label(if self.sync_in_progress {
+                                                    i18n!(cx, "settings.sync.syncing")
+                                                } else {
+                                                    sync_now_label
+                                                })
+                                                .loading(self.sync_in_progress)
+                                                .disabled(self.sync_in_progress)
+                                                .focus_handle(&sync_now_fh)
+                                                .on_click(cx.listener(|this, _, _window, cx| {
+                                                    if !this.sync_in_progress {
+                                                        this.sync_now(cx);
+                                                    }
+                                                }))
+                                        }),
+                                ),
                         ),
                  )
                  // 4. 容灾与高级恢复（保留标题，无外侧边框）

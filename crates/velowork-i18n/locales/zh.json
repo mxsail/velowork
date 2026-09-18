@@ -440,6 +440,8 @@
       "test_connection_testing": "测试中…",
       "test_connection_success": "连接成功",
       "test_connection_failed": "连接失败",
+      "test_connection_copy_tooltip": "点击复制完整错误信息",
+      "test_connection_copied": "错误信息已复制到剪贴板",
       "error_server_url_empty": "服务器地址不能为空",
       "error_server_url_invalid": "服务器地址必须以 http:// 或 https:// 开头",
       "error_sync_disabled": "未启用同步",
