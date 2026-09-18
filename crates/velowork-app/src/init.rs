@@ -462,6 +462,9 @@ pub fn init_stores(
     cx.set_global(crate::views::overlays::project_hover::GlobalProjectHover(
         project_hover,
     ));
+
+    // Global tracker for detached OS windows (terminals, dock panels, settings, logs)
+    cx.set_global(crate::app::DetachedWindowsRegistry::default());
 }
 
 /// Create the PTY manager from the configured session backend.

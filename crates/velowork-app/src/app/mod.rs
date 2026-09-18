@@ -3,7 +3,7 @@ mod detached_terminals;
 mod extras;
 mod notifications;
 
-pub use detached_overlays::{open_detached_overlay, DetachedOverlayOptions};
+pub use detached_overlays::{close_all_detached_windows, open_detached_overlay, DetachedOverlayOptions, DetachedWindowsRegistry};
 
 
 use crate::views::panels::toast::ToastManager;
@@ -677,6 +677,13 @@ impl Velowork {
         if let Ok(mut svc) = security::current_security_service() {
             svc.lock();
         }
+
+        // Safely close and re-attach all detached standalone OS windows (terminals, dock panels, settings, logs).
+        // This invokes each window's `on_close` handler to re-attach detached terminals and dock
+        // panels back into the main window layout before removing the OS windows.
+        crate::app::detached_overlays::close_all_detached_windows(cx);
+        self.opened_detached_windows.clear();
+
         // Dismiss every interactive floating surface (modals, dropdown panels,
         // popovers, context menus, ...) BEFORE showing the lock screen. Any
         // open surface that renders as a topmost `anchored` layer (e.g. a

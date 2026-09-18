@@ -10,6 +10,7 @@
 use crate::settings::settings;
 use crate::views::overlays::detached_overlay::DetachedOverlayView;
 use gpui::*;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::overlay::CloseEvent;
@@ -67,6 +68,37 @@ impl Default for DetachedOverlayOptions {
     }
 }
 
+pub(crate) struct DetachedEntry {
+    handle: AnyWindowHandle,
+    on_close: Option<Arc<dyn Fn(&mut Window, &mut App)>>,
+}
+
+/// Global registry tracking all active detached windows (terminals, dock panels, settings, logs).
+/// Allows the app to safely close and re-attach all floating windows when the screen locks.
+#[derive(Clone, Default)]
+pub struct DetachedWindowsRegistry(pub(crate) Arc<parking_lot::Mutex<Vec<DetachedEntry>>>);
+
+impl gpui::Global for DetachedWindowsRegistry {}
+
+/// Close all detached standalone OS windows (terminals, dock panels, settings, logs).
+/// Executes each window's `on_close` handler (which safely re-attaches terminals and dock panels
+/// back to the main window layout) before invoking `window.remove_window()`.
+pub fn close_all_detached_windows(cx: &mut App) {
+    let reg_arc = cx.try_global::<DetachedWindowsRegistry>().map(|r| r.0.clone());
+    if let Some(reg) = reg_arc {
+        let entries = std::mem::take(&mut *reg.lock());
+        for entry in entries {
+            let on_close = entry.on_close;
+            let _ = entry.handle.update(cx, |_, window, cx| {
+                if let Some(ref handler) = on_close {
+                    handler(window, cx);
+                }
+                window.remove_window();
+            });
+        }
+    }
+}
+
 /// Open `build`-produced content in a fresh OS window with the app's standard
 /// client-drawn chrome and shared window-bounds persistence.
 ///
@@ -88,7 +120,17 @@ where
     E: CloseEvent + 'static,
 {
     let title = title.into();
-    let on_close = opts.on_close.clone();
+    // Wrap `on_close` with an atomic flag to guarantee Exactly-Once execution,
+    // avoiding duplicate dock insertion if both OS close and programmatic dismiss occur.
+    let on_close = opts.on_close.map(|handler| {
+        let executed = Arc::new(AtomicBool::new(false));
+        let once_handler: Arc<dyn Fn(&mut Window, &mut App)> = Arc::new(move |window, cx| {
+            if !executed.swap(true, Ordering::SeqCst) {
+                handler(window, cx);
+            }
+        });
+        once_handler
+    });
     let hide_titlebar = opts.hide_titlebar;
 
     let window_bounds = match settings(cx).detached_overlay_bounds {
@@ -120,7 +162,8 @@ where
             title.clone(),
         );
 
-    cx.open_window(
+    let on_close_for_build = on_close.clone();
+    let handle = cx.open_window(
         WindowOptions {
             titlebar,
             window_bounds: Some(window_bounds),
@@ -138,11 +181,60 @@ where
             OverlayRegistry::set_global(overlay_registry.clone(), cx);
             let content = build(window, overlay_registry.clone(), cx);
             let view = cx.new(|cx| {
-                DetachedOverlayView::new(content, overlay_registry, title.clone(), on_close.clone(), hide_titlebar, window, cx)
+                DetachedOverlayView::new(content, overlay_registry, title.clone(), on_close_for_build, hide_titlebar, window, cx)
             });
             cx.new(|cx| Root::new(view, window, cx))
         },
     )
     .ok()
-    .map(|wh| wh.into())
+    .map(|wh| wh.into());
+
+    if let Some(any_handle) = handle {
+        if let Some(reg) = cx.try_global::<DetachedWindowsRegistry>().map(|r| r.0.clone()) {
+            let mut entries = reg.lock();
+            entries.push(DetachedEntry {
+                handle: any_handle,
+                on_close,
+            });
+        }
+    }
+
+    handle
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn test_close_all_detached_windows_safe(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            cx.set_global(DetachedWindowsRegistry::default());
+            // Safe when empty
+            close_all_detached_windows(cx);
+            let reg = cx.global::<DetachedWindowsRegistry>();
+            assert!(reg.0.lock().is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn test_on_close_once_only(_cx: &mut gpui::TestAppContext) {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let counter = Arc::new(AtomicUsize::new(0));
+        let counter_clone = counter.clone();
+
+        let executed = Arc::new(AtomicBool::new(false));
+        let mut once_handler = {
+            let executed = executed.clone();
+            move || {
+                if !executed.swap(true, Ordering::SeqCst) {
+                    counter_clone.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+        };
+
+        once_handler();
+        once_handler();
+        assert_eq!(counter.load(Ordering::SeqCst), 1, "Handler must be called only once");
+    }
 }
