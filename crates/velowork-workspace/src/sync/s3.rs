@@ -145,13 +145,19 @@ impl S3Sync {
         match results {
             Ok(_) => Ok(()),
             Err(e) => {
+                log::error!(
+                    "[s3] 测试连接失败 | bucket={} endpoint={} | 原始错误: {:?}",
+                    self.config.bucket,
+                    self.config.endpoint,
+                    e
+                );
                 let err_msg = e.to_string();
                 if err_msg.contains("NoSuchBucket") || err_msg.contains("404") {
                     bail!("存储桶不存在，请先在云服务商或 MinIO 控制台创建存储桶 '{}'", self.config.bucket);
                 } else if err_msg.contains("InvalidAccessKeyId") || err_msg.contains("SignatureDoesNotMatch") || err_msg.contains("403") {
                     bail!("S3 认证失败，请检查 Access Key ID 与 Secret Access Key 是否正确");
                 } else {
-                    bail!("连接 S3 失败：{err_msg}");
+                    bail!("{err_msg}");
                 }
             }
         }

@@ -125,9 +125,11 @@ pub struct SettingsPanel {
     pub(super) sync_provider_select: Entity<SelectState<Option<SyncProvider>>>,
     /// 提供商测试连接结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
     pub(super) sync_test_result: Option<Result<String, String>>,
+    pub(super) sync_test_detail: Option<String>,
     pub(super) sync_test_in_progress: bool,
     /// 立即同步结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
     pub(super) sync_result: Option<Result<String, String>>,
+    pub(super) sync_detail: Option<String>,
     pub(super) sync_in_progress: bool,
     /// 从云端恢复结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
     pub(super) restore_result: Option<Result<String, String>>,
@@ -1350,8 +1352,10 @@ impl SettingsPanel {
             sync_s3_prefix_input,
             sync_provider_select,
             sync_test_result: None,
+            sync_test_detail: None,
             sync_test_in_progress: false,
             sync_result: None,
+            sync_detail: None,
             sync_in_progress: false,
             restore_result: None,
             restore_in_progress: false,

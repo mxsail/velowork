@@ -15,7 +15,7 @@ use velowork_ui::tooltip::{format_soft_break_text, Tooltip};
 use crate::workspace::persistence;
 use crate::workspace::settings::{SyncProvider, SyncSettings};
 use crate::workspace::state::GlobalWorkspace;
-use crate::workspace::sync::{create_sync_provider, SyncProvider as _};
+use crate::workspace::sync::{create_sync_provider, simplify_sync_error, SyncProvider as _};
 use velowork_workspace::stores::{GlobalFocusStore, GlobalSessionStore};
 use velowork_state::WindowId;
 use gpui::*;
@@ -322,9 +322,21 @@ impl SettingsPanel {
                                                 ),
                                                 Some(Err(msg)) => {
                                                     let raw_msg = msg.clone();
-                                                    let copy_msg = msg.clone();
+                                                    let detail_msg = self.sync_test_detail.clone().unwrap_or_default();
                                                     let copy_tip = i18n!(cx, "settings.sync.test_connection_copy_tooltip");
                                                     let copied_toast = i18n!(cx, "settings.sync.test_connection_copied");
+
+                                                    let tooltip_text = if detail_msg.is_empty() || detail_msg == raw_msg {
+                                                        format!("{}\n({})", raw_msg, copy_tip)
+                                                    } else {
+                                                        format!("{}\n详细原因: {}\n({})", raw_msg, detail_msg, copy_tip)
+                                                    };
+                                                    let copy_content = if detail_msg.is_empty() {
+                                                        raw_msg
+                                                    } else {
+                                                        format!("{}\n详细错误: {}", raw_msg, detail_msg)
+                                                    };
+
                                                     Some(
                                                         div()
                                                             .id("sync-test-result-error")
@@ -333,10 +345,10 @@ impl SettingsPanel {
                                                             .text_color(rgb(t.error))
                                                             .cursor_pointer()
                                                             .tooltip(move |_, cx| {
-                                                                cx.new(|_| Tooltip::new(format!("{}\n({})", raw_msg, copy_tip))).into()
+                                                                cx.new(|_| Tooltip::new(tooltip_text.clone())).into()
                                                             })
                                                             .on_click(cx.listener(move |_, _, _, cx| {
-                                                                cx.write_to_clipboard(ClipboardItem::new_string(copy_msg.clone()));
+                                                                cx.write_to_clipboard(ClipboardItem::new_string(copy_content.clone()));
                                                                 ToastManager::post(Toast::info(copied_toast.clone()), cx);
                                                             }))
                                                             .child(format_soft_break_text(msg)),
@@ -648,9 +660,21 @@ impl SettingsPanel {
                                                 ),
                                                 Some(Err(msg)) => {
                                                     let raw_msg = msg.clone();
-                                                    let copy_msg = msg.clone();
+                                                    let detail_msg = self.sync_detail.clone().unwrap_or_default();
                                                     let copy_tip = i18n!(cx, "settings.sync.test_connection_copy_tooltip");
                                                     let copied_toast = i18n!(cx, "settings.sync.test_connection_copied");
+
+                                                    let tooltip_text = if detail_msg.is_empty() || detail_msg == raw_msg {
+                                                        format!("{}\n({})", raw_msg, copy_tip)
+                                                    } else {
+                                                        format!("{}\n详细原因: {}\n({})", raw_msg, detail_msg, copy_tip)
+                                                    };
+                                                    let copy_content = if detail_msg.is_empty() {
+                                                        raw_msg
+                                                    } else {
+                                                        format!("{}\n详细错误: {}", raw_msg, detail_msg)
+                                                    };
+
                                                     Some(
                                                         div()
                                                             .id("sync-result-error")
@@ -659,10 +683,10 @@ impl SettingsPanel {
                                                             .text_color(rgb(t.error))
                                                             .cursor_pointer()
                                                             .tooltip(move |_, cx| {
-                                                                cx.new(|_| Tooltip::new(format!("{}\n({})", raw_msg, copy_tip))).into()
+                                                                cx.new(|_| Tooltip::new(tooltip_text.clone())).into()
                                                             })
                                                             .on_click(cx.listener(move |_, _, _, cx| {
-                                                                cx.write_to_clipboard(ClipboardItem::new_string(copy_msg.clone()));
+                                                                cx.write_to_clipboard(ClipboardItem::new_string(copy_content.clone()));
                                                                 ToastManager::post(Toast::info(copied_toast.clone()), cx);
                                                             }))
                                                             .child(format_soft_break_text(msg)),
@@ -928,10 +952,13 @@ impl SettingsPanel {
         let provider = match create_sync_provider(&sync, secret.as_deref()) {
             Ok(p) => p,
             Err(e) => {
-                let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), e);
-                log::error!("[sync] 创建同步客户端失败: {:#}", e);
+                let detail = format!("{:#}", e);
+                log::error!("[sync] 创建同步客户端失败: {}", detail);
+                let simple_reason = simplify_sync_error(&detail);
+                let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), simple_reason);
                 ToastManager::error(err_msg.clone(), cx);
                 self.sync_test_result = Some(Err(err_msg));
+                self.sync_test_detail = Some(detail);
                 cx.notify();
                 return;
             }
@@ -939,6 +966,7 @@ impl SettingsPanel {
 
         self.sync_test_in_progress = true;
         self.sync_test_result = None;
+        self.sync_test_detail = None;
         cx.notify();
 
         log::info!("[sync] 开始测试连接 | provider={:?}", sync.provider);
@@ -980,12 +1008,16 @@ impl SettingsPanel {
                         let success_msg = i18n!(cx, "settings.sync.test_connection_success");
                         ToastManager::info(success_msg.clone(), cx);
                         this.sync_test_result = Some(Ok(success_msg));
+                        this.sync_test_detail = None;
                     }
                     Err(e) => {
-                        let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), e);
-                        log::error!("[sync] 同步连接测试失败 | provider={:?} | 错误: {:#}", provider_kind, e);
+                        let detailed_err = format!("{:#}", e);
+                        log::error!("[sync] 同步连接测试失败 | provider={:?} | 详细原因: {}", provider_kind, detailed_err);
+                        let simple_reason = simplify_sync_error(&detailed_err);
+                        let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), simple_reason);
                         ToastManager::error(err_msg.clone(), cx);
                         this.sync_test_result = Some(Err(err_msg));
+                        this.sync_test_detail = Some(detailed_err);
                     }
                 }
                 cx.notify();
@@ -1071,10 +1103,13 @@ impl SettingsPanel {
         let ctx = match crate::sync_engine::build_sync_context(&sync, if secret.is_empty() { None } else { Some(&secret) }) {
             Ok(c) => c,
             Err(e) => {
-                let err_msg = format!("构建同步失败: {e}");
-                log::error!("[sync] 构建同步上下文失败: {:#}", e);
+                let detail = format!("{:#}", e);
+                log::error!("[sync] 构建同步上下文失败: {}", detail);
+                let simple_reason = simplify_sync_error(&detail);
+                let err_msg = format!("构建同步失败: {simple_reason}");
                 ToastManager::error(err_msg.clone(), cx);
                 self.sync_result = Some(Err(err_msg));
+                self.sync_detail = Some(detail);
                 cx.notify();
                 return;
             }
@@ -1082,6 +1117,7 @@ impl SettingsPanel {
 
         self.sync_in_progress = true;
         self.sync_result = None;
+        self.sync_detail = None;
         cx.notify();
 
         log::info!("[sync] 开始立即同步 | provider={:?}", provider_kind);
@@ -1161,12 +1197,16 @@ impl SettingsPanel {
                                 log::info!("[sync] 立即同步成功: {}", msg);
                                 ToastManager::info(msg.clone(), cx);
                                 this.sync_result = Some(Ok(msg));
+                                this.sync_detail = None;
                             }
                             Err(e) => {
-                                let err_msg = format!("同步失败: {e}");
-                                log::error!("[sync] 立即同步失败: {:#}", e);
+                                let detailed_err = format!("{:#}", e);
+                                log::error!("[sync] 立即同步失败: {}", detailed_err);
+                                let simple_reason = simplify_sync_error(&detailed_err);
+                                let err_msg = format!("同步失败: {simple_reason}");
                                 ToastManager::error(err_msg.clone(), cx);
                                 this.sync_result = Some(Err(err_msg));
+                                this.sync_detail = Some(detailed_err);
                             }
                         }
                         cx.notify();
@@ -1225,9 +1265,11 @@ pub fn force_push_to_cloud(cx: &App) {
                     );
                 }
                 Err(e) => {
-                    log::error!("[sync] 强制覆盖云端失败: {:#}", e);
+                    let detailed_err = format!("{:#}", e);
+                    log::error!("[sync] 强制覆盖云端失败: {}", detailed_err);
+                    let simple_reason = simplify_sync_error(&detailed_err);
                     ToastManager::error(
-                        format!("{}: {}", i18n!(cx, "settings.sync.force_push_failed"), e),
+                        format!("{}: {}", i18n!(cx, "settings.sync.force_push_failed"), simple_reason),
                         cx,
                     );
                 }
@@ -1253,8 +1295,10 @@ pub fn restore_from_cloud(cx: &App) {
     let ctx = match crate::sync_engine::build_sync_context(&sync, None) {
         Ok(c) => c,
         Err(e) => {
-            log::error!("[sync] 构建云端恢复上下文失败: {:#}", e);
-            ToastManager::error(format!("构建恢复失败: {e}"), cx);
+            let detailed_err = format!("{:#}", e);
+            log::error!("[sync] 构建云端恢复上下文失败: {}", detailed_err);
+            let simple_reason = simplify_sync_error(&detailed_err);
+            ToastManager::error(format!("构建恢复失败: {simple_reason}"), cx);
             return;
         }
     };
@@ -1294,9 +1338,11 @@ pub fn restore_from_cloud(cx: &App) {
                     );
                 }
                 Err(e) => {
-                    log::error!("[sync] 从云端恢复失败: {:#}", e);
+                    let detailed_err = format!("{:#}", e);
+                    log::error!("[sync] 从云端恢复失败: {}", detailed_err);
+                    let simple_reason = simplify_sync_error(&detailed_err);
                     ToastManager::error(
-                        format!("{}: {}", i18n!(cx, "settings.sync.restore_failed"), e),
+                        format!("{}: {}", i18n!(cx, "settings.sync.restore_failed"), simple_reason),
                         cx,
                     );
                 }
