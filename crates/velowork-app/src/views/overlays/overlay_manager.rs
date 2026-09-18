@@ -719,6 +719,20 @@ impl OverlayManager {
         }
     }
 
+    /// Check if the active modal is a ConfirmDialog (e.g. quit confirmation).
+    pub fn is_confirm_dialog_active(&self) -> bool {
+        self.is_modal::<velowork_ui::confirm_dialog::ConfirmDialog>()
+    }
+
+    /// Get the active ConfirmDialog modal for rendering on top of the lock screen if one is active.
+    pub fn render_confirm_dialog_modal(&self) -> Option<AnyView> {
+        if self.is_confirm_dialog_active() {
+            self.render_modal()
+        } else {
+            None
+        }
+    }
+
     // ========================================================================
     // Centralized overlay registry (window-level click-outside dismissal)
     // ========================================================================
@@ -791,10 +805,28 @@ impl OverlayManager {
     /// part of `OverlayRegistry`, so it is unaffected. The underlying editor
     /// state (e.g. the lock-screen-settings edit dialog) is preserved because
     /// it lives in the main window subtree, not in a floating surface.
+    /// Close all detached standalone OS windows (e.g. settings panel, log console).
+    /// Safely cleans up window handles and associated entities to prevent credential leakage on lock.
+    pub fn close_detached_windows(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.settings_window_handle.take() {
+            let _ = handle.update(cx, |_, window, _| {
+                window.remove_window();
+            });
+            self.settings_panel_entity = None;
+        }
+        if let Some(handle) = self.log_console_window_handle.take() {
+            let _ = handle.update(cx, |_, window, _| {
+                window.remove_window();
+            });
+            self.log_console_entity = None;
+        }
+    }
+
     pub fn close_all_overlays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Do NOT close active modal: the user's edit state (e.g. TunnelDialog, Settings)
         // is preserved under the lock screen and restored upon unlock.
         self.close_all_context_menus();
+        self.close_detached_windows(cx);
 
         // Dismiss every floating surface registered in the global registry
         // (select dropdowns, popovers, ...).
@@ -3334,3 +3366,31 @@ fn tunnel_nodes_snapshot(cx: &App) -> Vec<TunnelNode> {
 }
 
 impl EventEmitter<OverlayManagerEvent> for OverlayManager {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[gpui::test]
+    fn test_close_detached_windows_idempotent(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            velowork_workspace::init_settings(cx);
+            let ws = cx.new(|cx| crate::workspace::state::Workspace::new(cx));
+            let om = cx.new(|cx| OverlayManager::new(ws, 1, cx));
+
+            om.update(cx, |this, cx| {
+                assert!(this.settings_window_handle.is_none());
+                assert!(this.log_console_window_handle.is_none());
+
+                // Closing when already None is a safe no-op
+                this.close_detached_windows(cx);
+                assert!(this.settings_window_handle.is_none());
+                assert!(this.log_console_window_handle.is_none());
+
+                // Confirm dialog check is false when no modal is active
+                assert!(!this.is_confirm_dialog_active());
+                assert!(this.render_confirm_dialog_modal().is_none());
+            });
+        });
+    }
+}

@@ -689,6 +689,11 @@ impl Velowork {
             w.set_locked(true, cx);
             w.close_all_overlays(window, cx);
         });
+        for extra in self.extra_windows.values() {
+            extra.update(cx, |w, cx| {
+                w.set_locked(true, cx);
+            });
+        }
         if self.lock_screen.is_none() {
             let ls = cx.new(|cx| crate::views::overlays::lock_screen::LockScreen::new(cx));
             // Subscribe to the new lock screen's unlock event
@@ -709,6 +714,11 @@ impl Velowork {
         self.last_activity = std::time::Instant::now();
         self.main_window
             .update(cx, |w, cx| w.set_locked(false, cx));
+        for extra in self.extra_windows.values() {
+            extra.update(cx, |w, cx| {
+                w.set_locked(false, cx);
+            });
+        }
         cx.notify();
     }
 
@@ -779,24 +789,30 @@ impl Render for Velowork {
                     overlay_div = overlay_div.rounded_bl(radius).rounded_br(radius);
                 }
 
-                let modals = self.main_window.read(cx).overlay_manager.read(cx).render_modals();
+                // If a system ConfirmDialog is active while locked (e.g. user requested quit with active sessions),
+                // render ONLY that confirm dialog on top of the lock screen so the user can confirm exit.
+                // Sensitive business modals remain shielded beneath the lock screen.
+                let confirm_modal = self.main_window.read(cx).overlay_manager.read(cx).render_confirm_dialog_modal();
 
-                div()
+                let mut root_div = div()
                     .size_full()
                     .child(self.main_window.clone())
-                    .child(overlay_div.child(ls))
-                    .children(modals.into_iter().map(|modal| {
-                        let mut modal_div = div()
-                            .absolute()
-                            .top(titlebar_offset)
-                            .bottom_0()
-                            .left_0()
-                            .right_0();
-                        if has_rounded_corners {
-                            modal_div = modal_div.rounded_bl(radius).rounded_br(radius).overflow_hidden();
-                        }
-                        modal_div.child(modal)
-                    }))
+                    .child(overlay_div.child(ls));
+
+                if let Some(modal) = confirm_modal {
+                    let mut modal_div = div()
+                        .absolute()
+                        .top(titlebar_offset)
+                        .bottom_0()
+                        .left_0()
+                        .right_0();
+                    if has_rounded_corners {
+                        modal_div = modal_div.rounded_bl(radius).rounded_br(radius).overflow_hidden();
+                    }
+                    root_div = root_div.child(modal_div.child(modal));
+                }
+
+                root_div
             } else {
                 div().size_full().child(self.main_window.clone())
             }
