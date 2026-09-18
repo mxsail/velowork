@@ -34,9 +34,10 @@ use crate::workspace::settings::TextAntialiasingMode;
 use crate::workspace::state::Workspace;
 use gpui::prelude::*;
 use gpui::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::time::Instant;
 use velowork_extensions::ExtensionRegistry;
 use velowork_i18n::i18n;
 use velowork_ui::focusable::FocusSurfaceExt;
@@ -222,8 +223,9 @@ pub struct SettingsPanel {
     pub(super) pending_scroll_focus_handle: Option<FocusHandle>,
 }
 
-/// 为设置面板输入框绑定防抖 (300ms) + 失焦 (Blur) + 回车 (PressEnter) 提交逻辑。
-/// 彻底阻断打字期间频繁触发全局 settings_entity.update 导致的整窗与主应用级连锁重绘。
+/// 为设置面板输入框绑定时间戳精确单任务防抖 (300ms) + 失焦 (Blur) + 回车 (PressEnter) 提交逻辑。
+/// 彻底阻断长按按键连续输入/退格引发的 Task 调度和堆内存分配风暴，实现零延迟原生手感。
+#[allow(clippy::type_complexity)]
 fn bind_debounced_input<T: 'static, F>(
     input: &Entity<InputState>,
     cx: &mut Context<T>,
@@ -233,32 +235,66 @@ fn bind_debounced_input<T: 'static, F>(
     F: Fn(&str, &mut T, &mut Context<T>) + 'static,
 {
     let on_commit = Rc::new(on_commit);
-    let debounce_task: Rc<RefCell<Option<Task<()>>>> = Rc::new(RefCell::new(None));
-    let dt_clone = debounce_task.clone();
+    let last_change_time = Rc::new(Cell::new(Instant::now()));
+    let is_timer_running = Rc::new(Cell::new(false));
+    let last_committed_val = Rc::new(RefCell::new(None::<String>));
+
+    let time_clone = last_change_time.clone();
+    let timer_clone = is_timer_running.clone();
+    let committed_clone = last_committed_val.clone();
+    let input_entity = input.clone();
 
     cx.subscribe(input, move |this, entity, event: &InputEvent, cx| match event {
         InputEvent::Change => {
             if let Some(extra) = on_change_extra.as_ref() {
                 extra(this, cx);
             }
-            let val = entity.read(cx).text().to_string();
-            let dt = dt_clone.clone();
-            let commit = on_commit.clone();
-            let task = cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(std::time::Duration::from_millis(300))
-                    .await;
-                this.update(cx, |this, cx| {
-                    dt.borrow_mut().take();
-                    commit(&val, this, cx);
+            // 每次击键仅刷新纳秒级时间戳，零堆内存分配，零 Task 创建与销毁！
+            time_clone.set(Instant::now());
+
+            if !timer_clone.get() {
+                timer_clone.set(true);
+                let last_time = time_clone.clone();
+                let is_running = timer_clone.clone();
+                let last_commit = committed_clone.clone();
+                let commit = on_commit.clone();
+                let input_weak = input_entity.downgrade();
+
+                cx.spawn(async move |this, cx| {
+                    loop {
+                        let elapsed = last_time.get().elapsed();
+                        if elapsed < std::time::Duration::from_millis(300) {
+                            let remain = std::time::Duration::from_millis(300) - elapsed;
+                            cx.background_executor().timer(remain).await;
+                        }
+
+                        if !is_running.get() {
+                            break;
+                        }
+
+                        if last_time.get().elapsed() >= std::time::Duration::from_millis(300) {
+                            is_running.set(false);
+                            let _ = this.update(cx, |this, cx| {
+                                if let Some(input) = input_weak.upgrade() {
+                                    let val = input.read(cx).text().to_string();
+                                    *last_commit.borrow_mut() = Some(val.clone());
+                                    commit(&val, this, cx);
+                                }
+                            });
+                            break;
+                        }
+                    }
                 })
-                .ok();
-            });
-            *dt_clone.borrow_mut() = Some(task);
+                .detach();
+            }
         }
         InputEvent::Blur | InputEvent::PressEnter => {
-            if dt_clone.borrow_mut().take().is_some() {
-                let val = entity.read(cx).text().to_string();
+            let val = entity.read(cx).text().to_string();
+            let need_commit = timer_clone.get()
+                || committed_clone.borrow().as_deref() != Some(&val);
+            if need_commit {
+                timer_clone.set(false);
+                *committed_clone.borrow_mut() = Some(val.clone());
                 on_commit(&val, this, cx);
             }
         }
@@ -727,45 +763,68 @@ impl SettingsPanel {
         let nav_search_input =
             cx.new(|cx| InputState::new(cx).placeholder(i18n!(cx, "settings.search_placeholder")));
         let ns_entity = nav_search_input.clone();
-        let search_debounce_task: Rc<RefCell<Option<Task<()>>>> = Rc::new(RefCell::new(None));
-        let sdt_clone = search_debounce_task.clone();
+        let search_last_change = Rc::new(Cell::new(Instant::now()));
+        let search_timer_running = Rc::new(Cell::new(false));
+        let slc_clone = search_last_change.clone();
+        let str_clone = search_timer_running.clone();
+
         cx.subscribe(
             &nav_search_input,
-            move |this, _entity, event: &InputEvent, cx| {
+            move |_this, _entity, event: &InputEvent, cx| {
                 if !matches!(event, InputEvent::Change) {
                     return;
                 }
-                let q = ns_entity.read(cx).text().to_string();
-                this.nav_search = q.clone();
-                let ql = q.to_lowercase();
-                let sdt = sdt_clone.clone();
-                let task = cx.spawn(async move |this, cx| {
-                    cx.background_executor()
-                        .timer(std::time::Duration::from_millis(150))
-                        .await;
-                    this.update(cx, |this, cx| {
-                        sdt.borrow_mut().take();
-                        if !ql.is_empty() {
-                            let cats = this.ordered_categories(cx);
-                            let mut first_matched = None;
-                            for cat in cats.iter() {
-                                if cat.matches_search(&ql, cx) {
-                                    this.expanded_categories.insert(cat.clone());
-                                    if first_matched.is_none() {
-                                        first_matched = Some(cat.clone());
-                                    }
-                                }
+                slc_clone.set(Instant::now());
+                if !str_clone.get() {
+                    str_clone.set(true);
+                    let last_time = slc_clone.clone();
+                    let is_running = str_clone.clone();
+                    let ns_weak = ns_entity.downgrade();
+
+                    cx.spawn(async move |this, cx| {
+                        loop {
+                            let elapsed = last_time.get().elapsed();
+                            if elapsed < std::time::Duration::from_millis(150) {
+                                let remain = std::time::Duration::from_millis(150) - elapsed;
+                                cx.background_executor().timer(remain).await;
                             }
-                            if let Some(target) = first_matched {
-                                this.active_category = target.clone();
-                                *this.pending_scroll.borrow_mut() = Some(target);
+
+                            if !is_running.get() {
+                                break;
+                            }
+
+                            if last_time.get().elapsed() >= std::time::Duration::from_millis(150) {
+                                is_running.set(false);
+                                let _ = this.update(cx, |this, cx| {
+                                    if let Some(ns) = ns_weak.upgrade() {
+                                        let q = ns.read(cx).text().to_string();
+                                        this.nav_search = q.clone();
+                                        let ql = q.to_lowercase();
+                                        if !ql.is_empty() {
+                                            let cats = this.ordered_categories(cx);
+                                            let mut first_matched = None;
+                                            for cat in cats.iter() {
+                                                if cat.matches_search(&ql, cx) {
+                                                    this.expanded_categories.insert(cat.clone());
+                                                    if first_matched.is_none() {
+                                                        first_matched = Some(cat.clone());
+                                                    }
+                                                }
+                                            }
+                                            if let Some(target) = first_matched {
+                                                this.active_category = target.clone();
+                                                *this.pending_scroll.borrow_mut() = Some(target);
+                                            }
+                                        }
+                                        cx.notify();
+                                    }
+                                });
+                                break;
                             }
                         }
-                        cx.notify();
                     })
-                    .ok();
-                });
-                *sdt_clone.borrow_mut() = Some(task);
+                    .detach();
+                }
             },
         )
         .detach();

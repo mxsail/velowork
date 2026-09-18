@@ -85,7 +85,11 @@ pub struct SimpleInputState {
     selection: Option<Range<usize>>, // UTF-8 byte range
     selection_reversed: bool,
     cursor_visible: bool,
+    is_focused: bool,
+    last_keystroke_time: Instant,
+    blink_epoch: usize,
     _blink_task: Option<Task<()>>,
+    _focus_subs: Option<(Subscription, Subscription)>,
     icon: Option<AppIcon>,
     highlight_vars: bool,
     syntax_language: Option<String>,
@@ -148,25 +152,6 @@ impl SimpleInputState {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
 
-        // Start cursor blink task
-        let blink_task = cx.spawn(async move |this: WeakEntity<SimpleInputState>, cx| {
-            loop {
-                smol::Timer::after(Duration::from_millis(530)).await;
-                let done = this
-                    .update(&mut *cx, |state, cx| {
-                        if state.read_only {
-                            return;
-                        }
-                        state.cursor_visible = !state.cursor_visible;
-                        cx.notify();
-                    })
-                    .is_err();
-                if done {
-                    break;
-                }
-            }
-        });
-
         Self {
             focus_handle,
             value: String::new(),
@@ -174,8 +159,12 @@ impl SimpleInputState {
             cursor_position: 0,
             selection: None,
             selection_reversed: false,
-            cursor_visible: true,
-            _blink_task: Some(blink_task),
+            cursor_visible: false,
+            is_focused: false,
+            last_keystroke_time: Instant::now(),
+            blink_epoch: 0,
+            _blink_task: None,
+            _focus_subs: None,
             icon: None,
             highlight_vars: false,
             syntax_language: None,
@@ -613,6 +602,66 @@ impl SimpleInputState {
         window.focus(&self.focus_handle, cx);
     }
 
+    pub fn on_focus(&mut self, cx: &mut Context<Self>) {
+        if self.is_focused {
+            return;
+        }
+        self.is_focused = true;
+        self.cursor_visible = true;
+        self.last_keystroke_time = Instant::now();
+        self.start_blink_task(cx);
+        cx.emit(InputEvent::Focus);
+        cx.notify();
+    }
+
+    pub fn on_blur(&mut self, cx: &mut Context<Self>) {
+        if !self.is_focused {
+            return;
+        }
+        self.is_focused = false;
+        self.cursor_visible = false;
+        self._blink_task = None;
+        cx.emit(InputEvent::Blur);
+        cx.notify();
+    }
+
+    pub fn start_blink_task(&mut self, cx: &mut Context<Self>) {
+        if self.read_only || !self.is_focused {
+            return;
+        }
+        self.blink_epoch = self.blink_epoch.wrapping_add(1);
+        let epoch = self.blink_epoch;
+        self.cursor_visible = true;
+
+        self._blink_task = Some(cx.spawn(async move |this: WeakEntity<SimpleInputState>, cx| {
+            loop {
+                smol::Timer::after(Duration::from_millis(530)).await;
+                let done = this
+                    .update(&mut *cx, |state, cx| {
+                        if state.blink_epoch != epoch || !state.is_focused || state.read_only {
+                            state._blink_task = None;
+                            return true; // 终止任务循环
+                        }
+                        // 打字常亮保护：若最近 500ms 内有按键输入（如用户正在高频长按连续输入），保持光标常亮且不触发多余重绘
+                        if state.last_keystroke_time.elapsed() < Duration::from_millis(500) {
+                            if !state.cursor_visible {
+                                state.cursor_visible = true;
+                                cx.notify();
+                            }
+                            return false;
+                        }
+                        state.cursor_visible = !state.cursor_visible;
+                        cx.notify();
+                        false
+                    });
+                match done {
+                    Ok(true) | Err(_) => break,
+                    _ => {}
+                }
+            }
+        }));
+    }
+
     pub fn select_all(&mut self, cx: &mut Context<Self>) {
         if !self.value.is_empty() {
             self.selection = Some(0..self.value.len());
@@ -624,6 +673,7 @@ impl SimpleInputState {
 
     fn reset_cursor_blink(&mut self) {
         self.cursor_visible = true;
+        self.last_keystroke_time = Instant::now();
         // Any edit or cursor movement re-enables auto-follow so freshly typed
         // content scrolls back into view even if the user had scrolled away.
         self.follow_cursor = true;
@@ -2251,14 +2301,21 @@ impl Element for TextInputElement {
             } else {
                 None
             };
-            let lines_str: Vec<&str> = display_value.split('\n').collect();
+            let single_line_slice = [display_value.as_str()];
+            let multi_line_storage;
+            let lines_str: &[&str] = if multiline {
+                multi_line_storage = display_value.split('\n').collect::<Vec<&str>>();
+                &multi_line_storage
+            } else {
+                &single_line_slice
+            };
             let mut line_start_byte = 0;
 
-            for line_str in lines_str.iter() {
+            for &line_str in lines_str {
                 let display_str: &str = if line_str.is_empty() {
                     "\u{200B}"
                 } else {
-                    *line_str
+                    line_str
                 };
 
                 let runs = build_runs(
@@ -2684,6 +2741,29 @@ impl Element for TextInputElement {
 
 impl Render for SimpleInputState {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self._focus_subs.is_none() {
+            let fh = self.focus_handle.clone();
+            let in_sub = cx.on_focus_in(&fh, window, |this, _window, cx| {
+                this.on_focus(cx);
+            });
+            let blur_sub = cx.on_blur(&fh, window, |this, _window, cx| {
+                this.on_blur(cx);
+            });
+            self._focus_subs = Some((in_sub, blur_sub));
+        }
+
+        // 权威焦点状态核实（零副作用：不调 cx.notify()，仅静默同步字段与调度任务）
+        let currently_focused = self.focus_handle.is_focused(window);
+        if currently_focused != self.is_focused {
+            self.is_focused = currently_focused;
+            if currently_focused && !self.read_only {
+                self.start_blink_task(cx);
+            } else {
+                self.cursor_visible = false;
+                self._blink_task = None;
+            }
+        }
+
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         let focus_handle = self.focus_handle.clone();
