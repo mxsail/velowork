@@ -60,6 +60,17 @@ use velowork_workspace::settings::{ColorSchema, ColorTheme, CustomTitlebarPreset
 
 // ============================================================================
 
+/// 同步连接测试状态机
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(super) enum SyncTestStatus {
+    #[default]
+    Idle,
+    Testing,
+    Success(String),
+    Failed(String),
+    Cancelled,
+}
+
 /// Settings panel overlay for configuring app settings
 pub struct SettingsPanel {
     pub(super) _workspace: Entity<Workspace>,
@@ -123,10 +134,11 @@ pub struct SettingsPanel {
     pub(super) sync_s3_secret_key_input: Entity<InputState>,
     pub(super) sync_s3_prefix_input: Entity<InputState>,
     pub(super) sync_provider_select: Entity<SelectState<Option<SyncProvider>>>,
-    /// 提供商测试连接结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
-    pub(super) sync_test_result: Option<Result<String, String>>,
+    /// 提供商测试连接状态
+    pub(super) sync_test_status: SyncTestStatus,
     pub(super) sync_test_detail: Option<String>,
-    pub(super) sync_test_in_progress: bool,
+    pub(super) sync_test_abort_handle: Option<tokio::task::AbortHandle>,
+    pub(super) sync_test_task: Option<gpui::Task<()>>,
     /// 立即同步结果：None = 空闲，Some(Ok(msg)) = 成功，Some(Err(msg)) = 失败
     pub(super) sync_result: Option<Result<String, String>>,
     pub(super) sync_detail: Option<String>,
@@ -491,8 +503,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_webdav_server_url(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -512,8 +523,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_webdav_username(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -550,8 +560,7 @@ impl SettingsPanel {
                         Err(e) => log::warn!("[webdav] 保存 WebDAV 密码失败: {}", e),
                     }
                 }
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -571,8 +580,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_webdav_remote_path(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -593,8 +601,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_s3_endpoint(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -614,8 +621,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_s3_bucket(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -635,8 +641,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_s3_region(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -656,8 +661,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_s3_access_key_id(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -692,8 +696,7 @@ impl SettingsPanel {
                         Err(e) => log::warn!("[s3] 保存 S3 Secret Key 失败: {}", e),
                     }
                 }
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -713,8 +716,7 @@ impl SettingsPanel {
                 }
                 let val = entity.read(cx).text().to_string();
                 settings_entity(cx).update(cx, |state, cx| state.set_s3_prefix(val, cx));
-                this.sync_test_result = None;
-                cx.notify();
+                this.reset_sync_test(cx);
             },
         )
         .detach();
@@ -1351,9 +1353,10 @@ impl SettingsPanel {
             sync_s3_secret_key_input,
             sync_s3_prefix_input,
             sync_provider_select,
-            sync_test_result: None,
+            sync_test_status: SyncTestStatus::Idle,
             sync_test_detail: None,
-            sync_test_in_progress: false,
+            sync_test_abort_handle: None,
+            sync_test_task: None,
             sync_result: None,
             sync_detail: None,
             sync_in_progress: false,
@@ -2791,3 +2794,12 @@ impl Focusable for SettingsPanel {
         }
     }
 }
+
+impl Drop for SettingsPanel {
+    fn drop(&mut self) {
+        if let Some(handle) = self.sync_test_abort_handle.take() {
+            handle.abort();
+        }
+    }
+}
+

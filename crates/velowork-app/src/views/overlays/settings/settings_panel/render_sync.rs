@@ -23,7 +23,7 @@ use gpui::prelude::*;
 use velowork_i18n::i18n;
 use velowork_workspace::toast::{Toast, ToastAction, ToastActionStyle, ToastManager};
 
-use super::SettingsPanel;
+use super::{SettingsPanel, SyncTestStatus};
 
 impl SettingsPanel {
     pub(super) fn render_sync(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -45,6 +45,8 @@ impl SettingsPanel {
         let force_push_label = i18n!(cx, "settings.sync.force_push");
         let test_connection_label = i18n!(cx, "settings.sync.test_connection");
         let test_connection_testing_label = i18n!(cx, "settings.sync.test_connection_testing");
+        let cancel_test_label = i18n!(cx, "settings.sync.cancel_test");
+        let test_cancelled_label = i18n!(cx, "settings.sync.test_cancelled");
         let scope_title_label = i18n!(cx, "settings.sync.scope_title");
         let disaster_recovery_label = i18n!(cx, "settings.sync.disaster_recovery");
         let disaster_recovery_desc = i18n!(cx, "settings.sync.disaster_recovery_desc");
@@ -311,8 +313,24 @@ impl SettingsPanel {
                                         .max_h(px(60.0))
                                         .overflow_hidden()
                                         .children(
-                                            match &self.sync_test_result {
-                                                Some(Ok(msg)) => Some(
+                                            match &self.sync_test_status {
+                                                SyncTestStatus::Testing => Some(
+                                                    div()
+                                                        .id("sync-test-result-testing")
+                                                        .whitespace_normal()
+                                                        .text_size(ui_text_sm(cx))
+                                                        .text_color(rgb(t.text_secondary))
+                                                        .child(format_soft_break_text(&test_connection_testing_label)),
+                                                ),
+                                                SyncTestStatus::Cancelled => Some(
+                                                    div()
+                                                        .id("sync-test-result-cancelled")
+                                                        .whitespace_normal()
+                                                        .text_size(ui_text_sm(cx))
+                                                        .text_color(rgb(t.text_secondary))
+                                                        .child(format_soft_break_text(&test_cancelled_label)),
+                                                ),
+                                                SyncTestStatus::Success(msg) => Some(
                                                     div()
                                                         .id("sync-test-result-success")
                                                         .whitespace_normal()
@@ -320,7 +338,7 @@ impl SettingsPanel {
                                                         .text_color(rgb(t.success))
                                                         .child(format_soft_break_text(msg)),
                                                 ),
-                                                Some(Err(msg)) => {
+                                                SyncTestStatus::Failed(msg) => {
                                                     let raw_msg = msg.clone();
                                                     let detail_msg = self.sync_test_detail.clone().unwrap_or_default();
                                                     let copy_tip = i18n!(cx, "settings.sync.test_connection_copy_tooltip");
@@ -354,7 +372,7 @@ impl SettingsPanel {
                                                             .child(format_soft_break_text(msg)),
                                                     )
                                                 }
-                                                None => None,
+                                                SyncTestStatus::Idle => None,
                                             },
                                         ),
                                 )
@@ -362,19 +380,22 @@ impl SettingsPanel {
                                     div()
                                         .flex_shrink_0()
                                         .child({
+                                            let is_testing = self.sync_test_status == SyncTestStatus::Testing;
                                             let test_fh = self.get_or_create_button_focus_handle("sync-test-conn-btn", cx);
                                             Button::new("sync-test-conn-btn", &t)
                                                 .variant(ControlVariant::Secondary)
-                                                .label(if self.sync_test_in_progress {
-                                                    test_connection_testing_label
+                                                .label(if is_testing {
+                                                    cancel_test_label
                                                 } else {
                                                     test_connection_label
                                                 })
-                                                .loading(self.sync_test_in_progress)
-                                                .disabled(self.sync_test_in_progress)
+                                                .loading(false)
+                                                .disabled(false)
                                                 .focus_handle(&test_fh)
                                                 .on_click(cx.listener(|this, _, _window, cx| {
-                                                    if !this.sync_test_in_progress {
+                                                    if this.sync_test_status == SyncTestStatus::Testing {
+                                                        this.cancel_sync_test(cx);
+                                                    } else {
                                                         this.test_sync_connection(cx);
                                                     }
                                                 }))
@@ -938,13 +959,43 @@ impl SettingsPanel {
         }
     }
 
+    /// 终止当前正在进行的同步连接测试
+    pub(super) fn cancel_sync_test(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.sync_test_abort_handle.take() {
+            handle.abort();
+        }
+        self.sync_test_task = None;
+        self.sync_test_status = SyncTestStatus::Cancelled;
+        self.sync_test_detail = None;
+        ToastManager::info(i18n!(cx, "settings.sync.test_cancelled"), cx);
+        log::info!("[sync] 用户主动终止了连接测试");
+        cx.notify();
+    }
+
+    /// 重置同步连接测试状态（例如输入框变更时调用，中断后台任务并恢复闲置状态）
+    pub(super) fn reset_sync_test(&mut self, cx: &mut Context<Self>) {
+        if let Some(handle) = self.sync_test_abort_handle.take() {
+            handle.abort();
+        }
+        self.sync_test_task = None;
+        self.sync_test_status = SyncTestStatus::Idle;
+        self.sync_test_detail = None;
+        cx.notify();
+    }
+
     fn do_test_connection(&mut self, sync: SyncSettings, secret: Option<String>, cx: &mut Context<Self>) {
+        // 先确保清理旧的句柄与任务
+        if let Some(handle) = self.sync_test_abort_handle.take() {
+            handle.abort();
+        }
+        self.sync_test_task = None;
+
         if let Err(err) = sync.validate_configuration() {
             let err_reason = i18n!(cx, err.translation_key());
             let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), err_reason);
             log::warn!("[sync] 测试连接校验失败: {}", err_reason);
             ToastManager::error(err_msg.clone(), cx);
-            self.sync_test_result = Some(Err(err_msg));
+            self.sync_test_status = SyncTestStatus::Failed(err_msg);
             cx.notify();
             return;
         }
@@ -957,30 +1008,36 @@ impl SettingsPanel {
                 let simple_reason = simplify_sync_error(&detail);
                 let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), simple_reason);
                 ToastManager::error(err_msg.clone(), cx);
-                self.sync_test_result = Some(Err(err_msg));
+                self.sync_test_status = SyncTestStatus::Failed(err_msg);
                 self.sync_test_detail = Some(detail);
                 cx.notify();
                 return;
             }
         };
 
-        self.sync_test_in_progress = true;
-        self.sync_test_result = None;
+        self.sync_test_status = SyncTestStatus::Testing;
         self.sync_test_detail = None;
         cx.notify();
 
         log::info!("[sync] 开始测试连接 | provider={:?}", sync.provider);
 
         let provider_kind = sync.provider;
-        cx.spawn(async move |this, cx| {
-            let result = velowork_terminal::pty_manager::get_tokio_runtime()
-                .spawn(async move { provider.test_connection().await })
-                .await
-                .unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)));
+        let tokio_task = velowork_terminal::pty_manager::get_tokio_runtime().spawn(async move {
+            tokio::time::timeout(std::time::Duration::from_secs(30), provider.test_connection()).await
+        });
+        self.sync_test_abort_handle = Some(tokio_task.abort_handle());
+
+        let task = cx.spawn(async move |this, cx| {
+            let join_result = tokio_task.await;
             this.update(cx, |this, cx| {
-                this.sync_test_in_progress = false;
-                match &result {
-                    Ok(_) => {
+                this.sync_test_abort_handle = None;
+                // 锁卫：若用户已主动终止或状态已变迁，不覆盖状态与弹窗
+                if this.sync_test_status != SyncTestStatus::Testing {
+                    return;
+                }
+
+                match join_result {
+                    Ok(Ok(Ok(_))) => {
                         log::info!("[sync] 同步连接测试成功 | provider={:?}", provider_kind);
                         // 连接成功：确保存储凭据已持久化
                         match provider_kind {
@@ -1007,24 +1064,47 @@ impl SettingsPanel {
                         }
                         let success_msg = i18n!(cx, "settings.sync.test_connection_success");
                         ToastManager::info(success_msg.clone(), cx);
-                        this.sync_test_result = Some(Ok(success_msg));
+                        this.sync_test_status = SyncTestStatus::Success(success_msg);
                         this.sync_test_detail = None;
                     }
-                    Err(e) => {
+                    Ok(Ok(Err(e))) => {
                         let detailed_err = format!("{:#}", e);
                         log::error!("[sync] 同步连接测试失败 | provider={:?} | 详细原因: {}", provider_kind, detailed_err);
                         let simple_reason = simplify_sync_error(&detailed_err);
                         let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), simple_reason);
                         ToastManager::error(err_msg.clone(), cx);
-                        this.sync_test_result = Some(Err(err_msg));
+                        this.sync_test_status = SyncTestStatus::Failed(err_msg);
                         this.sync_test_detail = Some(detailed_err);
+                    }
+                    Ok(Err(_elapsed)) => {
+                        let timeout_msg = "连接超时 (30s)";
+                        log::warn!("[sync] 同步连接测试超时 | provider={:?}", provider_kind);
+                        let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), timeout_msg);
+                        ToastManager::error(err_msg.clone(), cx);
+                        this.sync_test_status = SyncTestStatus::Failed(err_msg);
+                        this.sync_test_detail = Some(timeout_msg.to_string());
+                    }
+                    Err(join_err) => {
+                        if join_err.is_cancelled() {
+                            log::info!("[sync] 测试任务已在底层取消");
+                            if this.sync_test_status == SyncTestStatus::Testing {
+                                this.sync_test_status = SyncTestStatus::Cancelled;
+                            }
+                        } else {
+                            let detailed_err = format!("{:#}", join_err);
+                            log::error!("[sync] 测试任务异常: {}", detailed_err);
+                            let err_msg = format!("{}: {}", i18n!(cx, "settings.sync.test_connection_failed"), detailed_err);
+                            ToastManager::error(err_msg.clone(), cx);
+                            this.sync_test_status = SyncTestStatus::Failed(err_msg);
+                            this.sync_test_detail = Some(detailed_err);
+                        }
                     }
                 }
                 cx.notify();
             })
             .ok();
-        })
-        .detach();
+        });
+        self.sync_test_task = Some(task);
     }
 
     /// 立即同步：导出本地快照，与远端比较祖先关系后 push/pull/三向智能合并。
