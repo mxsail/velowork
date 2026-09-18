@@ -251,6 +251,8 @@ fn bind_debounced_input<T: 'static, F>(
             if let Some(extra) = on_change_extra.as_ref() {
                 extra(this, cx);
             }
+            // 实时驱动宿主面板在当前 VSync 帧重绘，与欢迎界面对齐 60fps 丝滑逐字输入
+            cx.notify();
             // 每次击键仅刷新纳秒级时间戳，零堆内存分配，零 Task 创建与销毁！
             time_clone.set(Instant::now());
 
@@ -776,6 +778,7 @@ impl SettingsPanel {
                 if !matches!(event, InputEvent::Change) {
                     return;
                 }
+                cx.notify();
                 slc_clone.set(Instant::now());
                 if !str_clone.get() {
                     str_clone.set(true);

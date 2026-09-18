@@ -87,7 +87,8 @@ impl SettingsPanel {
         let val_display = format_val(current_val);
         let input_entity = self.get_or_create_stepper_input(id, &val_display, window, cx);
 
-        if !input_entity.read(cx).is_focused() {
+        let is_input_focused = input_entity.read(cx).focus_handle(cx).is_focused(window);
+        if !is_input_focused {
             let cur_text = input_entity.read(cx).text().to_string();
             if cur_text.is_empty() {
                 input_entity.update(cx, |s, cx| s.set_value(&val_display, cx));
@@ -110,6 +111,8 @@ impl SettingsPanel {
             cx.subscribe(&input_entity, move |_this, _entity, event: &InputEvent, cx| {
                 match event {
                     InputEvent::Change => {
+                        // 驱动宿主面板在当前 VSync 帧即时渲染输入框内容变化，实现 60fps 丝滑逐字输入
+                        cx.notify();
                         time_clone.set(Instant::now());
                         if !timer_clone.get() {
                             timer_clone.set(true);
@@ -117,7 +120,6 @@ impl SettingsPanel {
                             let is_running = timer_clone.clone();
                             let input_weak = input_weak.clone();
                             let commit_sub = commit_sub.clone();
-                            let format_val_sub = format_val_sub.clone();
 
                             cx.spawn(async move |_this, cx| {
                                 loop {
@@ -137,8 +139,6 @@ impl SettingsPanel {
                                                 let cleaned = text.trim_end_matches('%').trim_end_matches("px").trim();
                                                 if let Ok(parsed) = cleaned.parse::<f32>() {
                                                     let final_val = parsed.clamp(min, max);
-                                                    let formatted = format_val_sub(final_val);
-                                                    input.update(cx, |s, cx| s.set_value(&formatted, cx));
                                                     settings_entity(cx).update(cx, |state, cx| {
                                                         commit_sub(state, final_val, cx);
                                                     });
@@ -231,7 +231,8 @@ impl SettingsPanel {
         let val_display = current_val.to_string();
         let input_entity = self.get_or_create_stepper_input(id, &val_display, window, cx);
 
-        if !input_entity.read(cx).is_focused() {
+        let is_input_focused = input_entity.read(cx).focus_handle(cx).is_focused(window);
+        if !is_input_focused {
             let cur_text = input_entity.read(cx).text().to_string();
             if cur_text.is_empty() {
                 input_entity.update(cx, |s, cx| s.set_value(&val_display, cx));
@@ -252,6 +253,8 @@ impl SettingsPanel {
             cx.subscribe(&input_entity, move |_this, _entity, event: &InputEvent, cx| {
                 match event {
                     InputEvent::Change => {
+                        // 驱动宿主面板在当前 VSync 帧即时渲染输入框内容变化，实现 60fps 丝滑逐字输入
+                        cx.notify();
                         time_clone.set(Instant::now());
                         if !timer_clone.get() {
                             timer_clone.set(true);
@@ -278,8 +281,6 @@ impl SettingsPanel {
                                                 let cleaned = text.trim();
                                                 if let Ok(parsed) = cleaned.parse::<u32>() {
                                                     let final_val = parsed.clamp(min, max);
-                                                    let formatted = final_val.to_string();
-                                                    input.update(cx, |s, cx| s.set_value(&formatted, cx));
                                                     settings_entity(cx).update(cx, |state, cx| {
                                                         commit_sub(state, final_val, cx);
                                                     });
@@ -370,7 +371,8 @@ impl SettingsPanel {
         let val_display = current_val.to_string();
         let input_entity = self.get_or_create_stepper_input(id, &val_display, window, cx);
 
-        if !input_entity.read(cx).is_focused() {
+        let is_input_focused = input_entity.read(cx).focus_handle(cx).is_focused(window);
+        if !is_input_focused {
             let cur_text = input_entity.read(cx).text().to_string();
             if cur_text.is_empty() {
                 input_entity.update(cx, |s, cx| s.set_value(&val_display, cx));
@@ -391,6 +393,8 @@ impl SettingsPanel {
             cx.subscribe(&input_entity, move |_this, _entity, event: &InputEvent, cx| {
                 match event {
                     InputEvent::Change => {
+                        // 驱动宿主面板在当前 VSync 帧即时渲染输入框内容变化，实现 60fps 丝滑逐字输入
+                        cx.notify();
                         time_clone.set(Instant::now());
                         if !timer_clone.get() {
                             timer_clone.set(true);
@@ -417,8 +421,6 @@ impl SettingsPanel {
                                                 let cleaned = text.trim();
                                                 if let Ok(parsed) = cleaned.parse::<u32>() {
                                                     let final_val = parsed.clamp(min, max);
-                                                    let formatted = final_val.to_string();
-                                                    input.update(cx, |s, cx| s.set_value(&formatted, cx));
                                                     settings_entity(cx).update(cx, |state, cx| {
                                                         commit_sub(state, final_val, cx);
                                                     });
