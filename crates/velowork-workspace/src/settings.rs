@@ -1225,7 +1225,7 @@ impl AppSettings {
         let pid = project_id.unwrap_or("default");
         if let Some(nodes) = self.project_quick_commands.get(pid) {
             nodes.as_slice()
-        } else if (pid == "default" || pid.is_empty()) && !self.quick_commands.is_empty() {
+        } else if !self.quick_commands.is_empty() {
             &self.quick_commands
         } else {
             &[]

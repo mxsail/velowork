@@ -731,7 +731,7 @@ impl SshSessionConfig {
         let pid = project_id.unwrap_or("default");
         if let Some(nodes) = self.by_project.get(pid) {
             nodes.as_slice()
-        } else if (pid == "default" || pid.is_empty()) && !self.tree.is_empty() {
+        } else if !self.tree.is_empty() {
             &self.tree
         } else {
             &[]
@@ -862,4 +862,33 @@ pub struct SshTestResult {
     pub latency_ms: u64,
     pub server_version: Option<String>,
     pub error: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tree_for_project_fallback() {
+        let global_node = SessionTreeNode::Folder {
+            id: "f1".to_string(),
+            name: "Global Folder".to_string(),
+            children: Vec::new(),
+            is_collapsed: false,
+        };
+        let config = SshSessionConfig {
+            tree: vec![global_node],
+            by_project: std::collections::HashMap::new(),
+        };
+
+        // Unknown project falls back to global tree
+        let nodes = config.tree_for_project(Some("unknown-zombie-id"));
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].name(), "Global Folder");
+
+        // None falls back to global tree
+        let nodes = config.tree_for_project(None);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].name(), "Global Folder");
+    }
 }

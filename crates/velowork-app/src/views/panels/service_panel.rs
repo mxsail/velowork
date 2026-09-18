@@ -317,7 +317,13 @@ impl ServiceMonitorPanel {
     }
 
     fn active_project_id(&self, cx: &App) -> Option<String> {
-        self.focus_manager.read(cx).active_project_id().cloned()
+        let raw = self.focus_manager.read(cx).active_project_id().cloned();
+        if let Some(ref pid) = raw {
+            if self.workspace.read(cx).project(pid).is_some() {
+                return raw;
+            }
+        }
+        self.workspace.read(cx).projects().first().map(|p| p.id.clone())
     }
 
     fn reload_nodes(&mut self, cx: &App) {

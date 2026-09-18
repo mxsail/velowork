@@ -1308,4 +1308,7 @@ pub(crate) fn reload_runtime_state_after_restore(cx: &mut App) {
 
     // 5) 通知所有面板与运行时数据已恢复
     crate::sync_engine::notify_runtime_state_restored(cx);
+
+    // 6) 强制刷新所有活动窗口，确保视觉即刻同步生效
+    cx.refresh_windows();
 }

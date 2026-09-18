@@ -15,6 +15,7 @@ pub enum TunnelEvent {
     TunnelUpdated(TunnelId),
     TunnelRemoved(TunnelId),
     TunnelRuntimeChanged(TunnelId),
+    TreeReplaced,
 }
 
 impl EventEmitter<TunnelEvent> for TunnelStore {}
@@ -55,6 +56,7 @@ impl TunnelStore {
                 self.nodes = tree;
             }
         }
+        cx.emit(TunnelEvent::TreeReplaced);
         cx.notify();
     }
 

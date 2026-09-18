@@ -817,8 +817,12 @@ impl WindowView {
                 this.last_data_replacement_epoch = data_replacement_epoch;
                 this.project_columns.clear();
                 this.last_project_paths.clear();
+                let wid = this.window_id;
+                let preferred = this.workspace.read(cx).data().window(wid).and_then(|w| w.focused_project_id.clone());
+                let projects = this.workspace.read(cx).projects().to_vec();
                 this.focus_manager.update(cx, |fm, cx| {
                     fm.clear_all();
+                    fm.realign_with_projects(&projects, preferred.as_deref());
                     cx.notify();
                 });
                 this.sync_project_columns(cx);

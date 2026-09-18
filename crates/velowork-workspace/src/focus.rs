@@ -531,7 +531,7 @@ impl FocusManager {
         changed
     }
 
-    /// Clear all focus state: current focus, focused_project_id, and stack.
+    /// Clear all focus state: current focus, focused_project_id, active_project_id, and stack.
     ///
     /// Used when switching workspaces to reset everything.
     pub fn clear_all(&mut self) {
@@ -540,8 +540,28 @@ impl FocusManager {
         self.layer = FocusLayer::None;
         self.layer_stack.clear();
         self.focused_project_id = None;
+        self.active_project_id = None;
         self.pre_zoom_focus = None;
         self.focus_stack.clear();
+    }
+
+    /// Realign focus and active project against a given list of projects (e.g. after workspace restore or reload).
+    ///
+    /// If `preferred_focused_id` exists in `projects`, it is selected. Otherwise falls back to
+    /// the first project in `projects`. If `projects` is empty, focus remains cleared.
+    pub fn realign_with_projects(&mut self, projects: &[crate::state::ProjectData], preferred_focused_id: Option<&str>) {
+        let target_pid = preferred_focused_id
+            .filter(|id| projects.iter().any(|p| p.id == *id))
+            .map(|id| id.to_string())
+            .or_else(|| projects.first().map(|p| p.id.clone()));
+
+        if let Some(pid) = target_pid {
+            self.focused_project_id = Some(pid.clone());
+            self.active_project_id = Some(pid);
+        } else {
+            self.focused_project_id = None;
+            self.active_project_id = None;
+        }
     }
 
     /// Push a focus entry onto the stack.
@@ -648,9 +668,34 @@ mod tests {
         fm.clear_all();
         assert!(fm.focused_terminal_state().is_none());
         assert_eq!(fm.focused_project_id(), None);
+        assert_eq!(fm.active_project_id(), None);
         assert!(!fm.has_fullscreen());
         assert!(fm.focus_stack.is_empty());
         assert_eq!(*fm.context(), FocusContext::Terminal);
+    }
+
+    #[test]
+    fn test_realign_with_projects() {
+        use crate::state::ProjectData;
+        let mut fm = FocusManager::new();
+        let p1 = ProjectData { id: "p1".to_string(), name: "P1".to_string(), ..Default::default() };
+        let p2 = ProjectData { id: "p2".to_string(), name: "P2".to_string(), ..Default::default() };
+        let projects = vec![p1, p2];
+
+        // Preferred is p2
+        fm.realign_with_projects(&projects, Some("p2"));
+        assert_eq!(fm.focused_project_id(), Some(&"p2".to_string()));
+        assert_eq!(fm.active_project_id(), Some(&"p2".to_string()));
+
+        // Preferred is invalid (nonexistent), fallback to first (p1)
+        fm.realign_with_projects(&projects, Some("unknown"));
+        assert_eq!(fm.focused_project_id(), Some(&"p1".to_string()));
+        assert_eq!(fm.active_project_id(), Some(&"p1".to_string()));
+
+        // Empty projects list clears everything
+        fm.realign_with_projects(&[], None);
+        assert_eq!(fm.focused_project_id(), None);
+        assert_eq!(fm.active_project_id(), None);
     }
 
     #[test]

@@ -135,6 +135,10 @@ impl Workspace {
         self.pending_closes.clear();
         self.restored_closes.clear();
         focus_manager.clear_all();
+        focus_manager.realign_with_projects(
+            &self.data.projects,
+            self.data.main_window.focused_project_id.as_deref(),
+        );
         cx.notify();
         cx.refresh_windows();
     }
@@ -1082,7 +1086,7 @@ mod gpui_tests {
 
 
     #[gpui::test]
-    fn test_replace_data_resets_focus(cx: &mut gpui::TestAppContext) {
+    fn test_replace_data_realigns_focus(cx: &mut gpui::TestAppContext) {
         use crate::focus::FocusManager;
 
         let data = make_workspace_data(vec![make_project("p1")], vec!["p1"]);
@@ -1097,7 +1101,8 @@ mod gpui_tests {
             ws.replace_data(&mut fm, new_data, cx);
         });
 
-        assert!(fm.focused_project_id().is_none());
+        assert_eq!(fm.focused_project_id(), Some(&"p2".to_string()));
+        assert_eq!(fm.active_project_id(), Some(&"p2".to_string()));
         workspace.read_with(cx, |ws: &Workspace, _cx| {
             assert_eq!(ws.data().projects.len(), 1);
             assert_eq!(ws.data().projects[0].id, "p2");

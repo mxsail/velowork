@@ -164,6 +164,10 @@ impl TunnelsPanel {
                 this.reload_nodes(cx);
             })
             .detach();
+            cx.observe(&entity, |this: &mut Self, _, cx| {
+                this.reload_nodes(cx);
+            })
+            .detach();
         }
 
         cx.observe(&workspace, |this: &mut Self, _ws, cx| {
@@ -247,7 +251,13 @@ impl TunnelsPanel {
     }
 
     fn active_project_id(&self, cx: &App) -> Option<String> {
-        self.focus_manager.read(cx).active_project_id().cloned()
+        let raw = self.focus_manager.read(cx).active_project_id().cloned();
+        if let Some(ref pid) = raw {
+            if self._workspace.read(cx).project(pid).is_some() {
+                return raw;
+            }
+        }
+        self._workspace.read(cx).projects().first().map(|p| p.id.clone())
     }
 
     fn reload_nodes(&mut self, cx: &mut Context<Self>) {
