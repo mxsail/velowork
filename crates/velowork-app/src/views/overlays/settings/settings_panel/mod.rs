@@ -136,6 +136,7 @@ pub struct SettingsPanel {
     pub(super) sync_s3_secret_key_input: Entity<InputState>,
     pub(super) sync_s3_prefix_input: Entity<InputState>,
     pub(super) sync_provider_select: Entity<SelectState<Option<SyncProvider>>>,
+    pub(super) sync_scope_card: Entity<render_sync::SyncScopeCardView>,
     /// 提供商测试连接状态
     pub(super) sync_test_status: SyncTestStatus,
     pub(super) sync_test_detail: Option<String>,
@@ -728,6 +729,8 @@ impl SettingsPanel {
             },
         )
         .detach();
+
+        let sync_scope_card = cx.new(render_sync::SyncScopeCardView::new);
 
         // 左侧导航搜索框（定位器：输入时展开并滚动到首个匹配分类）
         let nav_search_input =
@@ -1343,6 +1346,7 @@ impl SettingsPanel {
             sync_s3_secret_key_input,
             sync_s3_prefix_input,
             sync_provider_select,
+            sync_scope_card,
             sync_test_status: SyncTestStatus::Idle,
             sync_test_detail: None,
             sync_test_abort_handle: None,
@@ -2280,15 +2284,7 @@ impl SettingsPanel {
                         }
                     }
                     handles.push(self.get_or_create_button_focus_handle("sync-test-conn-btn", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-sessions", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-tunnels", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-services", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-qc", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-ai", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-history", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-settings", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-themes", cx));
-                    handles.push(self.get_or_create_toggle_focus_handle("sync-scope-credentials", cx));
+                    handles.extend(self.sync_scope_card.read(cx).focus_handles());
                     if let Some(input) = self.stepper_inputs.get("sync-interval") {
                         handles.push(input.read(cx).focus_handle(cx));
                     }

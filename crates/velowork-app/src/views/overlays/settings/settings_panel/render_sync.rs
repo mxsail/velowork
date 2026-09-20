@@ -25,11 +25,262 @@ use velowork_workspace::toast::{Toast, ToastAction, ToastActionStyle, ToastManag
 
 use super::{SettingsPanel, SyncTestStatus};
 
+/// 同步数据范围独立卡片 View（9 个 Checkbox）。
+/// 封装为独立 GPUI View，与上方连接配置输入框彻底隔离：
+/// 打字期间本 View 保持 clean 状态，GPUI 以 0ms 直接 `reuse_prepaint` 复用，
+/// 彻底阻断打字风暴对 9 个 Checkbox 的重复渲染。
+pub struct SyncScopeCardView {
+    pub fh_sessions: FocusHandle,
+    pub fh_tunnels: FocusHandle,
+    pub fh_services: FocusHandle,
+    pub fh_qc: FocusHandle,
+    pub fh_ai: FocusHandle,
+    pub fh_history: FocusHandle,
+    pub fh_settings: FocusHandle,
+    pub fh_themes: FocusHandle,
+    pub fh_credentials: FocusHandle,
+}
+
+impl SyncScopeCardView {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        Self {
+            fh_sessions: cx.focus_handle(),
+            fh_tunnels: cx.focus_handle(),
+            fh_services: cx.focus_handle(),
+            fh_qc: cx.focus_handle(),
+            fh_ai: cx.focus_handle(),
+            fh_history: cx.focus_handle(),
+            fh_settings: cx.focus_handle(),
+            fh_themes: cx.focus_handle(),
+            fh_credentials: cx.focus_handle(),
+        }
+    }
+
+    pub fn focus_handles(&self) -> Vec<FocusHandle> {
+        vec![
+            self.fh_sessions.clone(),
+            self.fh_tunnels.clone(),
+            self.fh_services.clone(),
+            self.fh_qc.clone(),
+            self.fh_ai.clone(),
+            self.fh_history.clone(),
+            self.fh_settings.clone(),
+            self.fh_themes.clone(),
+            self.fh_credentials.clone(),
+        ]
+    }
+}
+
+impl Render for SyncScopeCardView {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx);
+        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
+        let settings_guard = settings_entity(cx).read(cx);
+        let s = &settings_guard.settings;
+        let scope = &s.sync.data_scope;
+
+        div()
+            .bg(p.surface_card)
+            .border_1()
+            .border_color(p.border_subtle)
+            .rounded(RADIUS_LG)
+            .p(SPACE_LG)
+            .flex()
+            .flex_col()
+            .gap(SPACE_MD)
+            .child(
+                div()
+                    .text_size(ui_text_md(cx))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(rgb(t.text_primary))
+                    .child(i18n!(cx, "settings.sync.scope_title")),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_y(SPACE_MD)
+                    .gap_x(SPACE_MD)
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-sessions")
+                                    .focus(&self.fh_sessions)
+                                    .checked(scope.sessions)
+                                    .label(i18n!(cx, "settings.sync.scope_sessions"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("sessions", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-tunnels")
+                                    .focus(&self.fh_tunnels)
+                                    .checked(scope.tunnels)
+                                    .label(i18n!(cx, "settings.sync.scope_tunnels"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("tunnels", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-services")
+                                    .focus(&self.fh_services)
+                                    .checked(scope.services)
+                                    .label(i18n!(cx, "settings.sync.scope_services"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("services", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-qc")
+                                    .focus(&self.fh_qc)
+                                    .checked(scope.quick_commands)
+                                    .label(i18n!(cx, "settings.sync.scope_quick_commands"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("quick_commands", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-ai")
+                                    .focus(&self.fh_ai)
+                                    .checked(scope.ai_chat)
+                                    .label(i18n!(cx, "settings.sync.scope_ai_chat"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("ai_chat", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-history")
+                                    .focus(&self.fh_history)
+                                    .checked(scope.command_history)
+                                    .label(i18n!(cx, "settings.sync.scope_command_history"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("command_history", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-settings")
+                                    .focus(&self.fh_settings)
+                                    .checked(scope.settings)
+                                    .label(i18n!(cx, "settings.sync.scope_settings"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("settings", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-themes")
+                                    .focus(&self.fh_themes)
+                                    .checked(scope.themes)
+                                    .label(i18n!(cx, "settings.sync.scope_themes"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("themes", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .w(relative(0.31))
+                            .min_w(px(160.0))
+                            .child(
+                                Checkbox::new("sync-scope-credentials")
+                                    .focus(&self.fh_credentials)
+                                    .checked(scope.credentials)
+                                    .label(i18n!(cx, "settings.sync.scope_credentials"))
+                                    .on_click(cx.listener(|_, &checked, _window, cx| {
+                                        settings_entity(cx).update(cx, |state, cx| {
+                                            state.set_sync_scope_item("credentials", checked, cx);
+                                        });
+                                        cx.notify();
+                                    })),
+                            ),
+                    ),
+            )
+    }
+}
+
 impl SettingsPanel {
     pub(super) fn render_sync(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
-        let s = settings_entity(cx).read(cx).settings.clone();
+        let (
+            sync_enabled,
+            sync_provider,
+            s3_path_style,
+            sync_interval_secs,
+            auto_sync,
+            last_sync_at,
+        ) = {
+            let guard = settings_entity(cx).read(cx);
+            let s = &guard.settings.sync;
+            (
+                s.enabled,
+                s.provider,
+                s.s3.path_style,
+                s.sync_interval_secs,
+                s.auto_sync,
+                s.last_sync_at.clone(),
+            )
+        };
 
         let sync_provider_label = i18n!(cx, "settings.sync.provider.label");
         let server_url_label = i18n!(cx, "settings.sync.webdav.server");
@@ -47,7 +298,6 @@ impl SettingsPanel {
         let test_connection_testing_label = i18n!(cx, "settings.sync.test_connection_testing");
         let cancel_test_label = i18n!(cx, "settings.sync.cancel_test");
         let test_cancelled_label = i18n!(cx, "settings.sync.test_cancelled");
-        let scope_title_label = i18n!(cx, "settings.sync.scope_title");
         let disaster_recovery_label = i18n!(cx, "settings.sync.disaster_recovery");
         let disaster_recovery_desc = i18n!(cx, "settings.sync.disaster_recovery_desc");
 
@@ -88,7 +338,7 @@ impl SettingsPanel {
                             .child(Select::new(&self.sync_provider_select)),
                     ),
             )
-            .when(s.sync.enabled, |d| {
+            .when(sync_enabled, |d| {
                 d
                  // 1. 提供商连接配置项（根据选中的 Provider 切换 WebDAV / S3）
                  .child(
@@ -96,7 +346,7 @@ impl SettingsPanel {
                         .flex()
                         .flex_col()
                         .gap(SPACE_MD)
-                        .when(s.sync.provider == SyncProvider::WebDav, |d| {
+                        .when(sync_provider == SyncProvider::WebDav, |d| {
                             d
                                 // 服务器地址（整行）
                                 .child(
@@ -161,7 +411,7 @@ impl SettingsPanel {
                                         .child(Input::new(&self.sync_remote_path_input)),
                                 )
                         })
-                        .when(s.sync.provider == SyncProvider::S3, |d| {
+                        .when(sync_provider == SyncProvider::S3, |d| {
                             d
                                 // S3 终端节点 (Endpoint)
                                 .child(
@@ -289,7 +539,7 @@ impl SettingsPanel {
                                             let fh = self.get_or_create_toggle_focus_handle("sync-s3-path-style", cx);
                                             Switch::new("sync-s3-path-style")
                                                 .focus(&fh)
-                                                .checked(s.sync.s3.path_style)
+                                                .checked(s3_path_style)
                                                 .on_click(cx.listener(|_, &val, _, cx| {
                                                     settings_entity(cx).update(cx, |state, cx| {
                                                         state.set_s3_path_style(val, cx);
@@ -403,185 +653,8 @@ impl SettingsPanel {
                                 ),
                         ),
                  )
-                 // 2. 同步数据范围卡片（带边框，圆角与弹窗保持一致）
-                 .child(
-                    div()
-                        .bg(p.surface_card)
-                        .border_1()
-                        .border_color(p.border_subtle)
-                        .rounded(RADIUS_LG)
-                        .p(SPACE_LG)
-                        .flex()
-                        .flex_col()
-                        .gap(SPACE_MD)
-                        .child(
-                            div()
-                                .text_size(ui_text_md(cx))
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(rgb(t.text_primary))
-                                .child(scope_title_label),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .flex_wrap()
-                                .gap_y(SPACE_MD)
-                                .gap_x(SPACE_MD)
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-sessions", cx);
-                                            Checkbox::new("sync-scope-sessions")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.sessions)
-                                                .label(i18n!(cx, "settings.sync.scope_sessions"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("sessions", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-tunnels", cx);
-                                            Checkbox::new("sync-scope-tunnels")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.tunnels)
-                                                .label(i18n!(cx, "settings.sync.scope_tunnels"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("tunnels", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-services", cx);
-                                            Checkbox::new("sync-scope-services")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.services)
-                                                .label(i18n!(cx, "settings.sync.scope_services"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("services", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-qc", cx);
-                                            Checkbox::new("sync-scope-qc")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.quick_commands)
-                                                .label(i18n!(cx, "settings.sync.scope_quick_commands"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("quick_commands", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-ai", cx);
-                                            Checkbox::new("sync-scope-ai")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.ai_chat)
-                                                .label(i18n!(cx, "settings.sync.scope_ai_chat"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("ai_chat", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-history", cx);
-                                            Checkbox::new("sync-scope-history")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.command_history)
-                                                .label(i18n!(cx, "settings.sync.scope_command_history"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("command_history", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-settings", cx);
-                                            Checkbox::new("sync-scope-settings")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.settings)
-                                                .label(i18n!(cx, "settings.sync.scope_settings"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("settings", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-themes", cx);
-                                            Checkbox::new("sync-scope-themes")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.themes)
-                                                .label(i18n!(cx, "settings.sync.scope_themes"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("themes", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                )
-                                .child(
-                                    div()
-                                        .w(relative(0.31))
-                                        .min_w(px(160.0))
-                                        .child({
-                                            let fh = self.get_or_create_toggle_focus_handle("sync-scope-credentials", cx);
-                                            Checkbox::new("sync-scope-credentials")
-                                                .focus(&fh)
-                                                .checked(s.sync.data_scope.credentials)
-                                                .label(i18n!(cx, "settings.sync.scope_credentials"))
-                                                .on_click(move |&checked, _window, cx| {
-                                                    settings_entity(cx).update(cx, |state, cx| {
-                                                        state.set_sync_scope_item("credentials", checked, cx);
-                                                    });
-                                                })
-                                        }),
-                                ),
-                        ),
-                 )
+                 // 2. 同步数据范围卡片（独立 View 隔离，打字期间 0ms 纯复用）
+                 .child(self.sync_scope_card.clone())
                  // 3. 自动同步与执行（去掉标题与外侧边框，直接呈现内容）
                  .child(
                     div()
@@ -621,7 +694,7 @@ impl SettingsPanel {
                                         .child(
                                             self.render_compact_stepper(
                                                 "sync-interval",
-                                                s.sync.sync_interval_secs,
+                                                sync_interval_secs,
                                                 &t,
                                                 window,
                                                 cx,
@@ -631,7 +704,7 @@ impl SettingsPanel {
                                             let auto_sync_fh = self.get_or_create_toggle_focus_handle("sync-auto-sync-toggle", cx);
                                             Switch::new("sync-auto-sync-toggle")
                                                 .focus(&auto_sync_fh)
-                                                .checked(s.sync.auto_sync)
+                                                .checked(auto_sync)
                                                 .on_click(cx.listener(|_, &val, _, cx| {
                                                     settings_entity(cx).update(cx, |state, cx| {
                                                         state.set_auto_sync(val, cx);
@@ -666,7 +739,7 @@ impl SettingsPanel {
                                                 .child(format!(
                                                     "{}: {}",
                                                     last_sync_label,
-                                                    s.sync.last_sync_at.as_deref().unwrap_or(&never_label)
+                                                    last_sync_at.as_deref().unwrap_or(&never_label)
                                                 )),
                                         )
                                         .children(
@@ -974,6 +1047,9 @@ impl SettingsPanel {
 
     /// 重置同步连接测试状态（例如输入框变更时调用，中断后台任务并恢复闲置状态）
     pub(super) fn reset_sync_test(&mut self, cx: &mut Context<Self>) {
+        if self.sync_test_status == SyncTestStatus::Idle && self.sync_test_abort_handle.is_none() {
+            return;
+        }
         let had_abort = self.sync_test_abort_handle.is_some();
         let was_not_idle = self.sync_test_status != SyncTestStatus::Idle;
 
