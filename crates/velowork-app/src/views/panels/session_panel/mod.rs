@@ -6837,8 +6837,10 @@ impl SessionPanel {
             if let Some(ent) = model.input_for(fid).cloned() {
                 cx.subscribe(
                     &ent,
-                    move |this, _, _: &velowork_ui::input::InputEvent, cx| {
-                        this.dialog_on_field_changed(fid, cx);
+                    move |this, _, event: &velowork_ui::input::InputEvent, cx| {
+                        if matches!(event, velowork_ui::input::InputEvent::Change) {
+                            this.dialog_on_field_changed(fid, cx);
+                        }
                     },
                 )
                 .detach();
@@ -6901,9 +6903,14 @@ impl SessionPanel {
             None => return,
         };
         model.sync_field_from_input(fid, cx);
+        let old_validation = model.ui.validation.get(fid).cloned();
         model.validate_field(fid, cx);
-        model.recompute();
-        self.dialog_notify(cx);
+        let new_validation = model.ui.validation.get(fid).cloned();
+        // 跳过逐键 recompute（40+ 字段全量 ChangeSet diff），延迟到渲染/保存时惰性重算。
+        // 仅当校验状态实际变化时才通知面板重绘，避免高频长按时的无效全量重绘。
+        if old_validation != new_validation {
+            self.dialog_notify(cx);
+        }
     }
 
     pub fn dialog_set_nav_search(&mut self, text: String, cx: &mut App) {
