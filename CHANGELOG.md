@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.8] - 2026-09-20
+
+### Improved / 优化
+- **设置面板输入框长按连发与退格性能极致提升**：
+  - **文本整形（Text Shaping）高速缓存**：在底层 `TextInputElement` 中引入 `SimpleInputShapeKey` 缓存机制。打字期间只要输入框文本、字号与换行宽度未发生改变，直接以零成本复用已排版结果，彻底跳过 HarfBuzz C++ 重复整形开销。
+  - **消除全量配置状态克隆**：全面消除设置面板各分类模块及基准高度计算中的 `settings.clone()` 全量堆内存克隆，按需解构字段或使用只读引用借用，杜绝高频按键时的内存分配与 GC 抖动。
+  - **Canvas 测量守护与零分配 ElementId**：对卡片动态高度测量增加变动守卫，并使用静态元组标识替代动态 `format!` 字符串分配。
+  - **彻底消灭跳字与卡顿**：彻底根除在数据同步终端节点、文件管理器打开方式等配置项中长按连续输入或长按退格时的分段跳字现象，达到原生逐字丝滑输出。  
+  *(Settings panel input responsiveness enhancements: introduce SimpleInputShapeKey text shaping caching to bypass redundant HarfBuzz line layout, eliminate full Settings cloning across category render modules, add canvas layout guards, and completely resolve key repeat/backspace chunking lag).*
+- **数据同步范围独立 View 视图隔离**：
+  - 将数据同步范围选项（9 个 Checkbox）剥离为独立 GPUI View，在输入连接凭据与终端节点期间保持 clean 状态由 GPUI 瞬时复用，阻断打字风暴对复选框组的重复排版。  
+  *(Isolate sync scope card into a dedicated GPUI View to prevent re-layout during credential typing).*
+- **设置分类卡片按需展开与焦点判定快路径**：
+  - 设置面板引入可折叠分类卡片设计，优化首次布局与滚动定位效率；为 `focused_category` 引入活跃分类快路径检测短路，单帧总耗时大幅压缩。  
+  *(Collapsible category card design and fast-path focus detection for the settings panel).*
+
 ## [0.1.0-beta.7] - 2026-09-18
 
 ### Added / 新增
