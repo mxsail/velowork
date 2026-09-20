@@ -1817,9 +1817,11 @@ impl SettingsPanel {
                     move |bounds, _, cx| {
                         let h = f32::from(bounds.size.height);
                         let prev_h = height_setter.borrow().get(&cat_key).copied();
-                        height_setter
-                            .borrow_mut()
-                            .insert(cat_key.clone(), h);
+                        if prev_h != Some(h) {
+                            height_setter
+                                .borrow_mut()
+                                .insert(cat_key.clone(), h);
+                        }
 
                         // 当存在待滚动导航且卡片真实高度刚完成初次测量或发生显著变化时，触发重绘以在下一帧以真实像素精准对齐
                         if pending_scroll_rc.borrow().is_some()
@@ -1846,13 +1848,14 @@ impl SettingsPanel {
                 .flex_shrink_0(),
         );
 
-        div()
+        let content_el = div()
             .relative()
             .flex_1()
             .min_w(px(0.0))
             .min_h(px(0.0))
             .overflow_hidden()
-            .child(right.w_full().h_full())
+            .child(right.w_full().h_full());
+        content_el
             .child(
                 div()
                     .absolute()
@@ -1868,11 +1871,8 @@ impl SettingsPanel {
     fn ordered_categories(&self, cx: &App) -> Vec<SettingsCategory> {
         let mut cats: Vec<SettingsCategory> = SettingsCategory::all().to_vec();
         if let Some(registry) = cx.try_global::<ExtensionRegistry>() {
-            let enabled = settings_entity(cx)
-                .read(cx)
-                .settings
-                .enabled_extensions
-                .clone();
+            let guard = settings_entity(cx).read(cx);
+            let enabled = &guard.settings.enabled_extensions;
             for ext in registry.extensions().iter() {
                 if ext.settings_view.is_some() && enabled.contains(ext.manifest.id) {
                     cats.push(SettingsCategory::Extension(ext.manifest.id.to_string()));
@@ -1920,7 +1920,7 @@ impl SettingsPanel {
 
         let cat_for_click = cat.clone();
         let header = div()
-            .id(ElementId::Name(format!("settings-card-h-{}", index).into()))
+            .id(("settings-card-h", index))
             .cursor_pointer()
             .when(is_expanded, |d| d.pb(SPACE_SM))
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _window, cx| {
@@ -1962,7 +1962,7 @@ impl SettingsPanel {
             );
 
         let mut card = div()
-            .id(ElementId::Name(format!("settings-card-{}", index).into()))
+            .id(("settings-card", index))
             .w_full()
             .flex_shrink_0()
             .bg(palette.surface_card)
@@ -2409,7 +2409,8 @@ impl SettingsPanel {
     /// 针对不同设置分类在展开状态下的基准预估高度（对齐 SessionDialog 预估高度机制，
     /// 动态感知自定义标题栏、代理模式、数据同步等动态展开项，用于首次布局或无测量时的精准坐标对齐）
     pub fn default_expanded_height(&self, cat: &SettingsCategory, cx: &App) -> f32 {
-        let s = settings_entity(cx).read(cx).settings.clone();
+        let guard = settings_entity(cx).read(cx);
+        let s = &guard.settings;
         match cat {
             SettingsCategory::General => {
                 let mut h = 380.0;
@@ -2769,7 +2770,7 @@ impl Render for SettingsPanel {
             && window_corner_radius > 0.0;
         let radius = px(window_corner_radius);
 
-        div()
+        let root = div()
             .id("settings-panel-root")
             .size_full()
             .flex()
@@ -2870,7 +2871,9 @@ impl Render for SettingsPanel {
             )
             .when_some(self.active_color_scheme_dialog.clone(), |modal, dialog| {
                 modal.child(dialog)
-            })
+            });
+
+        root
     }
 }
 

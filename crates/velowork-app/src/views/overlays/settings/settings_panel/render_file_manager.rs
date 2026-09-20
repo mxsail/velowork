@@ -13,7 +13,14 @@ use super::SettingsPanel;
 impl SettingsPanel {
     pub(super) fn render_file_manager(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let s = settings_entity(cx).read(cx).settings.clone();
+        let (show_hidden_files, file_sort_by, alternating_row_bg) = {
+            let guard = settings_entity(cx).read(cx);
+            (
+                guard.settings.show_hidden_files,
+                guard.settings.file_sort_by,
+                guard.settings.alternating_row_bg,
+            )
+        };
 
         let file_opener_label = i18n!(cx, "settings.file_opener");
         let file_opener_desc = i18n!(cx, "settings.file_opener_desc");
@@ -49,12 +56,12 @@ impl SettingsPanel {
             .child(
                 section_container(&t)
                     .child(self.render_toggle(
-                        "show-hidden-files", &show_hidden_files_label, s.show_hidden_files, true,
+                        "show-hidden-files", &show_hidden_files_label, show_hidden_files, true,
                         |state, val, cx| state.set_show_hidden_files(val, cx), cx,
                     ))
-                    .child(self.render_file_sort_by_row(s.file_sort_by, cx))
+                    .child(self.render_file_sort_by_row(file_sort_by, cx))
                     .child(self.render_toggle(
-                        "alternating-row-bg", &alternating_row_bg_label, s.alternating_row_bg, false,
+                        "alternating-row-bg", &alternating_row_bg_label, alternating_row_bg, false,
                         |state, val, cx| state.set_alternating_row_bg(val, cx), cx,
                     ))
                     .child(self.render_mode_input_row(

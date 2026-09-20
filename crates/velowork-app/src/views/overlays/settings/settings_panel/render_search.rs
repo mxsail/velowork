@@ -25,8 +25,10 @@ impl SettingsPanel {
     /// Render the "Search Engines" settings page.
     pub(super) fn render_search(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let s = settings_entity(cx).read(cx).settings.clone();
-        let engines = &s.search_engines;
+        let engines = {
+            let guard = settings_entity(cx).read(cx);
+            guard.settings.search_engines.clone()
+        };
 
         let desc = i18n!(cx, "settings.search_engines.desc");
         let add_label = i18n!(cx, "settings.search_engines.add");
@@ -48,7 +50,7 @@ impl SettingsPanel {
                     .child(empty_label)
                     .into_any_element()
             } else {
-                self.render_search_list(engines, &t, cx).into_any_element()
+                self.render_search_list(&engines, &t, cx).into_any_element()
             })
             .child(
                 // Add button below the list (consistent with "Add AI Model")

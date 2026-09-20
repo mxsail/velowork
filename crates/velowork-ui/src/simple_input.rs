@@ -64,6 +64,23 @@ struct HistoryEntry {
     selection: Option<Range<usize>>,
 }
 
+#[derive(Clone, PartialEq)]
+pub(crate) struct SimpleInputShapeKey {
+    pub display_value: String,
+    pub placeholder: String,
+    pub show_placeholder: bool,
+    pub font_size: Pixels,
+    pub wrap_width: Option<Pixels>,
+    pub marked_range: Option<Range<usize>>,
+    pub highlight_vars: bool,
+    pub syntax_language: Option<String>,
+    pub is_dark: bool,
+    pub font: Font,
+    pub password: bool,
+    pub search_highlights: Vec<Range<usize>>,
+    pub search_current_match: Option<Range<usize>>,
+}
+
 /// Internal layout and geometry cache populated during prepaint/paint without triggering GPUI entity dirty notifications.
 #[derive(Default)]
 pub(crate) struct SimpleInputLayoutCache {
@@ -74,6 +91,7 @@ pub(crate) struct SimpleInputLayoutCache {
     pub font_size: Pixels,
     pub scroll_offset: Pixels,
     pub scroll_offset_y: Pixels,
+    pub shape_key: Option<SimpleInputShapeKey>,
 }
 
 /// A simple text input state that handles selection, cursor, IME, and scrolling
@@ -2286,7 +2304,45 @@ impl Element for TextInputElement {
         let selection = selection.map(|r| translate_offset(r.start)..translate_offset(r.end));
         let mut row_ranges: Vec<Range<usize>> = Vec::new();
         
-        if show_placeholder {
+        let wrap_width = if multiline && wrap {
+            // Reserve right-side padding so wrapped lines fold *before* they
+            // reach the right border (instead of only at it), clearing the
+            // 12px scrollbar and leaving a comfortable margin. Adaptive to the
+            // panel/dock width because `bounds.size.width` is re-read on every
+            // paint, so a resize that squeezes the input re-wraps immediately.
+            Some((bounds.size.width - px(8.0)).max(px(60.0)))
+        } else {
+            None
+        };
+
+        let shape_key = SimpleInputShapeKey {
+            display_value: display_value.clone(),
+            placeholder: placeholder.clone(),
+            show_placeholder,
+            font_size: if show_placeholder { font_size } else { effective_font_size },
+            wrap_width,
+            marked_range: marked_range.clone(),
+            highlight_vars,
+            syntax_language: syntax_lang.map(|s| s.to_string()),
+            is_dark,
+            font: text_style.font(),
+            password,
+            search_highlights: search_highlights.clone(),
+            search_current_match: search_current_match.clone(),
+        };
+
+        let can_reuse = {
+            let input = self.state.read(cx);
+            let cache = input.layout_cache.borrow();
+            cache.shape_key.as_ref() == Some(&shape_key) && !cache.layouts.is_empty()
+        };
+
+        if can_reuse {
+            let input = self.state.read(cx);
+            let cache = input.layout_cache.borrow();
+            shaped_lines = cache.layouts.clone();
+            row_ranges = cache.row_ranges.clone();
+        } else if show_placeholder {
             let run = TextRun {
                 len: placeholder.len(),
                 font: text_style.font(),
@@ -2299,16 +2355,6 @@ impl Element for TextInputElement {
             shaped_lines.push(line);
             row_ranges.push(0..0);
         } else {
-            let wrap_width = if multiline && wrap {
-                // Reserve right-side padding so wrapped lines fold *before* they
-                // reach the right border (instead of only at it), clearing the
-                // 12px scrollbar and leaving a comfortable margin. Adaptive to the
-                // panel/dock width because `bounds.size.width` is re-read on every
-                // paint, so a resize that squeezes the input re-wraps immediately.
-                Some((bounds.size.width - px(8.0)).max(px(60.0)))
-            } else {
-                None
-            };
             let single_line_slice = [display_value.as_str()];
             let multi_line_storage;
             let lines_str: &[&str] = if multiline {
@@ -2650,6 +2696,7 @@ impl Element for TextInputElement {
             let mut cache = input.layout_cache.borrow_mut();
             cache.row_ranges = row_ranges;
             cache.layouts = shaped_lines.clone();
+            cache.shape_key = Some(shape_key);
             cache.scroll_offset = final_scroll_offset;
             cache.scroll_offset_y = vscroll;
             cache.line_height = line_height;

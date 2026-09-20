@@ -1,6 +1,6 @@
 use velowork_i18n::i18n;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SettingsCategory {
     // Original categories (kept)
     General,

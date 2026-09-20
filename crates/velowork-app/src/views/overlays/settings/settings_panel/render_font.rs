@@ -10,7 +10,27 @@ use super::components::*;
 impl SettingsPanel {
     pub(super) fn render_font(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let s = settings_entity(cx).read(cx).settings.clone();
+        let (
+            ui_font_size,
+            ui_font_family,
+            ui_scale,
+            font_size,
+            font_family,
+            font_weight,
+            line_height,
+        ) = {
+            let guard = settings_entity(cx).read(cx);
+            let s = &guard.settings;
+            (
+                s.ui_font_size,
+                s.ui_font_family.clone(),
+                s.ui_scale,
+                s.font_size,
+                s.font_family.clone(),
+                s.font_weight.clone(),
+                s.line_height,
+            )
+        };
 
         let ui_section_title = i18n!(cx, "settings.font.section_ui");
         let terminal_section_title = i18n!(cx, "settings.font.section_terminal");
@@ -33,7 +53,7 @@ impl SettingsPanel {
                             .child(self.render_number_stepper(
                                 "ui-font-size",
                                 &ui_font_size_label,
-                                s.ui_font_size,
+                                ui_font_size,
                                 "{}",
                                 8.0,
                                 48.0,
@@ -44,12 +64,12 @@ impl SettingsPanel {
                                 window,
                                 cx,
                             ))
-                            .child(self.render_ui_font_dropdown_row(&s.ui_font_family, cx))
+                            .child(self.render_ui_font_dropdown_row(&ui_font_family, cx))
                             .child(self.render_text_antialiasing_dropdown_row(cx))
                             .child(self.render_number_stepper(
                                 "ui-scale",
                                 &ui_scale_label,
-                                s.ui_scale,
+                                ui_scale,
                                 "{}%",
                                 50.0,
                                 200.0,
@@ -71,7 +91,7 @@ impl SettingsPanel {
                             .child(self.render_number_stepper(
                                 "font-size",
                                 &terminal_font_size_label,
-                                s.font_size,
+                                font_size,
                                 "{}",
                                 6.0,
                                 72.0,
@@ -82,12 +102,12 @@ impl SettingsPanel {
                                 window,
                                 cx,
                             ))
-                            .child(self.render_font_dropdown_row(&s.font_family, cx))
-                            .child(self.render_font_weight_dropdown_row(&s.font_weight, cx))
+                            .child(self.render_font_dropdown_row(&font_family, cx))
+                            .child(self.render_font_weight_dropdown_row(&font_weight, cx))
                             .child(self.render_number_stepper(
                                 "line-height",
                                 &line_height_label,
-                                s.line_height,
+                                line_height,
                                 "{}",
                                 0.8,
                                 3.0,

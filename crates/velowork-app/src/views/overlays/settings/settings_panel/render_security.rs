@@ -15,7 +15,13 @@ use super::SettingsPanel;
 impl SettingsPanel {
     pub(super) fn render_security(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let s = settings_entity(cx).read(cx).settings.clone();
+        let (is_enhanced, password_timeout_secs) = {
+            let guard = settings_entity(cx).read(cx);
+            (
+                guard.settings.security.security_mode == "enhanced",
+                guard.settings.security.password_timeout_secs as f32,
+            )
+        };
 
         let security_label = i18n!(cx, "settings.nav.security");
         let current_mode_label = i18n!(cx, "settings.security.current_mode");
@@ -33,7 +39,6 @@ impl SettingsPanel {
         let confirm_label = i18n!(cx, "common.confirm");
         let cancel_label = i18n!(cx, "common.cancel");
 
-        let is_enhanced = s.security.security_mode == "enhanced";
         let result = self.security_result.clone();
 
         div()
@@ -396,7 +401,7 @@ impl SettingsPanel {
                         d.child(self.render_number_stepper(
                             "password-timeout",
                             &password_timeout_label,
-                            s.security.password_timeout_secs as f32,
+                            password_timeout_secs,
                             "{}s",
                             0.0,
                             86400.0,
