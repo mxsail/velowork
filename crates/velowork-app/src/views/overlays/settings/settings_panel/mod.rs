@@ -51,6 +51,7 @@ use velowork_ui::slider::SliderState;
 use velowork_ui::tokens::{
     RADIUS_CARD, SPACE_CARD_GAP, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL, ui_text_lg,
 };
+use velowork_ui::icon::AppIcon;
 use velowork_ui::{AnimatedModal, AnimatedModalEvent};
 
 // ============================================================================
@@ -1911,10 +1912,52 @@ impl SettingsPanel {
         let palette = velowork_ui::SemanticPalette::from_context(cx);
         let _active = self.active_category == cat;
         let title = self.category_title(&cat, cx);
+        let is_expanded = self.expanded_categories.contains(&cat);
 
-        let content = self.render_category_body(&cat, window, cx);
+        let cat_for_click = cat.clone();
+        let header = div()
+            .id(ElementId::Name(format!("settings-card-h-{}", index).into()))
+            .cursor_pointer()
+            .when(is_expanded, |d| d.pb(SPACE_SM))
+            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _window, cx| {
+                if this.expanded_categories.contains(&cat_for_click) {
+                    this.expanded_categories.remove(&cat_for_click);
+                } else {
+                    this.expanded_categories.insert(cat_for_click.clone());
+                }
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(SPACE_MD)
+                    .child(
+                        cat.icon()
+                            .size(crate::ui::tokens::ui_icon_std_ts(cx))
+                            .text_color(palette.text_secondary),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.0))
+                            .text_size(ui_text_lg(cx))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(t.text_primary))
+                            .child(title),
+                    )
+                    .child(
+                        (if is_expanded {
+                            AppIcon::ChevronDown
+                        } else {
+                            AppIcon::ChevronRight
+                        })
+                        .size(crate::ui::tokens::ui_icon_sm(cx))
+                        .text_color(palette.text_muted),
+                    ),
+            );
 
-        div()
+        let mut card = div()
             .id(ElementId::Name(format!("settings-card-{}", index).into()))
             .w_full()
             .flex_shrink_0()
@@ -1924,33 +1967,14 @@ impl SettingsPanel {
             .rounded(RADIUS_CARD)
             .px(SPACE_LG)
             .py(SPACE_MD)
-            .child(
-                div()
-                    .id(ElementId::Name(format!("settings-card-h-{}", index).into()))
-                    .pb(SPACE_SM)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(SPACE_MD)
-                            .child(
-                                cat.icon()
-                                    .size(crate::ui::tokens::ui_icon_std_ts(cx))
-                                    .text_color(palette.text_secondary),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .text_size(ui_text_lg(cx))
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(rgb(t.text_primary))
-                                    .child(title),
-                            ),
-                    ),
-            )
-            .child(div().w_full().child(content))
-            .into_any_element()
+            .child(header);
+
+        if is_expanded {
+            let content = self.render_category_body(&cat, window, cx);
+            card = card.child(div().w_full().child(content));
+        }
+
+        card.into_any_element()
     }
 
     /// 根据分类分发到对应的内容渲染函数（返回裸内容体，不含卡片头）。
@@ -2347,8 +2371,23 @@ impl SettingsPanel {
     /// 用于「焦点驱动高亮」，当 Tab 或交互使某卡片内控件获焦时，
     /// 左侧导航立即高亮该卡片，避免因无需滚动而被 Scroll Spy 反向覆写。
     pub fn focused_category(&self, window: &Window, cx: &App) -> Option<SettingsCategory> {
+        // 快路径：优先检查当前 active_category（用户打字长按或交互期间 99% 命中）
+        let active = &self.active_category;
+        if self.expanded_categories.contains(active) {
+            let handles = self.category_focus_handles(active, cx);
+            for h in &handles {
+                if h.is_focused(window) {
+                    return Some(active.clone());
+                }
+            }
+        }
+
+        // 慢路径：仅检查其他已展开的分类，跳过未展开的折叠卡片
         let categories = self.ordered_categories(cx);
         for cat in &categories {
+            if cat == active || !self.expanded_categories.contains(cat) {
+                continue;
+            }
             let handles = self.category_focus_handles(cat, cx);
             for h in &handles {
                 if h.is_focused(window) {
