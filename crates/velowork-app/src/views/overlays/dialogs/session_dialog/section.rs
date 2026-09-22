@@ -48,6 +48,7 @@ pub fn visible_sections(protocol: velowork_state::SessionProtocol) -> &'static [
         | velowork_state::SessionProtocol::Local => &[
             SshSection::Basic,
             SshSection::Terminal,
+            SshSection::Advanced,
             SshSection::Notes,
         ],
     }
@@ -125,7 +126,7 @@ pub const BUILTIN_SECTIONS: &[SectionDescriptor] = &[
         id: SshSection::Network,
         title_key: "ssh.section.network",
         icon: AppIcon::Transfer,
-        default_expand: false,
+        default_expand: true,
         search_keywords: &[
             "network", "performance", "window", "packet", "nodelay", "tcp",
             "网络", "性能", "窗口", "延迟", "数据包",
@@ -135,7 +136,7 @@ pub const BUILTIN_SECTIONS: &[SectionDescriptor] = &[
         id: SshSection::Security,
         title_key: "ssh.section.security",
         icon: AppIcon::Check,
-        default_expand: false,
+        default_expand: true,
         search_keywords: &[
             "security", "algorithm", "kex", "cipher", "mac", "hostkey", "compression", "strict",
             "安全", "算法", "压缩", "加密", "主机密钥", "指纹",
@@ -145,17 +146,18 @@ pub const BUILTIN_SECTIONS: &[SectionDescriptor] = &[
         id: SshSection::Advanced,
         title_key: "ssh.section.advanced",
         icon: AppIcon::Settings,
-        default_expand: false,
+        default_expand: true,
         search_keywords: &[
             "advanced", "gex", "rekey", "compression", "min", "max", "preferred",
-            "高级", "重协商", "算法配置",
+            "parity", "flow", "dtr", "rts", "hex", "crlf", "baud",
+            "高级", "重协商", "算法配置", "校验", "流控", "串口", "数据位", "停止位",
         ],
     },
     SectionDescriptor {
         id: SshSection::Notes,
         title_key: "ssh.section.notes",
         icon: AppIcon::Folder,
-        default_expand: false,
+        default_expand: true,
         search_keywords: &[
             "notes", "tags", "description", "remark",
             "备注", "标签", "描述", "说明", "注释",

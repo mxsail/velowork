@@ -24,7 +24,7 @@ use velowork_ui::select::{Select, SelectState};
 use velowork_ui::theme::{surface_bg_t, theme, with_alpha, ThemeColors};
 use velowork_ui::tokens::{
     ICON_SM, ICON_STD, RADIUS_CARD, RADIUS_LG, RADIUS_STD, RADIUS_XS,
-    SCROLL_BOTTOM_SPACER_H, SPACE_CARD_GAP, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS, ui_space_md, ui_text_lg, ui_text_md, ui_text_ms, ui_text_sm,
+    SPACE_CARD_GAP, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS, ui_space_md, ui_text_lg, ui_text_md, ui_text_ms, ui_text_sm,
 };
 use velowork_ui::tooltip::Tooltip;
 use velowork_ui::h_flex;
@@ -67,53 +67,22 @@ pub fn render_session_dialog(
     let show_all = true;
     let visible_sec_list = visible_sections(model.config.protocol);
 
-    // 1. 处理左侧导航点击带来的整卡定位
-    let scroll_to_target = model.ui.pending_scroll.get();
-    if let Some(target) = scroll_to_target {
-        model.ui.pending_scroll.set(None);
-        let y = model.section_top_offset(target);
-        model.ui.scroll_handle.set_offset(point(px(0.0), px(-y)));
-        model.ui.active_section = target;
+    // 容灾与合法性保障：若当前 active_section 不在当前协议可见列表中，安全重置为首项
+    if !visible_sec_list.contains(&model.ui.active_section) {
+        if let Some(&first) = visible_sec_list.first() {
+            model.ui.active_section = first;
+        }
+    }
+
+    // 1. 处理左侧导航点击或报错跳转带来的置顶
+    if let Some(target) = model.ui.pending_scroll.take() {
+        if visible_sec_list.contains(&target) {
+            model.ui.active_section = target;
+        }
+        model.ui.scroll_handle.set_offset(point(px(0.0), px(0.0)));
     } else if let Some(fh) = model.ui.pending_scroll_focus_handle.take() {
         // 处理 Tab 聚焦带来的控件级视口自适应平滑滚动
         model.scroll_handle_into_view(&fh, cx);
-    } else if let Some(focused_sec) = model.focused_section(window, cx) {
-        // 2. 焦点驱动高亮：若当前有表单项或导航项获焦且位于视口内，左侧导航紧随焦点所在分组，绝不被滚动位覆写
-        model.ui.active_section = focused_sec;
-    } else {
-        // 3. 根据用户手动滚动位置，反向推导并更新左侧导航激活态 (Scroll Spy)
-        let heights = model.ui.card_heights.borrow();
-        let current_scroll_y = -f32::from(model.ui.scroll_handle.offset().y);
-        let gap = f32::from(SPACE_CARD_GAP);
-
-        if !heights.is_empty() {
-            let mut y_acc = 0.0;
-            let mut current_active = None;
-
-            for &section in visible_sec_list {
-                if !show_all && !matched.contains(&section) {
-                    continue;
-                }
-                let is_expanded = model.is_expanded(section);
-                let card_h = heights.get(&section).copied().unwrap_or_else(|| {
-                    if is_expanded {
-                        default_expanded_height(section, model.config.protocol)
-                    } else {
-                        52.0
-                    }
-                });
-
-                // 当滚动距离超过该卡片顶部 - 40px 偏移阈值时激活该分类
-                if current_scroll_y + 40.0 >= y_acc {
-                    current_active = Some(section);
-                }
-                y_acc += card_h + gap;
-            }
-
-            if let Some(active) = current_active {
-                model.ui.active_section = active;
-            }
-        }
     }
 
     // ---- 左侧导航 ----
@@ -257,8 +226,6 @@ pub fn render_session_dialog(
                 })),
         );
 
-    let card_heights_rc = model.ui.card_heights.clone();
-
     let mut right = div()
         .id("session-dialog-right")
         .flex()
@@ -272,13 +239,11 @@ pub fn render_session_dialog(
         .track_scroll(&model.ui.scroll_handle)
         .flex_1();
 
-    for &section in visible_sec_list {
-        if !show_all && !matched.contains(&section) {
-            continue;
-        }
-
+    // 单分类按需挂载（Zed 架构）：右侧仅挂载当前选中的单个分类卡片，DOM 节点体量缩减 85%
+    let active_section = model.ui.active_section;
+    if visible_sec_list.contains(&active_section) {
         let section_card = render_section_card(
-            section,
+            active_section,
             model,
             panel.clone(),
             &active_project_id,
@@ -286,34 +251,14 @@ pub fn render_session_dialog(
             cx,
             window,
         );
-        let height_setter = card_heights_rc.clone();
-
-        let card_wrapper = div().relative().child(section_card).child(
-            canvas(
-                move |bounds, _, _| {
-                    // 实时测量并更新卡片经 layout 计算后的真实高度
-                    height_setter
-                        .borrow_mut()
-                        .insert(section, f32::from(bounds.size.height));
-                },
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .inset_0(),
-        );
-
-        right = right.child(card_wrapper);
+        right = right.child(section_card);
     }
-
-    // 底部弹性安全间距：确保最后几个分类卡片点击导航时也能完整滚动置顶，避免触底提前截断导致高亮回跳
-    right = right.child(div().h(SCROLL_BOTTOM_SPACER_H).flex_shrink_0());
 
     // 头部标题（带 Dirty 标记）
     let title = super::session_dialog_title(model.editing_id.is_some(), model.config.protocol, cx);
     let dirty_mark = if model.is_dirty() { " *" } else { "" };
 
     // ---- 底部操作栏 ----
-    let can_save = model.is_valid();
     let save_label = if model.editing_id.is_some() {
         i18n!(cx, "ssh.dialog.save_changes")
     } else {
@@ -355,7 +300,13 @@ pub fn render_session_dialog(
                                 }
                             },
                         ))
-                })
+                }),
+        )
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(SPACE_SM)
                 .child(action_button(
                     "cancel",
                     &i18n!(cx, "common.cancel"),
@@ -378,7 +329,7 @@ pub fn render_session_dialog(
                     &save_label,
                     t,
                     cx,
-                    !can_save,
+                    false,
                     true,
                     &model.focus.save,
                     {
@@ -1046,7 +997,7 @@ fn render_serial_basic_fields(
 ) -> AnyElement {
     let inputs = &model.inputs;
     let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
-    let detected_ports = velowork_terminal::list_available_serial_ports();
+    let detected_ports = &model.ui.detected_serial_ports;
     let serial_port_input = &inputs.serial_port;
 
     let port_row = div()
@@ -1078,17 +1029,54 @@ fn render_serial_basic_fields(
                 )
                 .child(
                     div()
-                        .text_size(ui_text_sm(cx))
-                        .text_color(rgb(t.text_muted))
-                        .child(if detected_ports.is_empty() {
-                            i18n!(cx, "ssh.serial.no_ports")
-                        } else {
-                            format!(
-                                "{} {}",
-                                detected_ports.len(),
-                                i18n!(cx, "ssh.serial.refresh")
-                            )
-                        }),
+                        .flex()
+                        .items_center()
+                        .gap(SPACE_SM)
+                        .child(
+                            div()
+                                .text_size(ui_text_sm(cx))
+                                .text_color(rgb(t.text_muted))
+                                .child(if detected_ports.is_empty() {
+                                    i18n!(cx, "ssh.serial.no_ports")
+                                } else {
+                                    format!(
+                                        "{} {}",
+                                        detected_ports.len(),
+                                        i18n!(cx, "ssh.serial.refresh")
+                                    )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .id("btn-refresh-serial-ports")
+                                .cursor_pointer()
+                                .flex_shrink_0()
+                                .w(px(20.0))
+                                .h(px(20.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded(RADIUS_XS)
+                                .hover(|s| s.bg(p.surface_hover))
+                                .tooltip({
+                                    let tip = i18n!(cx, "ssh.serial.refresh");
+                                    move |_, cx| cx.new(|_| Tooltip::new(tip.clone())).into()
+                                })
+                                .on_click({
+                                    let panel = panel.clone();
+                                    move |_, _, cx| {
+                                        panel.update(cx, |this, cx| {
+                                            this.dialog_refresh_serial_ports(cx);
+                                        });
+                                    }
+                                })
+                                .child(
+                                    velowork_ui::icon::AppIcon::Refresh
+                                        .svg()
+                                        .size(px(13.0))
+                                        .text_color(p.text_secondary),
+                                ),
+                        ),
                 ),
         )
         .child(Input::new(serial_port_input))
@@ -1106,35 +1094,11 @@ fn render_serial_basic_fields(
             }
         })
         .when(!detected_ports.is_empty(), |d| {
-            let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
-            d.child(div().flex().flex_wrap().gap(SPACE_XS).pt(px(2.0)).children(
-                detected_ports.into_iter().map(|port_desc| {
-                    let port_name = port_desc.port_name.clone();
-                    let label = port_desc.display_label();
-                    let input_ref = serial_port_input.clone();
-                    div()
-                        .id(ElementId::Name(
-                            format!("detected-port-{}", port_name).into(),
-                        ))
-                        .px(SPACE_SM)
-                        .py(px(2.0))
-                        .rounded(RADIUS_STD)
-                        .border_1()
-                        .border_color(p.border_subtle)
-                        .bg(p.surface_card)
-                        .hover(|s| s.bg(p.surface_hover))
-                        .cursor_pointer()
-                        .on_click(move |_, _w, cx| {
-                            input_ref.update(cx, |s, cx| s.set_value(&port_name, cx));
-                        })
-                        .child(
-                            div()
-                                .text_size(ui_text_sm(cx))
-                                .text_color(p.text_secondary)
-                                .child(label),
-                        )
-                }),
-            ))
+            d.child(
+                div()
+                    .pt(px(4.0))
+                    .child(Select::new(&model.selects.serial_port_picker))
+            )
         });
 
     div()
@@ -1142,138 +1106,291 @@ fn render_serial_basic_fields(
         .flex_col()
         .gap(px(12.0))
         .child(port_row)
-        .child(two_col(
-            select_block(
-                i18n!(cx, "ssh.serial.baud_rate"),
-                &model.selects.serial_baud_rate,
-                t,
-                cx,
-            ),
-            select_block(
-                i18n!(cx, "ssh.serial.data_bits"),
-                &model.selects.serial_data_bits,
-                t,
-                cx,
-            ),
-        ))
-        .child(two_col(
-            select_block(
-                i18n!(cx, "ssh.serial.stop_bits"),
-                &model.selects.serial_stop_bits,
-                t,
-                cx,
-            ),
-            select_block(
-                i18n!(cx, "ssh.serial.parity"),
-                &model.selects.serial_parity,
-                t,
-                cx,
-            ),
-        ))
         .child(select_block(
-            i18n!(cx, "ssh.serial.flow_control"),
-            &model.selects.serial_flow_control,
+            i18n!(cx, "ssh.serial.baud_rate"),
+            &model.selects.serial_baud_rate,
             t,
             cx,
         ))
-        .child(two_col(
-            switch_row(
-                "serial_dtr",
-                i18n!(cx, "ssh.serial.dtr"),
-                model.config.serial_dtr,
-                &model.focus.serial_dtr,
-                {
-                    let panel = panel.clone();
-                    move |_, _, cx| {
-                        panel.update(cx, |this, cx| {
-                            this.dialog_toggle_bool("serial_dtr", cx)
+        .into_any_element()
+}
+
+fn render_serial_advanced_fields(
+    model: &SessionDialogModel,
+    panel: Entity<SessionPanel>,
+    t: &ThemeColors,
+    cx: &App,
+) -> AnyElement {
+    let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
+
+    let stop_bits_val = model.config.serial_stop_bits.to_string();
+    let display_mode_val = model.config.serial_display_mode.clone();
+    let line_ending_val = model.config.serial_line_ending.clone();
+    let data_bits_val = model.config.serial_data_bits.to_string();
+
+    let stop_bits_ctrl = {
+        let panel = panel.clone();
+        RadioGroup::new("serial-stop-bits-segmented")
+            .mode(RadioMode::Button)
+            .full_width(true)
+            .options(vec![
+                RadioOption::new("1".to_string(), "1"),
+                RadioOption::new("2".to_string(), "2"),
+            ])
+            .selected(Some(stop_bits_val))
+            .on_change(move |val: &String, _, cx| {
+                let n: u8 = val.parse().unwrap_or(1);
+                panel.update(cx, |this, cx| {
+                    if let Some(m) = this.ssh_dialog_mut() {
+                        m.config.serial_stop_bits = n;
+                        m.selects.serial_stop_bits.update(cx, |s, cx| {
+                            s.set_selected_value(Some(SharedString::from(val.clone())), cx);
                         });
                     }
-                },
-                t,
-                cx,
-            ),
-            switch_row(
-                "serial_rts",
-                i18n!(cx, "ssh.serial.rts"),
-                model.config.serial_rts,
-                &model.focus.serial_rts,
-                {
-                    let panel = panel.clone();
-                    move |_, _, cx| {
-                        panel.update(cx, |this, cx| {
-                            this.dialog_toggle_bool("serial_rts", cx)
+                    this.dialog_notify(cx);
+                });
+            })
+    };
+
+    let data_bits_ctrl = {
+        let panel = panel.clone();
+        RadioGroup::new("serial-data-bits-segmented")
+            .mode(RadioMode::Button)
+            .full_width(true)
+            .options(vec![
+                RadioOption::new("8".to_string(), "8"),
+                RadioOption::new("7".to_string(), "7"),
+                RadioOption::new("6".to_string(), "6"),
+                RadioOption::new("5".to_string(), "5"),
+            ])
+            .selected(Some(data_bits_val))
+            .on_change(move |val: &String, _, cx| {
+                let n: u8 = val.parse().unwrap_or(8);
+                panel.update(cx, |this, cx| {
+                    if let Some(m) = this.ssh_dialog_mut() {
+                        m.config.serial_data_bits = n;
+                        m.selects.serial_data_bits.update(cx, |s, cx| {
+                            s.set_selected_value(Some(SharedString::from(val.clone())), cx);
                         });
                     }
-                },
-                t,
-                cx,
-            ),
-        ))
-        .child(two_col(
-            select_block(
-                i18n!(cx, "ssh.serial.display_mode"),
-                &model.selects.serial_display_mode,
-                t,
-                cx,
-            ),
-            select_block(
-                i18n!(cx, "ssh.serial.line_ending"),
-                &model.selects.serial_line_ending,
-                t,
-                cx,
-            ),
-        ))
-        .child(two_col(
-            switch_row(
-                "serial_local_echo",
-                i18n!(cx, "ssh.serial.local_echo"),
-                model.config.serial_local_echo,
-                &model.focus.serial_local_echo,
-                {
-                    let panel = panel.clone();
-                    move |_, _, cx| {
-                        panel.update(cx, |this, cx| {
-                            this.dialog_toggle_bool("serial_local_echo", cx)
+                    this.dialog_notify(cx);
+                });
+            })
+    };
+
+    let display_mode_ctrl = {
+        let panel = panel.clone();
+        RadioGroup::new("serial-display-mode-segmented")
+            .mode(RadioMode::Button)
+            .full_width(true)
+            .options(vec![
+                RadioOption::new("ascii".to_string(), "ASCII"),
+                RadioOption::new("hex".to_string(), "HEX"),
+            ])
+            .selected(Some(display_mode_val))
+            .on_change(move |val: &String, _, cx| {
+                let v = val.clone();
+                panel.update(cx, |this, cx| {
+                    if let Some(m) = this.ssh_dialog_mut() {
+                        m.config.serial_display_mode = v.clone();
+                        m.selects.serial_display_mode.update(cx, |s, cx| {
+                            s.set_selected_value(Some(SharedString::from(v)), cx);
                         });
                     }
-                },
-                t,
-                cx,
-            ),
-            switch_row(
-                "serial_timestamps",
-                i18n!(cx, "ssh.serial.timestamps"),
-                model.config.serial_timestamps,
-                &model.focus.serial_timestamps,
-                {
-                    let panel = panel.clone();
-                    move |_, _, cx| {
-                        panel.update(cx, |this, cx| {
-                            this.dialog_toggle_bool("serial_timestamps", cx)
+                    this.dialog_notify(cx);
+                });
+            })
+    };
+
+    let line_ending_ctrl = {
+        let panel = panel.clone();
+        RadioGroup::new("serial-line-ending-segmented")
+            .mode(RadioMode::Button)
+            .full_width(true)
+            .options(vec![
+                RadioOption::new("crlf".to_string(), "CRLF"),
+                RadioOption::new("lf".to_string(), "LF"),
+                RadioOption::new("cr".to_string(), "CR"),
+            ])
+            .selected(Some(line_ending_val))
+            .on_change(move |val: &String, _, cx| {
+                let v = val.clone();
+                panel.update(cx, |this, cx| {
+                    if let Some(m) = this.ssh_dialog_mut() {
+                        m.config.serial_line_ending = v.clone();
+                        m.selects.serial_line_ending.update(cx, |s, cx| {
+                            s.set_selected_value(Some(SharedString::from(v)), cx);
                         });
                     }
-                },
-                t,
-                cx,
-            ),
-        ))
-        .child(switch_row(
-            "serial_auto_reconnect",
-            i18n!(cx, "ssh.serial.auto_reconnect"),
-            model.config.serial_auto_reconnect,
-            &model.focus.serial_auto_reconnect,
-            {
-                let panel = panel.clone();
-                move |_, _, cx| {
-                    panel.update(cx, |this, cx| {
-                        this.dialog_toggle_bool("serial_auto_reconnect", cx)
-                    });
-                }
-            },
-            t,
-            cx,
-        ))
+                    this.dialog_notify(cx);
+                });
+            })
+    };
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(16.0))
+        // 1. 通信与数据校验 (Transmission & Parity)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .text_size(ui_text_ms(cx))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.text_secondary)
+                        .child(i18n!(cx, "ssh.serial.group_transmission")),
+                )
+                .child(two_col(
+                    velowork_ui::form::form_item("select-block-data-bits")
+                        .label(i18n!(cx, "ssh.serial.data_bits"))
+                        .child(data_bits_ctrl.into_any_element())
+                        .render(t, cx),
+                    velowork_ui::form::form_item("select-block-stop-bits")
+                        .label(i18n!(cx, "ssh.serial.stop_bits"))
+                        .child(stop_bits_ctrl.into_any_element())
+                        .render(t, cx),
+                ))
+                .child(two_col(
+                    select_block(
+                        i18n!(cx, "ssh.serial.parity"),
+                        &model.selects.serial_parity,
+                        t,
+                        cx,
+                    ),
+                    select_block(
+                        i18n!(cx, "ssh.serial.flow_control"),
+                        &model.selects.serial_flow_control,
+                        t,
+                        cx,
+                    ),
+                )),
+        )
+        // 2. 硬件控制信号 (Hardware Signals)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .text_size(ui_text_ms(cx))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.text_secondary)
+                        .child(i18n!(cx, "ssh.serial.group_signals")),
+                )
+                .child(two_col(
+                    switch_row(
+                        "serial_dtr",
+                        i18n!(cx, "ssh.serial.dtr"),
+                        model.config.serial_dtr,
+                        &model.focus.serial_dtr,
+                        {
+                            let panel = panel.clone();
+                            move |_, _, cx| {
+                                panel.update(cx, |this, cx| {
+                                    this.dialog_toggle_bool("serial_dtr", cx)
+                                });
+                            }
+                        },
+                        t,
+                        cx,
+                    ),
+                    switch_row(
+                        "serial_rts",
+                        i18n!(cx, "ssh.serial.rts"),
+                        model.config.serial_rts,
+                        &model.focus.serial_rts,
+                        {
+                            let panel = panel.clone();
+                            move |_, _, cx| {
+                                panel.update(cx, |this, cx| {
+                                    this.dialog_toggle_bool("serial_rts", cx)
+                                });
+                            }
+                        },
+                        t,
+                        cx,
+                    ),
+                )),
+        )
+        // 3. 终端显示与数据流 (Terminal Display & Control)
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(
+                    div()
+                        .text_size(ui_text_ms(cx))
+                        .font_weight(FontWeight::BOLD)
+                        .text_color(p.text_secondary)
+                        .child(i18n!(cx, "ssh.serial.group_display")),
+                )
+                .child(two_col(
+                    velowork_ui::form::form_item("select-block-display-mode")
+                        .label(i18n!(cx, "ssh.serial.display_mode"))
+                        .child(display_mode_ctrl.into_any_element())
+                        .render(t, cx),
+                    velowork_ui::form::form_item("select-block-line-ending")
+                        .label(i18n!(cx, "ssh.serial.line_ending"))
+                        .child(line_ending_ctrl.into_any_element())
+                        .render(t, cx),
+                ))
+                .child(two_col(
+                    switch_row(
+                        "serial_local_echo",
+                        i18n!(cx, "ssh.serial.local_echo"),
+                        model.config.serial_local_echo,
+                        &model.focus.serial_local_echo,
+                        {
+                            let panel = panel.clone();
+                            move |_, _, cx| {
+                                panel.update(cx, |this, cx| {
+                                    this.dialog_toggle_bool("serial_local_echo", cx)
+                                });
+                            }
+                        },
+                        t,
+                        cx,
+                    ),
+                    switch_row(
+                        "serial_timestamps",
+                        i18n!(cx, "ssh.serial.timestamps"),
+                        model.config.serial_timestamps,
+                        &model.focus.serial_timestamps,
+                        {
+                            let panel = panel.clone();
+                            move |_, _, cx| {
+                                panel.update(cx, |this, cx| {
+                                    this.dialog_toggle_bool("serial_timestamps", cx)
+                                });
+                            }
+                        },
+                        t,
+                        cx,
+                    ),
+                ))
+                .child(switch_row(
+                    "serial_auto_reconnect",
+                    i18n!(cx, "ssh.serial.auto_reconnect"),
+                    model.config.serial_auto_reconnect,
+                    &model.focus.serial_auto_reconnect,
+                    {
+                        let panel = panel.clone();
+                        move |_, _, cx| {
+                            panel.update(cx, |this, cx| {
+                                this.dialog_toggle_bool("serial_auto_reconnect", cx)
+                            });
+                        }
+                    },
+                    t,
+                    cx,
+                )),
+        )
         .into_any_element()
 }
 
@@ -2597,11 +2714,14 @@ fn render_algorithm_lists(
 
 fn render_advanced(
     model: &mut SessionDialogModel,
-    _panel: Entity<SessionPanel>,
+    panel: Entity<SessionPanel>,
     t: &ThemeColors,
     cx: &mut App,
     _window: &mut Window,
 ) -> AnyElement {
+    if model.config.protocol == velowork_state::SessionProtocol::Serial {
+        return render_serial_advanced_fields(model, panel, t, cx);
+    }
     let inputs = &model.inputs;
     let content = div()
         .flex()
@@ -3019,8 +3139,4 @@ fn session_folder_options(active_project_id: &Option<String>, cx: &App) -> Vec<(
     let mut out = Vec::new();
     collect_session_folders(nodes, "", &mut out);
     out
-}
-
-fn default_expanded_height(section: SshSection, protocol: velowork_state::SessionProtocol) -> f32 {
-    super::model::default_expanded_height(section, protocol)
 }

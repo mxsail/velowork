@@ -6,8 +6,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use std::cell::{Cell, RefCell};
-use std::rc::Rc;
+use std::cell::Cell;
 
 use gpui::{point, px, App, AppContext, Bounds, Context, Entity, EntityId, FocusHandle, Focusable, ListAlignment, ListState, Pixels, ScrollHandle, SharedString, WeakEntity, Window};
 use velowork_state::{
@@ -95,14 +94,14 @@ pub struct SessionDialogUiState {
     pub pending_scroll: Cell<Option<SshSection>>,
     /// Tab 焦点切换触发的待自适应视口滚动句柄（视口未完成首次布局时暂存）
     pub pending_scroll_focus_handle: Cell<Option<FocusHandle>>,
-    /// 各 section 卡片动态布局高度缓存（基于 canvas 测量，用于精准算距贴顶）
-    pub card_heights: Rc<RefCell<HashMap<SshSection, f32>>>,
     /// 首次渲染时自动聚焦标记（防止后续渲染帧重复抢夺焦点）。
     pub auto_focused: bool,
     /// 是否处于新建所属目录编辑态
     pub creating_parent_folder: bool,
     /// 新建所属目录输入框实体
     pub parent_folder_input: Option<Entity<InputState>>,
+    /// 当前已探测的串口设备列表（模型缓存，避免 render 中同步硬件扫描）
+    pub detected_serial_ports: Vec<velowork_terminal::SerialPortDescription>,
 }
 
 impl Default for SessionDialogUiState {
@@ -130,10 +129,10 @@ impl Default for SessionDialogUiState {
             list_state: ListState::new(BUILTIN_SECTIONS.len(), ListAlignment::Top, px(1000.0)),
             pending_scroll: Cell::new(None),
             pending_scroll_focus_handle: Cell::new(None),
-            card_heights: Rc::new(RefCell::new(HashMap::new())),
             auto_focused: false,
             creating_parent_folder: false,
             parent_folder_input: None,
+            detected_serial_ports: Vec::new(),
         }
     }
 }
@@ -230,6 +229,7 @@ pub struct SessionDialogSelects {
     pub serial_flow_control: Entity<SelectState<SharedString>>,
     pub serial_display_mode: Entity<SelectState<SharedString>>,
     pub serial_line_ending: Entity<SelectState<SharedString>>,
+    pub serial_port_picker: Entity<SelectState<SharedString>>,
     pub cursor_shape: Entity<SelectState<SharedString>>,
     pub cursor_blink: Entity<SelectState<SharedString>>,
     pub telnet_encoding: Entity<SelectState<SharedString>>,
@@ -240,6 +240,12 @@ impl SessionDialogSelects {
     /// 创建全部 SelectState 实体（占位，options/selected 由 `setup` 填充）。
     pub fn new<T: 'static>(cx: &mut Context<T>) -> Self {
         let font_family = cx.new(|cx| SelectState::new(cx).searchable(true).virtual_scroll(true));
+        let serial_port_picker = cx.new(|cx| {
+            SelectState::new(cx)
+                .placeholder(velowork_i18n::i18n!(cx, "ssh.serial.select_port_placeholder"))
+                .searchable(true)
+                .virtual_scroll(true)
+        });
         let mut mk = || cx.new(|cx| SelectState::new(cx));
         Self {
             proxy_type: mk(),
@@ -262,6 +268,7 @@ impl SessionDialogSelects {
             serial_flow_control: mk(),
             serial_display_mode: mk(),
             serial_line_ending: mk(),
+            serial_port_picker,
             cursor_shape: mk(),
             cursor_blink: mk(),
             telnet_encoding: mk(),
@@ -322,6 +329,7 @@ impl SessionDialogSelects {
         self.serial_flow_control.update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.serial_display_mode.update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.serial_line_ending.update(cx, |s, _| s.set_overlay_registry(reg.clone()));
+        self.serial_port_picker.update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.cursor_shape.update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.cursor_blink.update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.telnet_encoding.update(cx, |s, _| s.set_overlay_registry(reg.clone()));
@@ -870,6 +878,47 @@ impl SessionDialogModel {
         }
     }
 
+    /// 刷新系统串口设备探测列表并同步更新下拉选项（仅在开窗或用户点击刷新时执行，绝不在 render 中执行）。
+    pub fn refresh_detected_serial_ports(&mut self, cx: &mut App) {
+        let ports = velowork_terminal::list_available_serial_ports();
+        self.ui.detected_serial_ports = ports.clone();
+
+        let mut options: Vec<velowork_ui::select::SelectOption<SharedString>> =
+            Vec::with_capacity(ports.len());
+        let current_port = self.inputs.serial_port.read(cx).text().to_string();
+        let mut selected: Option<SharedString> = None;
+
+        for p in ports {
+            let val = SharedString::from(p.port_name.clone());
+            let label = p.display_label();
+            if p.port_name == current_port {
+                selected = Some(val.clone());
+            }
+            options.push(velowork_ui::select::SelectOption::new(val, label));
+        }
+
+        self.selects.serial_port_picker.update(cx, |s, cx| {
+            s.set_options(options, cx);
+            s.set_selected_value(selected, cx);
+        });
+    }
+
+    /// 根据当前 inputs.serial_port 中的文本同步下拉推荐框的选中状态。
+    pub fn sync_serial_port_picker_from_input(&mut self, cx: &mut App) {
+        let current_port = self.inputs.serial_port.read(cx).text().to_string();
+        let selected = self
+            .ui
+            .detected_serial_ports
+            .iter()
+            .find(|p| p.port_name == current_port)
+            .map(|p| SharedString::from(p.port_name.clone()));
+        self.selects.serial_port_picker.update(cx, |s, cx| {
+            if s.selected_value() != selected.as_ref() {
+                s.set_selected_value(selected, cx);
+            }
+        });
+    }
+
     /// 为全部 Select 组件注入 OverlayRegistry 句柄。
     pub fn set_overlay_registry(&self, reg: Entity<OverlayRegistry>, cx: &mut App) {
         self.selects.set_overlay_registry(reg, cx);
@@ -1049,18 +1098,10 @@ impl SessionDialogModel {
             velowork_state::SessionProtocol::Ssh => {}
             velowork_state::SessionProtocol::Serial => {
                 out.push(self.inputs.serial_port.focus_handle(cx));
+                if !self.ui.detected_serial_ports.is_empty() {
+                    out.push(self.selects.serial_port_picker.read(cx).focus_handle().clone());
+                }
                 out.push(self.selects.serial_baud_rate.read(cx).focus_handle().clone());
-                out.push(self.selects.serial_data_bits.read(cx).focus_handle().clone());
-                out.push(self.selects.serial_stop_bits.read(cx).focus_handle().clone());
-                out.push(self.selects.serial_parity.read(cx).focus_handle().clone());
-                out.push(self.selects.serial_flow_control.read(cx).focus_handle().clone());
-                out.push(self.focus.serial_dtr.clone());
-                out.push(self.focus.serial_rts.clone());
-                out.push(self.selects.serial_display_mode.read(cx).focus_handle().clone());
-                out.push(self.selects.serial_line_ending.read(cx).focus_handle().clone());
-                out.push(self.focus.serial_local_echo.clone());
-                out.push(self.focus.serial_timestamps.clone());
-                out.push(self.focus.serial_auto_reconnect.clone());
             }
             velowork_state::SessionProtocol::Telnet => {
                 out.push(self.inputs.telnet_host.focus_handle(cx));
@@ -1188,10 +1229,24 @@ impl SessionDialogModel {
             SshSection::Network => self.network_focus_handles(cx, out),
             SshSection::Security => self.security_focus_handles(cx, out),
             SshSection::Advanced => {
-                out.push(self.inputs.rekey_time.focus_handle(cx));
-                out.push(self.inputs.gex_min.focus_handle(cx));
-                out.push(self.inputs.gex_preferred.focus_handle(cx));
-                out.push(self.inputs.gex_max.focus_handle(cx));
+                if self.config.protocol == velowork_state::SessionProtocol::Serial {
+                    out.push(self.selects.serial_data_bits.read(cx).focus_handle().clone());
+                    out.push(self.selects.serial_stop_bits.read(cx).focus_handle().clone());
+                    out.push(self.selects.serial_parity.read(cx).focus_handle().clone());
+                    out.push(self.selects.serial_flow_control.read(cx).focus_handle().clone());
+                    out.push(self.focus.serial_dtr.clone());
+                    out.push(self.focus.serial_rts.clone());
+                    out.push(self.selects.serial_display_mode.read(cx).focus_handle().clone());
+                    out.push(self.selects.serial_line_ending.read(cx).focus_handle().clone());
+                    out.push(self.focus.serial_local_echo.clone());
+                    out.push(self.focus.serial_timestamps.clone());
+                    out.push(self.focus.serial_auto_reconnect.clone());
+                } else {
+                    out.push(self.inputs.rekey_time.focus_handle(cx));
+                    out.push(self.inputs.gex_min.focus_handle(cx));
+                    out.push(self.inputs.gex_preferred.focus_handle(cx));
+                    out.push(self.inputs.gex_max.focus_handle(cx));
+                }
             }
             SshSection::Notes => {
                 out.push(self.inputs.tags.focus_handle(cx));
@@ -1263,20 +1318,12 @@ impl SessionDialogModel {
     pub fn section_top_offset(&self, target: SshSection) -> f32 {
         let visible_sec_list = visible_sections(self.config.protocol);
         let gap = f32::from(SPACE_CARD_GAP);
-        let heights = self.ui.card_heights.borrow();
         let mut y_acc = 0.0;
         for &sec in visible_sec_list {
             if sec == target {
                 break;
             }
-            let is_expanded = self.is_expanded(sec);
-            let card_h = heights.get(&sec).copied().unwrap_or_else(|| {
-                if is_expanded {
-                    default_expanded_height(sec, self.config.protocol)
-                } else {
-                    52.0
-                }
-            });
+            let card_h = default_expanded_height(sec, self.config.protocol);
             y_acc += card_h + gap;
         }
         y_acc
@@ -1313,31 +1360,14 @@ impl SessionDialogModel {
                 match self.config.protocol {
                     velowork_state::SessionProtocol::Ssh => 2,
                     velowork_state::SessionProtocol::Serial => {
-                        if handle == &self.inputs.serial_port.focus_handle(cx) {
+                        if handle == &self.inputs.serial_port.focus_handle(cx)
+                            || handle == self.selects.serial_port_picker.read(cx).focus_handle()
+                        {
                             2
                         } else if handle == self.selects.serial_baud_rate.read(cx).focus_handle() {
                             3
-                        } else if handle == self.selects.serial_data_bits.read(cx).focus_handle() {
-                            4
-                        } else if handle == self.selects.serial_stop_bits.read(cx).focus_handle() {
-                            5
-                        } else if handle == self.selects.serial_parity.read(cx).focus_handle() {
-                            6
-                        } else if handle == self.selects.serial_flow_control.read(cx).focus_handle() {
-                            7
-                        } else if handle == &self.focus.serial_dtr || handle == &self.focus.serial_rts {
-                            8
-                        } else if handle == self.selects.serial_display_mode.read(cx).focus_handle() {
-                            9
-                        } else if handle == self.selects.serial_line_ending.read(cx).focus_handle() {
-                            10
-                        } else if handle == &self.focus.serial_local_echo
-                            || handle == &self.focus.serial_timestamps
-                            || handle == &self.focus.serial_auto_reconnect
-                        {
-                            11
                         } else {
-                            12
+                            4
                         }
                     }
                     velowork_state::SessionProtocol::Telnet => {
@@ -1460,7 +1490,25 @@ impl SessionDialogModel {
                 }
             }
             SshSection::Advanced => {
-                if handle == &self.inputs.rekey_time.focus_handle(cx) {
+                if self.config.protocol == velowork_state::SessionProtocol::Serial {
+                    if handle == self.selects.serial_data_bits.read(cx).focus_handle()
+                        || handle == self.selects.serial_stop_bits.read(cx).focus_handle()
+                    {
+                        0
+                    } else if handle == self.selects.serial_parity.read(cx).focus_handle()
+                        || handle == self.selects.serial_flow_control.read(cx).focus_handle()
+                    {
+                        1
+                    } else if handle == &self.focus.serial_dtr || handle == &self.focus.serial_rts {
+                        2
+                    } else if handle == self.selects.serial_display_mode.read(cx).focus_handle()
+                        || handle == self.selects.serial_line_ending.read(cx).focus_handle()
+                    {
+                        3
+                    } else {
+                        4
+                    }
+                } else if handle == &self.inputs.rekey_time.focus_handle(cx) {
                     0
                 } else {
                     1
@@ -1494,10 +1542,14 @@ impl SessionDialogModel {
             return;
         }
 
+        if self.ui.active_section != sec {
+            self.ui.active_section = sec;
+            self.ui.scroll_handle.set_offset(point(px(0.0), px(0.0)));
+        }
+
         let (in_card_top, in_card_bottom) = self.handle_y_range_in_section(sec, handle, cx);
-        let sec_top = self.section_top_offset(sec);
-        let item_top = sec_top + in_card_top;
-        let item_bottom = sec_top + in_card_bottom;
+        let item_top = in_card_top;
+        let item_bottom = in_card_bottom;
 
         let viewport_h = f32::from(self.ui.scroll_handle.bounds().size.height);
         if viewport_h <= 0.0 {

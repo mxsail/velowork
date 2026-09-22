@@ -6863,6 +6863,27 @@ impl SessionPanel {
         )
         .detach();
 
+        let picker = model.selects.serial_port_picker.clone();
+        cx.subscribe(
+            &picker,
+            move |this, _, event: &velowork_ui::select::SelectEvent<SharedString>, cx| {
+                if let velowork_ui::select::SelectEvent::Change(Some(val)) = event {
+                    let port_str = val.to_string();
+                    if let Some(m) = this.ssh_dialog_mut() {
+                        m.inputs.serial_port.update(cx, |s, cx| s.set_value(&port_str, cx));
+                        m.config.serial_port = Some(port_str);
+                        m.validate_field(FieldId::SerialPort, cx);
+                    }
+                    this.dialog_notify(cx);
+                }
+            },
+        )
+        .detach();
+
+        if protocol == velowork_state::SessionProtocol::Serial {
+            model.refresh_detected_serial_ports(cx);
+        }
+
         if let Some(reg) = self
             .overlay_registry
             .clone()
@@ -6887,6 +6908,13 @@ impl SessionPanel {
         self.start_dialog_enter_animation(origin, cx);
     }
 
+    pub fn dialog_refresh_serial_ports(&mut self, cx: &mut App) {
+        if let Some(m) = self.ssh_dialog_mut() {
+            m.refresh_detected_serial_ports(cx);
+            self.dialog_notify(cx);
+        }
+    }
+
     pub fn refresh_session_dialog_selects(&mut self, cx: &mut App) {
         if let Some(m) = self.ssh_dialog() {
             let active_pid = self.active_project_id(cx);
@@ -6904,6 +6932,9 @@ impl SessionPanel {
         };
         let old_validation = model.ui.validation.get(fid).cloned();
         model.validate_field(fid, cx);
+        if fid == FieldId::SerialPort {
+            model.sync_serial_port_picker_from_input(cx);
+        }
         let new_validation = model.ui.validation.get(fid).cloned();
         let changed = old_validation != new_validation;
         if changed {
@@ -6938,9 +6969,10 @@ impl SessionPanel {
 
     pub fn dialog_nav_to(&mut self, s: SshSection, cx: &mut App) {
         if let Some(m) = self.ssh_dialog_mut() {
+            m.sync_config_from_inputs(cx);
             m.ui.expanded_sections.insert(s);
             m.ui.active_section = s;
-            m.ui.pending_scroll.set(Some(s));
+            m.ui.scroll_handle.set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
             self.dialog_notify(cx);
         }
     }
@@ -7383,6 +7415,7 @@ impl SessionPanel {
                     if let Some(err) = model.validate_all(cx) {
                         model.ui.active_section = err.section();
                         model.ui.expanded_sections.insert(err.section());
+                        model.ui.pending_scroll.set(Some(err.section()));
                         self.dialog_notify(cx);
                         return;
                     }
@@ -7421,6 +7454,8 @@ impl SessionPanel {
                         &i18n!(cx, "sftp.dialog.name_exists").replace("{name}", &name),
                     )),
                 );
+                model.ui.active_section = SshSection::Basic;
+                model.ui.pending_scroll.set(Some(SshSection::Basic));
             }
             self.dialog_notify(cx);
             return;
@@ -7606,9 +7641,13 @@ impl SessionPanel {
                 .left(motion_values.offset.x)
                 .top(motion_values.offset.y)
                 .opacity(motion_values.card_opacity)
-                .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                    cx.stop_propagation();
-                })
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        window.focus(&this.focus_handle, cx);
+                    }),
+                )
                 .child(card);
 
             let card_wrapper = div()

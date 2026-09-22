@@ -1450,7 +1450,8 @@
     "serial": {
       "port": "Serial Port",
       "port_placeholder": "COM3 or /dev/ttyUSB0",
-      "refresh": "Refresh Ports",
+      "select_port_placeholder": "Select from detected devices...",
+      "refresh": "Refresh serial ports",
       "no_ports": "No serial devices detected",
       "baud_rate": "Baud Rate",
       "data_bits": "Data Bits",
@@ -1477,7 +1478,10 @@
       "line_ending_none": "None",
       "local_echo": "Local Echo",
       "timestamps": "Timestamps",
-      "auto_reconnect": "Auto Reconnect"
+      "auto_reconnect": "Auto Reconnect",
+      "group_transmission": "Transmission & Parity",
+      "group_signals": "Hardware Control Signals",
+      "group_display": "Terminal Display & Control"
     },
     "telnet": {
       "host": "Host",

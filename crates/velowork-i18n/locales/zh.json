@@ -1450,6 +1450,7 @@
     "serial": {
       "port": "串口端口",
       "port_placeholder": "COM3 或 /dev/ttyUSB0",
+      "select_port_placeholder": "从已检测到的设备中选择...",
       "refresh": "刷新串口列表",
       "no_ports": "未检测到串口设备",
       "baud_rate": "波特率",
@@ -1477,7 +1478,10 @@
       "line_ending_none": "无（None）",
       "local_echo": "本地回显",
       "timestamps": "时间戳标记",
-      "auto_reconnect": "自动重连"
+      "auto_reconnect": "自动重连",
+      "group_transmission": "通信与数据校验",
+      "group_signals": "硬件控制信号",
+      "group_display": "终端显示与数据流"
     },
     "telnet": {
       "host": "目标主机",
