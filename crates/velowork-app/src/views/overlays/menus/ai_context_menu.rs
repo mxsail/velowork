@@ -35,7 +35,7 @@ pub fn open_ai_context_menu(
     // 仅保留一个「复制」项：有选区则复制选区，否则复制整条消息，
     // 避免「复制选中内容」与「复制」语义重叠、菜单项重复。
     let copy_text = selection_text.unwrap_or_else(|| message_text.clone());
-    let label = i18n!(cx, "common.copy");
+    let label = i18n!(cx, "common.action.copy");
     items.push(
         PopupMenuItem::item("ai-cm-copy", label, move |_, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));

@@ -317,7 +317,7 @@ impl TransferPopup {
                     t,
                     "transfer-cancel",
                     AppIcon::Close,
-                    i18n!(cx, "common.cancel"),
+                    i18n!(cx, "common.action.cancel"),
                     move |_this, _ev, _w, cx| {
                         store_c.update(cx, |s, cx| {
                             s.remove(&id_c);

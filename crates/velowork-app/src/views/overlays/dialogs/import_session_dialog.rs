@@ -575,7 +575,7 @@ impl Render for ImportSessionsDialog {
                             .gap(SPACE_MD)
                             .child(
                                 Button::new("import-cancel-btn", &t)
-                                    .label(i18n!(cx, "common.cancel"))
+                                    .label(i18n!(cx, "common.action.cancel"))
                                     .disabled(self.is_importing)
                                     .focus_handle(&self.cancel_focus)
                                     .on_click(cx.listener(|this, _, _window, cx| {

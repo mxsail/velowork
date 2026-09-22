@@ -275,8 +275,8 @@ impl SettingsPanel {
         t: &velowork_core::theme::ThemeColors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let edit_label = i18n!(cx, "common.edit");
-        let delete_label = i18n!(cx, "common.delete");
+        let edit_label = i18n!(cx, "common.action.edit");
+        let delete_label = i18n!(cx, "common.action.delete");
         let detail = format!("{} · {}", model.base_url, model.model_id);
         let model_id = model.id.clone();
         let model_id_for_delete = model_id.clone();
@@ -408,8 +408,8 @@ impl SettingsPanel {
         let api_key_label = i18n!(cx, "settings.ai_assistant.api_key");
         let model_id_label = i18n!(cx, "settings.ai_assistant.model_id");
         let desc_label = i18n!(cx, "settings.ai_assistant.description");
-        let cancel_label = i18n!(cx, "common.cancel");
-        let save_label = i18n!(cx, "common.save");
+        let cancel_label = i18n!(cx, "common.action.cancel");
+        let save_label = i18n!(cx, "common.action.save");
         let test_label = i18n!(cx, "common.test");
         let test_testing_label = i18n!(cx, "settings.ai_assistant.test_testing");
         let _test_success_label = i18n!(cx, "status.test_success");

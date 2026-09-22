@@ -74,7 +74,7 @@ pub fn open_command_history_context_menu(
     // 4. 复制 (Copy)
     let e4 = entry.clone();
     let ev4 = on_event.clone();
-    let label_copy = i18n!(cx, "common.copy");
+    let label_copy = i18n!(cx, "common.action.copy");
     items.push(
         PopupMenuItem::item("history-menu-copy", label_copy, move |_, cx| {
             ev4(CommandHistoryContextMenuEvent::Copy { entry: e4.clone() }, cx);
@@ -98,7 +98,7 @@ pub fn open_command_history_context_menu(
     // 6. 删除 (Delete - 警告色)
     let e6 = entry.clone();
     let ev6 = on_event.clone();
-    let label_del = i18n!(cx, "common.delete");
+    let label_del = i18n!(cx, "common.action.delete");
     let t = velowork_ui::theme::theme(cx);
     items.push(
         PopupMenuItem::item("history-menu-delete", label_del, move |_, cx| {

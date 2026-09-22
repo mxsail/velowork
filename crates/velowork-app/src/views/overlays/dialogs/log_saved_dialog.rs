@@ -120,7 +120,7 @@ impl Render for LogSavedDialog {
                             .gap(SPACE_MD)
                             .child(
                                 Button::new("close-btn", &t)
-                                    .label(i18n!(cx, "common.close"))
+                                    .label(i18n!(cx, "common.action.close"))
                                     .focus_handle(&self.close_focus)
                                     .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
                             )

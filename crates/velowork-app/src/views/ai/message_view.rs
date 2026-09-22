@@ -149,7 +149,7 @@ fn render_user_message(
                 .group_hover(group_id, |s| s.opacity(1.0))
                 .when(on_edit.is_some(), |d| {
                     let on_edit = on_edit.unwrap();
-                    let edit_tip: &'static str = Box::leak(i18n!(cx, "common.edit").into_boxed_str());
+                    let edit_tip: &'static str = Box::leak(i18n!(cx, "common.action.edit").into_boxed_str());
                     d.child(
                         div()
                             .id(SharedString::from(format!("btn-edit-{}", msg_index)))
@@ -169,7 +169,7 @@ fn render_user_message(
                     let copy_tip: &'static str = if copied {
                         Box::leak(i18n!(cx, "ai_assistant.copied").into_boxed_str())
                     } else {
-                        Box::leak(i18n!(cx, "common.copy").into_boxed_str())
+                        Box::leak(i18n!(cx, "common.action.copy").into_boxed_str())
                     };
                     let icon = if copied {
                         AppIcon::Check.size(px(12.0)).text_color(p.status_success)
@@ -290,7 +290,7 @@ fn render_assistant_message(
             let copy_tip: &'static str = if copied {
                 Box::leak(i18n!(cx, "ai_assistant.copied").into_boxed_str())
             } else {
-                Box::leak(i18n!(cx, "common.copy").into_boxed_str())
+                Box::leak(i18n!(cx, "common.action.copy").into_boxed_str())
             };
             let icon = if copied {
                 AppIcon::Check.size(px(12.0)).text_color(p.status_success)

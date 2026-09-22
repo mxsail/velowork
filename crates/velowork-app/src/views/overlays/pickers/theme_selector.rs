@@ -102,7 +102,7 @@ impl ThemeSelector {
             .centered()
             .keyboard_hints(vec![
                 ("Enter".to_string(), i18n!(cx, "common.select")),
-                ("Esc".to_string(), i18n!(cx, "common.close")),
+                ("Esc".to_string(), i18n!(cx, "common.action.close")),
             ])
             .key_context("ThemeSelector");
 
@@ -423,7 +423,7 @@ impl Render for ThemeSelector {
             .child({
                 let hint_nav = i18n!(cx, "theme.hint_navigate");
                 let hint_sel = i18n!(cx, "theme.hint_select");
-                let hint_cls = i18n!(cx, "common.close");
+                let hint_cls = i18n!(cx, "common.action.close");
                 let hints = [
                     ("↑↓", hint_nav.as_str()),
                     ("Enter", hint_sel.as_str()),

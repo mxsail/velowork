@@ -447,12 +447,12 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                         let reconnect_text = if is_reconnecting {
                             i18n!(cx, "status.reconnecting")
                         } else {
-                            i18n!(cx, "common.reconnect")
+                            i18n!(cx, "common.action.reconnect")
                         };
                         let tooltip_text = if is_reconnecting {
                             i18n!(cx, "status.reconnecting")
                         } else {
-                            i18n!(cx, "common.reconnect")
+                            i18n!(cx, "common.action.reconnect")
                         };
                         let banner_border = if is_reconnecting {
                             p.status_warning

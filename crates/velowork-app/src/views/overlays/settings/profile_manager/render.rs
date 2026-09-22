@@ -157,7 +157,7 @@ impl ProfileManager {
                                 Button::new(format!("profile-del-cancel-{id}"), &t)
                                     .focus_handle(&self.delete_cancel_focus)
                                     .size(ControlSize::Default)
-                                    .label(i18n!(cx, "common.cancel"))
+                                    .label(i18n!(cx, "common.action.cancel"))
                                     .on_click({
                                         let e = entity.clone();
                                         move |_, _window, cx| {
@@ -170,7 +170,7 @@ impl ProfileManager {
                                     .focus_handle(&self.delete_confirm_focus)
                                     .size(ControlSize::Default)
                                     .danger(true)
-                                    .label(i18n!(cx, "common.delete"))
+                                    .label(i18n!(cx, "common.action.delete"))
                                     .on_click({
                                         let e = entity.clone();
                                         let id_del = id_for_delete_confirm.clone();
@@ -228,7 +228,7 @@ impl ProfileManager {
                             .size(ControlSize::Default)
                             .primary()
                             .disabled(is_active)
-                            .label(i18n!(cx, "common.switch"))
+                            .label(i18n!(cx, "common.action.switch"))
                             .on_click({
                                 let e = entity.clone();
                                 move |_, _window, cx| {
@@ -256,7 +256,7 @@ impl ProfileManager {
                             .size(ControlSize::Default)
                             .danger(true)
                             .disabled(is_active || is_default)
-                            .label(i18n!(cx, "common.delete"))
+                            .label(i18n!(cx, "common.action.delete"))
                             .on_click({
                                 let e = entity.clone();
                                 let id_del = id_for_delete.clone();
@@ -421,7 +421,7 @@ impl Render for ProfileManager {
                                     .focus_handle(&self.create_button_focus)
                                     .size(ControlSize::Default)
                                     .primary()
-                                    .label(i18n!(cx, "common.create"))
+                                    .label(i18n!(cx, "common.action.create"))
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.create_profile(cx);
                                     })),

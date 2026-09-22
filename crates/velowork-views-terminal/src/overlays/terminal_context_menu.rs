@@ -140,9 +140,9 @@ pub fn open_terminal_context_menu(
 
     let open_in_browser = i18n!(cx, "terminal.open_in_browser");
     let copy_link = i18n!(cx, "terminal.copy_link");
-    let copy = i18n!(cx, "common.copy");
-    let paste = i18n!(cx, "common.paste");
-    let select_all = i18n!(cx, "common.select_all");
+    let copy = i18n!(cx, "common.action.copy");
+    let paste = i18n!(cx, "common.action.paste");
+    let select_all = i18n!(cx, "common.action.select_all");
     let split_horizontal = i18n!(cx, "terminal.split_horizontal");
     let split_vertical = i18n!(cx, "terminal.split_vertical");
     let edit_config = i18n!(cx, "terminal.edit_config");

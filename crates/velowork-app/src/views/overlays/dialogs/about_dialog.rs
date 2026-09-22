@@ -133,7 +133,7 @@ impl AboutDialog {
                 }))
                 .into_any_element()
         } else if is_failed {
-            let retry_tip = i18n!(cx, "common.retry");
+            let retry_tip = i18n!(cx, "common.action.retry");
             div()
                 .id("about-failed-retry-chip")
                 .cursor_pointer()
@@ -281,7 +281,7 @@ impl AboutDialog {
         let t = theme(cx);
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let license_label = i18n!(cx, "about.license");
-        let close_label = i18n!(cx, "common.close");
+        let close_label = i18n!(cx, "common.action.close");
 
         h_flex()
             .h(px(48.0))

@@ -282,7 +282,7 @@ impl Render for DocumentView {
                     let copy_label = if is_copied {
                         i18n!(cx, "ai_assistant.copied")
                     } else {
-                        i18n!(cx, "common.copy")
+                        i18n!(cx, "common.action.copy")
                     };
                     let copy_icon = if is_copied {
                         AppIcon::Check

@@ -262,7 +262,7 @@ pub fn render_session_dialog(
     let save_label = if model.editing_id.is_some() {
         i18n!(cx, "ssh.dialog.save_changes")
     } else {
-        i18n!(cx, "common.save")
+        i18n!(cx, "common.action.save")
     };
 
     let is_ssh_session = model.config.protocol == velowork_state::SessionProtocol::Ssh;
@@ -309,7 +309,7 @@ pub fn render_session_dialog(
                 .gap(SPACE_SM)
                 .child(action_button(
                     "cancel",
-                    &i18n!(cx, "common.cancel"),
+                    &i18n!(cx, "common.action.cancel"),
                     t,
                     cx,
                     false,
@@ -713,8 +713,8 @@ fn render_folder_select_field(
     cx: &mut App,
 ) -> impl IntoElement {
     let field_body = if model.ui.creating_parent_folder {
-        let confirm_tip = i18n!(cx, "common.confirm");
-        let cancel_tip = i18n!(cx, "common.cancel");
+        let confirm_tip = i18n!(cx, "common.action.confirm");
+        let cancel_tip = i18n!(cx, "common.action.cancel");
         let active_pid = active_project_id.clone();
         let panel_clone = panel.clone();
         let confirm = icon_button("parent-folder-confirm", AppIcon::Check, t, cx)
@@ -947,7 +947,7 @@ fn render_dialog_test_status(
         TestConnectionStatus::Testing => div()
             .text_size(ui_text_ms(cx))
             .text_color(rgb(t.text_secondary))
-            .child(i18n!(cx, "common.testing")),
+            .child(i18n!(cx, "common.state.testing")),
         TestConnectionStatus::Success { latency_ms } => div()
             .flex()
             .items_center()

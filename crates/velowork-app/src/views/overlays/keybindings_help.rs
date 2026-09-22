@@ -1006,7 +1006,7 @@ impl Render for KeybindingsHelp {
                                     .child(keyboard_hint("↑↓", i18n!(cx, "keybindings.hint_navigate"), &t, cx))
                                     .child(keyboard_hint("Enter", i18n!(cx, "keybindings.hint_record"), &t, cx))
                                     .child(keyboard_hint("Space", i18n!(cx, "keybindings.hint_toggle"), &t, cx))
-                                    .child(keyboard_hint("Esc", i18n!(cx, "common.close"), &t, cx)),
+                                    .child(keyboard_hint("Esc", i18n!(cx, "common.action.close"), &t, cx)),
                             )
                             .child(
                                 div()
@@ -1046,7 +1046,7 @@ impl Render for KeybindingsHelp {
                                                     .hover(|s| s.bg(surface_bg_t(t.bg_hover, &t)))
                                                     .text_size(ui_text_sm(cx))
                                                     .text_color(rgb(t.text_primary))
-                                                    .child(i18n!(cx, "common.cancel"))
+                                                    .child(i18n!(cx, "common.action.cancel"))
                                                     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _window, cx| {
                                                         this.cancel_reset(cx);
                                                     })),

@@ -276,9 +276,9 @@ impl Render for RenameDirectoryDialog {
                             .border_t_1()
                             .border_color(p.border_subtle)
                             .child(dialog_actions(
-                                &i18n!(cx, "common.cancel"),
+                                &i18n!(cx, "common.action.cancel"),
                                 cx.listener(|this, _, _, cx| this.close(cx)),
-                                &i18n!(cx, "common.rename"),
+                                &i18n!(cx, "common.action.rename"),
                                 cx.listener(|this, _, _, cx| this.confirm(cx)),
                                 &self.cancel_focus,
                                 &self.confirm_focus,

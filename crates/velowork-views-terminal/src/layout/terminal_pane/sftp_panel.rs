@@ -1635,7 +1635,7 @@ impl BottomPanel {
                 div()
                     .text_size(ui_text_md(cx))
                     .text_color(p.text_muted)
-                    .child(i18n!(cx, "common.loading")),
+                    .child(i18n!(cx, "common.state.loading")),
             )
     }
 
@@ -1742,8 +1742,8 @@ impl BottomPanel {
                 cx,
                 title,
                 message,
-                i18n!(cx, "common.delete"),
-                i18n!(cx, "common.cancel"),
+                i18n!(cx, "common.action.delete"),
+                i18n!(cx, "common.action.cancel"),
                 true,
                 self.overlay_registry.clone(),
                 "sftp-delete-confirm",
@@ -3075,7 +3075,7 @@ impl BottomPanel {
                 title,
                 message,
                 i18n!(cx, "sftp.upload"),
-                i18n!(cx, "common.cancel"),
+                i18n!(cx, "common.action.cancel"),
                 false,
                 self.overlay_registry.clone(),
                 "sftp-upload-confirm",
@@ -3468,7 +3468,7 @@ impl BottomPanel {
                     .justify_end()
                     .gap(SPACE_SM)
                     .child(
-                        button("cancel-creation-btn", &i18n!(cx, "common.cancel"), &t).on_click(
+                        button("cancel-creation-btn", &i18n!(cx, "common.action.cancel"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.close_active_dialog(cx);
                             }),
@@ -3509,7 +3509,7 @@ impl BottomPanel {
     ) -> impl IntoElement {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
-        let title: SharedString = i18n!(cx, "common.rename").into();
+        let title: SharedString = i18n!(cx, "common.action.rename").into();
 
         let card =
             modal_content("sftp-rename-modal", cx)
@@ -3552,14 +3552,14 @@ impl BottomPanel {
                         .justify_end()
                         .gap(SPACE_SM)
                         .child(
-                            button("rename-cancel", &i18n!(cx, "common.cancel"), &t).on_click(
+                            button("rename-cancel", &i18n!(cx, "common.action.cancel"), &t).on_click(
                                 cx.listener(|this, _, _, cx| {
                                     this.close_modal(cx);
                                 }),
                             ),
                         )
                         .child(
-                            button_primary("rename-save", &i18n!(cx, "common.rename"), &t)
+                            button_primary("rename-save", &i18n!(cx, "common.action.rename"), &t)
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.submit_rename(cx);
                                 })),
@@ -3709,7 +3709,7 @@ impl BottomPanel {
                             h_flex()
                                 .gap(SPACE_SM)
                                 .child(
-                                    button("move-cancel", &i18n!(cx, "common.cancel"), &t)
+                                    button("move-cancel", &i18n!(cx, "common.action.cancel"), &t)
                                         .on_click(cx.listener(|this, _, _, cx| {
                                             this.close_modal(cx);
                                         }))
@@ -3792,7 +3792,7 @@ impl BottomPanel {
                     .justify_end()
                     .gap(SPACE_SM)
                     .child(
-                        button("link-cancel", &i18n!(cx, "common.cancel"), &t).on_click(
+                        button("link-cancel", &i18n!(cx, "common.action.cancel"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.close_modal(cx);
                             }),
@@ -3887,7 +3887,7 @@ impl BottomPanel {
                     .border_color(p.border_subtle)
                     .justify_end()
                     .child(
-                        button("props-close", &i18n!(cx, "common.close"), &t).on_click(
+                        button("props-close", &i18n!(cx, "common.action.close"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.close_modal(cx);
                             }),
@@ -4025,7 +4025,7 @@ impl Panel for BottomPanel {
         });
         items.push(ToolbarItem::IconButton {
             icon: AppIcon::Refresh,
-            tooltip: i18n!(cx, "common.refresh"),
+            tooltip: i18n!(cx, "common.action.refresh"),
             enabled: true,
             on_click: refresh_cb,
             accent: None,
@@ -4158,7 +4158,7 @@ impl Render for BottomPanel {
                         .child(format!("{}{}", i18n!(cx, "sftp.status.failed"), err)),
                 )
                 .child(
-                    button_primary("sftp-retry-btn", i18n!(cx, "common.retry"), &t).on_click(
+                    button_primary("sftp-retry-btn", i18n!(cx, "common.action.retry"), &t).on_click(
                         cx.listener(|this, _, _, cx| {
                             this.bind_active_terminal(cx);
                         }),
@@ -4432,7 +4432,7 @@ impl Render for BottomPanel {
                                 menu_item(
                                     "sftp-menu-refresh",
                                     AppIcon::Refresh,
-                                    i18n!(cx, "common.refresh"),
+                                    i18n!(cx, "common.action.refresh"),
                                     &t, cx,
                                 )
                                 .on_click(cx.listener(
@@ -4449,7 +4449,7 @@ impl Render for BottomPanel {
                                     menu_item_with_shortcut(
                                         "sftp-menu-open",
                                         AppIcon::ExternalLink,
-                                        i18n!(cx, "common.open"),
+                                        i18n!(cx, "common.action.open"),
                                         Some("Space".into()),
                                         &t, cx,
                                     )
@@ -4479,7 +4479,7 @@ impl Render for BottomPanel {
                                     menu_item_with_shortcut(
                                         "sftp-menu-delete",
                                         AppIcon::Trash,
-                                        i18n!(cx, "common.delete"),
+                                        i18n!(cx, "common.action.delete"),
                                         Some("Delete".into()),
                                         &t, cx,
                                     )
@@ -4493,7 +4493,7 @@ impl Render for BottomPanel {
                                     menu_item_with_shortcut(
                                         "sftp-menu-rename",
                                         AppIcon::Edit,
-                                        i18n!(cx, "common.rename"),
+                                        i18n!(cx, "common.action.rename"),
                                         Some("F2".into()),
                                         &t, cx,
                                     )

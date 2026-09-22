@@ -469,8 +469,8 @@ impl ServiceDialog {
         let s = self.strings.clone();
 
         let field_body = if self.creating_directory {
-            let confirm_tip = i18n!(cx, "common.confirm");
-            let cancel_tip = i18n!(cx, "common.cancel");
+            let confirm_tip = i18n!(cx, "common.action.confirm");
+            let cancel_tip = i18n!(cx, "common.action.cancel");
             let confirm = icon_button("dir-confirm", AppIcon::Check, t, cx)
                 .tooltip(move |_, cx| {
                     cx.new(|_| velowork_ui::Tooltip::new(confirm_tip.clone()))
@@ -776,9 +776,9 @@ impl Render for ServiceDialog {
         };
 
         let footer = dialog_actions(
-            &i18n!(cx, "common.cancel"),
+            &i18n!(cx, "common.action.cancel"),
             cx.listener(|this, _, window, cx| this.close(Some(window), cx)),
-            &i18n!(cx, "common.save"),
+            &i18n!(cx, "common.action.save"),
             cx.listener(|this, _, window, cx| this.on_save(window, cx)),
             &self.cancel_focus,
             &self.confirm_focus,

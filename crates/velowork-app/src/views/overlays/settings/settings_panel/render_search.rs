@@ -76,8 +76,8 @@ impl SettingsPanel {
         t: &velowork_core::theme::ThemeColors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let edit_label = i18n!(cx, "common.edit");
-        let delete_label = i18n!(cx, "common.delete");
+        let edit_label = i18n!(cx, "common.action.edit");
+        let delete_label = i18n!(cx, "common.action.delete");
         let keyword_label = i18n!(cx, "settings.search_engines.keyword");
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
 
@@ -214,8 +214,8 @@ impl SettingsPanel {
         let url_hint = i18n!(cx, "settings.search_engines.url_hint");
         let keyword_label = i18n!(cx, "settings.search_engines.keyword");
         let keyword_hint = i18n!(cx, "settings.search_engines.keyword_hint");
-        let cancel_label = i18n!(cx, "common.cancel");
-        let save_label = i18n!(cx, "common.save");
+        let cancel_label = i18n!(cx, "common.action.cancel");
+        let save_label = i18n!(cx, "common.action.save");
         let focus_group = FocusGroup::new();
         focus_group.extend([
             self.search_name_input.read(cx).focus_handle(cx),

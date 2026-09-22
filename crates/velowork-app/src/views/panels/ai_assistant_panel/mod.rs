@@ -3433,7 +3433,7 @@ impl AiAssistantPanel {
         let history = self.ai_history.clone();
 
         let title = i18n!(cx, "ai_assistant.history");
-        let close_tip = i18n!(cx, "common.close");
+        let close_tip = i18n!(cx, "common.action.close");
 
         // 标题栏（固定，不随列表滚动）+ 右侧关闭按钮。
         let header = h_flex()
@@ -4065,8 +4065,8 @@ impl AiAssistantPanel {
                 cx,
                 title,
                 msg,
-                i18n!(cx, "common.confirm"),
-                i18n!(cx, "common.cancel"),
+                i18n!(cx, "common.action.confirm"),
+                i18n!(cx, "common.action.cancel"),
                 true,
                 None,
                 "ai-clear-all-sessions-confirm",
@@ -5206,7 +5206,7 @@ impl AiAssistantPanel {
                     .child(self.ai_icon_btn(
                         "ai-refresh",
                         AppIcon::Refresh,
-                        i18n!(cx, "common.refresh"),
+                        i18n!(cx, "common.action.refresh"),
                         &t,
                         cx,
                         |this, _, cx| this.refresh_ai(cx),
@@ -5289,7 +5289,7 @@ impl AiAssistantPanel {
                                     div()
                                         .text_size(ui_text_sm(cx))
                                         .text_color(rgb(t.text_muted))
-                                        .child(i18n!(cx, "common.loading")),
+                                        .child(i18n!(cx, "common.state.loading")),
                                 ),
                         )
                     })
@@ -5394,7 +5394,7 @@ impl AiAssistantPanel {
                                         div()
                                             .text_size(ui_text_xs(cx))
                                             .text_color(rgb(t.text_muted))
-                                            .child(i18n!(cx, "common.loading")),
+                                            .child(i18n!(cx, "common.state.loading")),
                                     ),
                             )
                         } else {
@@ -6815,7 +6815,7 @@ fn render_ai_message(
                 let cancel_btn = Button::new(format!("ai-edit-cancel-{}", msg_index), &t)
                     .default()
                     .small()
-                    .label(i18n!(cx, "common.cancel"))
+                    .label(i18n!(cx, "common.action.cancel"))
                     .on_click(move |_ev, _window, cx| {
                         let _ = panel_cancel.update(cx, |panel, cx| panel.cancel_edit(cx));
                     });
@@ -6867,7 +6867,7 @@ fn render_ai_message(
         }
 
         // Normal user message: right-aligned bubble, hover actions on the right.
-        let edit_label = i18n!(cx, "common.edit");
+        let edit_label = i18n!(cx, "common.action.edit");
         return (
             v_flex()
                 .w_full()
@@ -7025,7 +7025,7 @@ fn msg_copy_btn(
     let label = if copied {
         i18n!(cx, "ai_assistant.copy_done")
     } else {
-        i18n!(cx, "common.copy")
+        i18n!(cx, "common.action.copy")
     };
     let icon_path = if copied {
         AppIcon::Check
@@ -7193,7 +7193,7 @@ fn code_block_with_actions(
                             Button::new("code-copy-btn", &t)
                                 .text()
                                 .small()
-                                .label(i18n!(cx, "common.copy"))
+                                .label(i18n!(cx, "common.action.copy"))
                                 .on_click(move |_ev, _window, cx| {
                                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(
                                         code_clone.clone(),
@@ -7258,7 +7258,7 @@ fn result_code_block(code: &str, lang: &str, t: &ThemeColors, cx: &mut App) -> A
                     Button::new("code-copy-btn", &t)
                         .text()
                         .small()
-                        .label(i18n!(cx, "common.copy"))
+                        .label(i18n!(cx, "common.action.copy"))
                         .on_click(move |_ev, _window, cx| {
                             cx.write_to_clipboard(gpui::ClipboardItem::new_string(
                                 code_clone.clone(),

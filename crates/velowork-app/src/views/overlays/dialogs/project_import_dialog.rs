@@ -925,7 +925,7 @@ impl Render for ProjectImportDialog {
                     .child(
                         Button::new("import-cancel-btn", &t)
                             .size(ControlSize::Default)
-                            .label(i18n!(cx, "common.cancel"))
+                            .label(i18n!(cx, "common.action.cancel"))
                             .focus_handle(&self.cancel_focus)
                             .on_click(cx.listener(|this, _, _, cx| this.close(cx))),
                     )

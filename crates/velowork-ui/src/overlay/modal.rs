@@ -269,7 +269,7 @@ impl ModalHeader {
                 right = right.child(chrome_button(
                     "overlay-header-close",
                     AppIcon::Close,
-                    i18n!(cx, "common.close"),
+                    i18n!(cx, "common.action.close"),
                     on_close,
                     cx,
                 ));
@@ -466,7 +466,7 @@ impl ModalActions {
         Self::new()
             .push(ModalAction::new(
                 "overlay-action-cancel",
-                i18n!(cx, "common.cancel"),
+                i18n!(cx, "common.action.cancel"),
                 on_cancel,
             ))
             .push(

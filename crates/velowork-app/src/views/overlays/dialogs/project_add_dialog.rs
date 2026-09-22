@@ -552,7 +552,7 @@ impl Render for AddProjectDialog {
             i18n!(cx, "add_project.title")
         };
         let confirm_label = if is_edit {
-            i18n!(cx, "common.save")
+            i18n!(cx, "common.action.save")
         } else {
             i18n!(cx, "add_project.add")
         };
@@ -565,7 +565,7 @@ impl Render for AddProjectDialog {
         focus_group.add(self.cancel_focus.clone());
         focus_group.add(self.confirm_focus.clone());
 
-        let close_tip = i18n!(cx, "common.close");
+        let close_tip = i18n!(cx, "common.action.close");
 
         modal_content("add-project-modal", cx)
             .w(px(460.0))
@@ -694,7 +694,7 @@ impl Render for AddProjectDialog {
                             .border_t_1()
                             .border_color(p.border_subtle)
                             .child(dialog_actions_extended(
-                                i18n!(cx, "common.cancel"),
+                                i18n!(cx, "common.action.cancel"),
                                 cx.listener(|this, _, _window, cx| {
                                     this.close(cx);
                                 }),

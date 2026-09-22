@@ -224,7 +224,7 @@ pub fn open_service_context_menu(
 
         let node_rename = n.clone();
         let ev3 = on_event.clone();
-        let label_rename = i18n!(cx, "common.rename");
+        let label_rename = i18n!(cx, "common.action.rename");
         items.push(
             PopupMenuItem::item("service-menu-rename", label_rename, move |_, cx| {
                 ev3(ServiceContextMenuEvent::Rename { node: node_rename.clone() }, cx);
@@ -235,7 +235,7 @@ pub fn open_service_context_menu(
         if is_service {
             let node_edit = n.clone();
             let ev4 = on_event.clone();
-            let label_edit = i18n!(cx, "common.edit");
+            let label_edit = i18n!(cx, "common.action.edit");
             items.push(
                 PopupMenuItem::item("service-menu-edit", label_edit, move |_, cx| {
                     ev4(ServiceContextMenuEvent::Edit { node: node_edit.clone() }, cx);
@@ -245,7 +245,7 @@ pub fn open_service_context_menu(
 
             let node_copy = n.clone();
             let ev5 = on_event.clone();
-            let label_copy = i18n!(cx, "common.copy");
+            let label_copy = i18n!(cx, "common.action.copy");
             items.push(
                 PopupMenuItem::item("service-menu-copy", label_copy, move |_, cx| {
                     ev5(ServiceContextMenuEvent::Copy { node: node_copy.clone() }, cx);
@@ -258,7 +258,7 @@ pub fn open_service_context_menu(
 
         let node_id = delete_id.clone();
         let ev6 = on_event.clone();
-        let label_del = i18n!(cx, "common.delete");
+        let label_del = i18n!(cx, "common.action.delete");
         let t = velowork_ui::theme::theme(cx);
         items.push(
             PopupMenuItem::item("service-menu-delete", label_del, move |_, cx| {

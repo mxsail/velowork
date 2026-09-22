@@ -36,8 +36,8 @@ impl SettingsPanel {
         let confirm_pw_placeholder = i18n!(cx, "settings.security.confirm_password_placeholder");
         let password_timeout_label = i18n!(cx, "settings.security.password_timeout.label");
         let remove_hint_label = i18n!(cx, "settings.security.remove_hint");
-        let confirm_label = i18n!(cx, "common.confirm");
-        let cancel_label = i18n!(cx, "common.cancel");
+        let confirm_label = i18n!(cx, "common.action.confirm");
+        let cancel_label = i18n!(cx, "common.action.cancel");
 
         let result = self.security_result.clone();
 

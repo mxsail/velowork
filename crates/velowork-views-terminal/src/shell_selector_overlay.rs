@@ -37,7 +37,7 @@ impl ShellSelectorOverlay {
             .centered()
             .keyboard_hints(vec![
                 ("Enter".to_string(), i18n!(cx, "common.select")),
-                ("Esc".to_string(), i18n!(cx, "common.close")),
+                ("Esc".to_string(), i18n!(cx, "common.action.close")),
             ])
             .key_context("ShellSelectorOverlay");
 

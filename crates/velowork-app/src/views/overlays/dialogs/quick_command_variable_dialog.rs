@@ -230,9 +230,9 @@ impl Render for QuickCommandVarDialog {
                                         div()
                                             .text_size(ui_text_sm(cx))
                                             .text_color(rgb(t.text_muted))
-                                            .child(i18n!(cx, "common.copy")),
+                                            .child(i18n!(cx, "common.action.copy")),
                                     )
-                                    .tooltip(move |_, cx| { let __tip = i18n!(cx, "common.copy"); cx.new(|_| Tooltip::new(__tip)).into() })
+                                    .tooltip(move |_, cx| { let __tip = i18n!(cx, "common.action.copy"); cx.new(|_| Tooltip::new(__tip)).into() })
                                     .on_click({
                                         let preview = preview.clone();
                                         cx.listener(move |_, _, _window, cx| {
@@ -321,7 +321,7 @@ impl Render for QuickCommandVarDialog {
                     .child(
                         button(
                             "qc-var-cancel",
-                            i18n!(cx, "common.cancel"),
+                            i18n!(cx, "common.action.cancel"),
                             &t,
                         )
                         .focus_handle(&self.cancel_focus)

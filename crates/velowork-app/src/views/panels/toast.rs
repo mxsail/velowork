@@ -429,7 +429,7 @@ fn render_single_toast(
     let toast_id = toast.id.clone();
     let has_countdown = !toast.actions.is_empty();
     let remaining = toast.remaining_fraction();
-    let close_tip = i18n!(cx, "common.close");
+    let close_tip = i18n!(cx, "common.action.close");
 
     div()
         .id(SharedString::from(format!("toast-{}", toast.id)))

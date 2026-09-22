@@ -3395,7 +3395,7 @@ impl SessionPanel {
                 items.push(
                     PopupMenuItem::item(
                         "tree-ctx-connect",
-                        i18n!(cx, "common.connect"),
+                        i18n!(cx, "common.action.connect"),
                         move |window, cx| {
                             if let Some(this) = w3.upgrade() {
                                 this.update(cx, |this, cx| {
@@ -3414,7 +3414,7 @@ impl SessionPanel {
                 items.push(
                     PopupMenuItem::item(
                         "tree-ctx-connect",
-                        i18n!(cx, "common.connect"),
+                        i18n!(cx, "common.action.connect"),
                         move |window, cx| {
                             if let Some(this) = w_conn.upgrade() {
                                 let sid = sid.clone();
@@ -3571,7 +3571,7 @@ impl SessionPanel {
                 items.push(
                     PopupMenuItem::item(
                         "tree-ctx-rename-session",
-                        i18n!(cx, "common.rename"),
+                        i18n!(cx, "common.action.rename"),
                         move |window, cx| {
                             if let Some(this) = w_ren.upgrade() {
                                 let sid = sid.clone();
@@ -3587,7 +3587,7 @@ impl SessionPanel {
                 items.push(
                     PopupMenuItem::item(
                         "tree-ctx-duplicate",
-                        i18n!(cx, "common.duplicate"),
+                        i18n!(cx, "common.action.duplicate"),
                         move |window, cx| {
                             if let Some(this) = w_dup.upgrade() {
                                 let sid = sid_dup.clone();
@@ -3634,9 +3634,9 @@ impl SessionPanel {
                     i18n!(
                         cx,
                         if is_folder {
-                            "common.rename"
+                            "common.action.rename"
                         } else {
-                            "common.edit"
+                            "common.action.edit"
                         }
                     ),
                     move |window, cx| {
@@ -3670,7 +3670,7 @@ impl SessionPanel {
             items.push(
                 PopupMenuItem::item(
                     "tree-ctx-delete",
-                    i18n!(cx, "common.delete"),
+                    i18n!(cx, "common.action.delete"),
                     move |window, cx| {
                         if let Some(this) = w_del.upgrade() {
                             let del_id = del_id.clone();
@@ -6742,7 +6742,7 @@ impl SessionPanel {
             TestConnectionStatus::Testing => div()
                 .text_size(ui_text_sm(cx))
                 .text_color(rgb(t.text_secondary))
-                .child(i18n!(cx, "common.testing")),
+                .child(i18n!(cx, "common.state.testing")),
             TestConnectionStatus::Success { latency_ms } => h_flex()
                 .gap(SPACE_XS)
                 .items_center()
@@ -8079,14 +8079,14 @@ impl SessionPanel {
             .justify_end()
             .gap(SPACE_MD)
             .child(
-                button("cancel-btn", i18n!(cx, "common.cancel"), &t)
+                button("cancel-btn", i18n!(cx, "common.action.cancel"), &t)
                     .text_size(ui_text_md(cx))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.cancel_dialog(Some(window), cx);
                     })),
             )
             .child(
-                button_primary("save-btn", i18n!(cx, "common.save"), &t)
+                button_primary("save-btn", i18n!(cx, "common.action.save"), &t)
                     .text_size(ui_text_md(cx))
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.submit_dialog(Some(window), cx);
@@ -8176,7 +8176,7 @@ impl SessionPanel {
                         h_flex()
                             .gap(SPACE_MD)
                             .child(
-                                button("cancel-btn", i18n!(cx, "common.cancel"), &t)
+                                button("cancel-btn", i18n!(cx, "common.action.cancel"), &t)
                                     .text_size(ui_text_md(cx))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         this.cancel_dialog(Some(window), cx);
@@ -8184,7 +8184,7 @@ impl SessionPanel {
                             )
                             .child({
                                 let label = if is_testing {
-                                    i18n!(cx, "common.testing")
+                                    i18n!(cx, "common.state.testing")
                                 } else {
                                     i18n!(cx, "ssh.action.test_connection")
                                 };
@@ -8223,14 +8223,14 @@ impl SessionPanel {
                                     .hover(|s| s.bg(surface_bg_t(t.bg_hover, &t)))
                                     .flex()
                                     .items_center()
-                                    .child(i18n!(cx, "common.connect"))
+                                    .child(i18n!(cx, "common.action.connect"))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         log::info!("Connect button clicked");
                                         this.submit_and_connect(Some(window), cx);
                                     }))
                             })
                             .child(
-                                button_primary("save-btn", i18n!(cx, "common.save"), &t)
+                                button_primary("save-btn", i18n!(cx, "common.action.save"), &t)
                                     .text_size(ui_text_md(cx))
                                     .on_click(cx.listener(|this, _, window, cx| {
                                         log::info!("Save button clicked");

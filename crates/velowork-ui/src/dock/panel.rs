@@ -1561,7 +1561,7 @@ impl Render for DockPanel {
         }
 
         let weak_more = cx.entity().downgrade();
-        let more_tooltip = i18n!(cx, "common.more");
+        let more_tooltip = i18n!(cx, "common.action.more");
         let more_menu_open = self.active_menu.is_some();
         actions_w += action_btn_w;
         action_elements.push(
@@ -2384,7 +2384,7 @@ impl Render for DockPanel {
                             .child(format!("{}: {}", i18n!(cx, "dock.state.error"), err_msg)),
                     )
                     .child(
-                        button_primary("retry-btn", i18n!(cx, "common.retry"), &t).on_click(
+                        button_primary("retry-btn", i18n!(cx, "common.action.retry"), &t).on_click(
                             move |_, _window, cx| {
                                 if let Some(this) = retry_weak.upgrade() {
                                     let _ = this.update(cx, |this, cx| {

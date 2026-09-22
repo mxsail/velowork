@@ -84,7 +84,7 @@ pub fn open_quick_command_context_menu(
 
         let n1 = node.clone();
         let ev3 = on_event.clone();
-        let label_rename = i18n!(cx, "common.rename");
+        let label_rename = i18n!(cx, "common.action.rename");
         items.push(
             PopupMenuItem::item("qc-menu-rename", label_rename, move |_, cx| {
                 if let Some(node) = n1.clone() {
@@ -96,7 +96,7 @@ pub fn open_quick_command_context_menu(
 
         let n2 = node.clone();
         let ev4 = on_event.clone();
-        let label_edit = i18n!(cx, "common.edit");
+        let label_edit = i18n!(cx, "common.action.edit");
         items.push(
             PopupMenuItem::item("qc-menu-edit", label_edit, move |_, cx| {
                 if let Some(node) = n2.clone() {
@@ -108,7 +108,7 @@ pub fn open_quick_command_context_menu(
 
         let n3 = node.clone();
         let ev5 = on_event.clone();
-        let label_dup = i18n!(cx, "common.duplicate");
+        let label_dup = i18n!(cx, "common.action.duplicate");
         items.push(
             PopupMenuItem::item("qc-menu-duplicate", label_dup, move |_, cx| {
                 if let Some(node) = n3.clone() {
@@ -128,7 +128,7 @@ pub fn open_quick_command_context_menu(
         let node_id = delete_id.clone();
         let selected = request.selected_ids.clone();
         let ev6 = on_event.clone();
-        let label_del = i18n!(cx, "common.delete");
+        let label_del = i18n!(cx, "common.action.delete");
         let t = velowork_ui::theme::theme(cx);
         items.push(
             PopupMenuItem::item("qc-menu-delete", label_del, move |_, cx| {
@@ -149,7 +149,7 @@ pub fn open_quick_command_context_menu(
 
         let n1 = node.clone();
         let ev7 = on_event.clone();
-        let label_rename = i18n!(cx, "common.rename");
+        let label_rename = i18n!(cx, "common.action.rename");
         items.push(
             PopupMenuItem::item("qc-menu-rename-folder", label_rename, move |_, cx| {
                 if let Some(node) = n1.clone() {
@@ -164,7 +164,7 @@ pub fn open_quick_command_context_menu(
         let node_id = delete_id.clone();
         let selected = request.selected_ids.clone();
         let ev8 = on_event.clone();
-        let label_del = i18n!(cx, "common.delete");
+        let label_del = i18n!(cx, "common.action.delete");
         let t = velowork_ui::theme::theme(cx);
         items.push(
             PopupMenuItem::item("qc-menu-delete-folder", label_del, move |_, cx| {

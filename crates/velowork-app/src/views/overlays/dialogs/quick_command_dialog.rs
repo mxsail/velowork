@@ -345,7 +345,7 @@ impl QuickCommandDialog {
             QuickCommandDialogMode::CreateCommand { .. } => i18n!(cx, "quick_commands.new_command"),
             QuickCommandDialogMode::CreateFolder { .. } => i18n!(cx, "common.new_folder"),
             QuickCommandDialogMode::EditCommand { .. }
-            | QuickCommandDialogMode::EditFolder { .. } => i18n!(cx, "common.edit"),
+            | QuickCommandDialogMode::EditFolder { .. } => i18n!(cx, "common.action.edit"),
         }
     }
 
@@ -638,8 +638,8 @@ impl QuickCommandDialog {
     fn render_directory_selector(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         if self.creating_directory {
-            let confirm_tip = i18n!(cx, "common.confirm");
-            let cancel_tip = i18n!(cx, "common.cancel");
+            let confirm_tip = i18n!(cx, "common.action.confirm");
+            let cancel_tip = i18n!(cx, "common.action.cancel");
             let confirm = icon_button("dir-confirm", AppIcon::Check, &t, cx)
                 .tooltip(move |_, cx| cx.new(|_| Tooltip::new(confirm_tip.clone())).into())
                 .focus_action(&self.dir_confirm_focus, &t, cx.listener(move |this, _, window, cx| {
@@ -1112,9 +1112,9 @@ impl Render for QuickCommandDialog {
                     .border_t_1()
                     .border_color(p.border_subtle)
                     .child(dialog_actions(
-                        &i18n!(cx, "common.cancel"),
+                        &i18n!(cx, "common.action.cancel"),
                         cx.listener(|this, _, window, cx| this.close(Some(window), cx)),
-                        &i18n!(cx, "common.save"),
+                        &i18n!(cx, "common.action.save"),
                         cx.listener(|this, _, window, cx| this.save(window, cx)),
                         &self.cancel_focus,
                         &self.confirm_focus,

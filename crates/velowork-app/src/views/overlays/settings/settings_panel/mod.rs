@@ -694,7 +694,7 @@ impl SettingsPanel {
         let sync_provider_select = cx.new(|cx| {
             SelectState::new(cx)
                 .options(vec![
-                    SelectOption::new(None, i18n!(cx, "common.none")),
+                    SelectOption::new(None, i18n!(cx, "common.state.none")),
                     SelectOption::new(Some(SyncProvider::WebDav), "WebDAV"),
                     SelectOption::new(Some(SyncProvider::S3), i18n!(cx, "settings.sync.provider.s3")),
                 ])

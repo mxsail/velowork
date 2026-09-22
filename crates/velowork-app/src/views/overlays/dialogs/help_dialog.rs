@@ -59,7 +59,7 @@ impl HelpDialog {
         let _t = theme(cx);
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let title = i18n!(cx, "help.title");
-        let close_tip = i18n!(cx, "common.close");
+        let close_tip = i18n!(cx, "common.action.close");
 
         div()
             .flex_shrink_0()
@@ -437,7 +437,7 @@ impl HelpDialog {
     fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
-        let close_label = i18n!(cx, "common.close");
+        let close_label = i18n!(cx, "common.action.close");
 
         h_flex()
             .h(px(48.0))

@@ -76,7 +76,7 @@ impl HeaderAction {
             HeaderAction::Sftp => "terminal.sftp",
             HeaderAction::CommandPalette => "terminal.command_palette",
             HeaderAction::Search => "terminal.search",
-            HeaderAction::MoreMenu => "common.more",
+            HeaderAction::MoreMenu => "common.action.more",
             HeaderAction::TabList => "terminal.tab_list",
         }
     }

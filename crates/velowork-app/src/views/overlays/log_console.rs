@@ -423,7 +423,7 @@ impl LogConsole {
                     .child(
                         Button::new("log-copy", t)
                             .size(ControlSize::Compact)
-                            .label(i18n!(cx, "common.copy"))
+                            .label(i18n!(cx, "common.action.copy"))
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 let text = this
                                     .visible(cx)
@@ -438,7 +438,7 @@ impl LogConsole {
                         Button::new("log-clear", t)
                             .size(ControlSize::Compact)
                             .danger(true)
-                            .label(i18n!(cx, "common.clear"))
+                            .label(i18n!(cx, "common.action.clear"))
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 if let Some(hub) = logging::hub() {
                                     hub.clear();
@@ -475,7 +475,7 @@ impl LogConsole {
                 .into_any_element();
         }
 
-        let copy_tip = i18n!(cx, "common.copy");
+        let copy_tip = i18n!(cx, "common.action.copy");
         let count = visible.len();
         uniform_list(
             "log-console-list",

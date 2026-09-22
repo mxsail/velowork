@@ -222,7 +222,7 @@ impl Render for ColorPicker {
                     .items_center()
                     .child(
                         Button::new("color-picker-cancel", &t)
-                            .label(i18n!(cx, "common.cancel"))
+                            .label(i18n!(cx, "common.action.cancel"))
                             .small()
                             .text()
                             .on_click(cx.listener(|this, _, _window, cx| {
@@ -231,7 +231,7 @@ impl Render for ColorPicker {
                     )
                     .child(
                         Button::new("color-picker-confirm", &t)
-                            .label(i18n!(cx, "common.confirm"))
+                            .label(i18n!(cx, "common.action.confirm"))
                             .small()
                             .primary()
                             .disabled(!is_valid)

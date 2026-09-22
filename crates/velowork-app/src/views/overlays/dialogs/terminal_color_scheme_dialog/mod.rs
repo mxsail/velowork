@@ -687,7 +687,7 @@ impl Render for TerminalColorSchemeDialog {
                                                                 .label("×")
                                                                 .small()
                                                                 .text()
-                                                                .tooltip(i18n!(cx, "common.delete"))
+                                                                .tooltip(i18n!(cx, "common.action.delete"))
                                                                 .on_click(cx.listener({
                                                                     let id = id_owned.clone();
                                                                     move |this, _, _window, cx| {
@@ -773,14 +773,14 @@ impl Render for TerminalColorSchemeDialog {
                             .gap(SPACE_MD)
                             .child(
                                 Button::new("cancel-scheme-btn", &t)
-                                    .label(i18n!(cx, "common.cancel"))
+                                    .label(i18n!(cx, "common.action.cancel"))
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.close(cx);
                                     })),
                             )
                             .child(
                                 Button::new("save-scheme-btn", &t)
-                                    .label(i18n!(cx, "common.save"))
+                                    .label(i18n!(cx, "common.action.save"))
                                     .disabled(is_builtin)
                                     .on_click(cx.listener(|this, _, _window, cx| {
                                         this.save_and_apply(false, cx);

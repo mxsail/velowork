@@ -972,7 +972,7 @@ impl TerminalAiInline {
             Box::leak(i18n!(cx, "terminal.ai_toolbar_send_to_side_panel_tip").into_boxed_str());
 
         let close_tip: &'static str =
-            Box::leak(i18n!(cx, "common.close").into_boxed_str());
+            Box::leak(i18n!(cx, "common.action.close").into_boxed_str());
 
         capsule_toolbar_container("terminal-ai-toolbar", cx)
             .child(

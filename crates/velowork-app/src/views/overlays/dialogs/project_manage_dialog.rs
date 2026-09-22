@@ -516,7 +516,7 @@ impl ManageProjectsDialog {
                 .py(SPACE_LG)
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.text_muted))
-                .child(i18n!(cx, "common.no_results"))
+                .child(i18n!(cx, "common.state.no_results"))
                 .into_any_element()
         } else {
             virtual_list(
@@ -793,7 +793,7 @@ impl ManageProjectsDialog {
                                 }])
                         })
                         .text_size(ui_text_md(cx))
-                        .child(i18n!(cx, "common.confirm"))
+                        .child(i18n!(cx, "common.action.confirm"))
                         .on_mouse_down(MouseButton::Left, cx.listener({
                             let pid = project_id.clone();
                             move |this, _, _, cx| this.delete_project(&pid, cx)
@@ -825,7 +825,7 @@ impl ManageProjectsDialog {
                                 }])
                         })
                         .text_size(ui_text_md(cx))
-                        .child(i18n!(cx, "common.cancel"))
+                        .child(i18n!(cx, "common.action.cancel"))
                         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                             this.delete_confirming_id = None;
                             this.pending_focus = Some(PendingFocus::SearchInput);
@@ -1074,7 +1074,7 @@ impl Render for ManageProjectsDialog {
                     menu_item(
                         "mp-menu-rename",
                         AppIcon::Edit,
-                        i18n!(cx, "common.rename"),
+                        i18n!(cx, "common.action.rename"),
                         &t,
                         cx,
                     )
@@ -1154,7 +1154,7 @@ impl Render for ManageProjectsDialog {
                     menu_item_disabled(
                         "mp-menu-delete",
                         AppIcon::Trash,
-                        i18n!(cx, "common.delete"),
+                        i18n!(cx, "common.action.delete"),
                         &t,
                         cx,
                     )
@@ -1162,7 +1162,7 @@ impl Render for ManageProjectsDialog {
                     menu_item_with_color(
                         "mp-menu-delete",
                         AppIcon::Trash,
-                        i18n!(cx, "common.delete"),
+                        i18n!(cx, "common.action.delete"),
                         t.error,
                         t.error,
                         &t,

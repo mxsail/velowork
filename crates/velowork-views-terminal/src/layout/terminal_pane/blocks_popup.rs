@@ -119,7 +119,7 @@ pub fn render_blocks_list(
                                         .on_mouse_down(MouseButton::Left, move |_, _, cx| {
                                             copy_cb(&output_str, cx);
                                         })
-                                        .child(i18n!(cx, "common.copy")),
+                                        .child(i18n!(cx, "common.action.copy")),
                                 )
                                 .child(
                                     div()

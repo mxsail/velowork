@@ -218,7 +218,7 @@ mod tests {
         let store = TranslationStore::new();
         // Nested structure is flattened into dot-separated keys.
         assert_eq!(store.translate(Locale::Zh, "dock.explorer"), "会话管理器");
-        assert_eq!(store.translate(Locale::En, "common.cancel"), "Cancel");
+        assert_eq!(store.translate(Locale::En, "common.action.cancel"), "Cancel");
         assert_eq!(
             store.translate(Locale::Zh, "search_dialogs.file_search.title"),
             "跳转到文件"

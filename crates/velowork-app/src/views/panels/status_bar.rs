@@ -2057,7 +2057,7 @@ impl StatusBar {
     ) -> AnyElement {
         let p = SemanticPalette::from_context(cx);
         let title = i18n!(cx, "status.monitor.title");
-        let close_label = i18n!(cx, "common.close");
+        let close_label = i18n!(cx, "common.action.close");
         let now = format_datetime();
 
         let (_enable_monitor, monitor_cpu, monitor_mem, monitor_disk) =
@@ -3226,18 +3226,18 @@ impl StatusBar {
                 base.opacity(0.50)
                     .cursor(CursorStyle::Arrow)
                     .child(spinner)
-                    .child(i18n!(cx, "common.refresh"))
+                    .child(i18n!(cx, "common.action.refresh"))
             } else if is_operating {
                 base.opacity(0.35)
                     .cursor(CursorStyle::Arrow)
-                    .child(i18n!(cx, "common.refresh"))
+                    .child(i18n!(cx, "common.action.refresh"))
             } else {
                 base.cursor_pointer()
                     .hover(|s| s.bg(surface_bg(t.bg_hover, cx)).border_color(p.border_active))
                     .on_click(cx.listener(move |this, _, _w, cx| {
                         this.trigger_service_probe_single(&s_refresh_id, cx);
                     }))
-                    .child(i18n!(cx, "common.refresh"))
+                    .child(i18n!(cx, "common.action.refresh"))
             }
         };
 

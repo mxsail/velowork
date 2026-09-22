@@ -127,7 +127,7 @@ impl Render for FolderContextMenu {
                         )
                         // Rename option
                         .child(
-                            menu_item("folder-ctx-rename", AppIcon::Edit, i18n!(cx, "common.rename"), &t, cx)
+                            menu_item("folder-ctx-rename", AppIcon::Edit, i18n!(cx, "common.action.rename"), &t, cx)
                                 .on_click(cx.listener(|this, _, _window, cx| {
                                     this.rename_folder(cx);
                                 })),

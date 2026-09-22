@@ -337,7 +337,7 @@ impl UpdateDialog {
         if !busy {
             let is_retry = matches!(status, UpdateStatus::Failed { .. });
             let label = if is_retry {
-                i18n!(cx, "common.retry")
+                i18n!(cx, "common.action.retry")
             } else {
                 i18n!(cx, "update.check")
             };

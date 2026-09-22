@@ -327,7 +327,7 @@ impl TitleBar {
                             menu_item(
                                 "app-menu-copy",
                                 AppIcon::Copy,
-                                i18n!(cx, "common.copy"),
+                                i18n!(cx, "common.action.copy"),
                                 &t,
                                 cx,
                             )
@@ -339,7 +339,7 @@ impl TitleBar {
                             menu_item(
                                 "app-menu-paste",
                                 AppIcon::ClipboardPaste,
-                                i18n!(cx, "common.paste"),
+                                i18n!(cx, "common.action.paste"),
                                 &t,
                                 cx,
                             )

@@ -86,7 +86,7 @@ impl Render for TabContextMenu {
 
         let duplicate_session = i18n!(cx, "terminal.duplicate_session");
         let duplicate_channel = i18n!(cx, "terminal.duplicate_channel");
-        let reconnect = i18n!(cx, "common.reconnect");
+        let reconnect = i18n!(cx, "common.action.reconnect");
         let split_h = i18n!(cx, "terminal.split_horizontal");
         let split_v = i18n!(cx, "terminal.split_vertical");
         let minimize_tab = i18n!(cx, "terminal.minimize_tab");

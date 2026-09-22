@@ -25,7 +25,7 @@ impl WindowControlType {
             WindowControlType::Minimize => "titlebar.minimize",
             WindowControlType::Maximize => "titlebar.maximize",
             WindowControlType::Restore => "titlebar.restore",
-            WindowControlType::Close => "common.close",
+            WindowControlType::Close => "common.action.close",
         }
     }
 

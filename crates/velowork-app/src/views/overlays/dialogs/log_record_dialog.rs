@@ -196,7 +196,7 @@ impl Render for LogRecordDialog {
                             .justify_end()
                             .gap(SPACE_MD)
                             .child(
-                                button("cancel-btn", &i18n!(cx, "common.cancel"), &t)
+                                button("cancel-btn", &i18n!(cx, "common.action.cancel"), &t)
                                     .focus_handle(&self.cancel_focus)
                                     .on_click(cx.listener(|this, _, _, cx| this.close(cx)))
                             )

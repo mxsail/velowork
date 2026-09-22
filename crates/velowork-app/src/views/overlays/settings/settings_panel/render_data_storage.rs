@@ -454,7 +454,7 @@ impl SettingsPanel {
                         .gap(SPACE_MD)
                         .child(
                             Button::new("cancel-migration-btn", &t)
-                                .label(i18n!(cx, "common.cancel"))
+                                .label(i18n!(cx, "common.action.cancel"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.show_data_root_confirm_modal = false;
                                     cx.notify();

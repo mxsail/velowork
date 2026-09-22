@@ -3110,7 +3110,7 @@ impl Render for SimpleInputState {
             .child(TextInputElement { state: cx.entity() })
             .when(show_clear, |d| {
                 let this_entity = cx.entity();
-                let clear_tip = velowork_i18n::i18n!(cx, "common.clear_content");
+                let clear_tip = velowork_i18n::i18n!(cx, "common.action.clear_content");
                 d.child(
                     div()
                         .id("simple-input-clear-btn")
@@ -3460,9 +3460,9 @@ impl RenderOnce for SimpleInput {
                 AppIcon::EyeOff
             };
             let tip_text = if is_masked {
-                i18n!(cx, "common.show_password")
+                i18n!(cx, "common.action.show_password")
             } else {
-                i18n!(cx, "common.hide_password")
+                i18n!(cx, "common.action.hide_password")
             };
             let state_clone = self.state.clone();
 

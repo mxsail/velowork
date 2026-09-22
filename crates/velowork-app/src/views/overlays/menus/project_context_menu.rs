@@ -223,7 +223,7 @@ impl Render for ContextMenu {
                         .child(menu_separator(&t))
                         // Rename option
                         .child(
-                            menu_item("context-menu-rename", AppIcon::Edit, i18n!(cx, "common.rename"), &t, cx)
+                            menu_item("context-menu-rename", AppIcon::Edit, i18n!(cx, "common.action.rename"), &t, cx)
                                 .on_click(cx.listener({
                                     let project_name = project_name.clone();
                                     move |this, _, _window, cx| {
@@ -243,7 +243,7 @@ impl Render for ContextMenu {
                         )
                         // Delete option
                         .child(
-                            menu_item_with_color("context-menu-delete", AppIcon::Trash, i18n!(cx, "common.delete"), t.error, t.error, &t, cx)
+                            menu_item_with_color("context-menu-delete", AppIcon::Trash, i18n!(cx, "common.action.delete"), t.error, t.error, &t, cx)
                                 .on_click(cx.listener(|this, _, _window, cx| {
                                     this.delete_project(cx);
                                 })),
