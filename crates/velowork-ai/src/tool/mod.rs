@@ -119,6 +119,8 @@ pub fn builtin_tools() -> Vec<Box<dyn Tool>> {
         Box::new(WriteFile),
         Box::new(SearchLogs),
         Box::new(GenerateConfig),
+        Box::new(ListWorkflows),
+        Box::new(RunWorkflow),
     ]
 }
 
@@ -745,3 +747,132 @@ impl Tool for GenerateConfig {
         Ok(format!("```\n{}\n```", body))
     }
 }
+
+/// 列出所有可用的多步工作流。
+pub struct ListWorkflows;
+
+impl Tool for ListWorkflows {
+    fn name(&self) -> &str {
+        "list_workflows"
+    }
+    fn description(&self) -> &str {
+        "List all available automated multi-step workflows with their IDs, names, and descriptions."
+    }
+    fn schema(&self) -> Value {
+        json!({ "type": "object", "properties": {} })
+    }
+    fn execute(&self, _args: Value, _ctx: &ToolCtx, _cx: &App) -> Result<String, ToolError> {
+        let registry = crate::workflow::WorkflowRegistry::default();
+        let list = registry.list();
+        let mut out = String::from("Available Workflows:\n");
+        for wf in list {
+            out.push_str(&format!(
+                "- `{}`: {} ({} steps)\n  {}\n",
+                wf.id,
+                wf.name,
+                wf.steps.len(),
+                wf.description
+            ));
+        }
+        Ok(out)
+    }
+}
+
+/// 执行指定的多步自动化工作流。
+pub struct RunWorkflow;
+
+impl Tool for RunWorkflow {
+    fn name(&self) -> &str {
+        "run_workflow"
+    }
+    fn description(&self) -> &str {
+        "Execute a predefined multi-step automated workflow by its ID."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "workflow_id": {
+                    "type": "string",
+                    "description": "The unique identifier of the workflow to run (e.g. 'service_health_check', 'git_safe_precommit', 'quick_diagnostics')."
+                },
+                "auto_confirm": {
+                    "type": "boolean",
+                    "description": "Whether to automatically approve confirmation steps. Defaults to false."
+                }
+            },
+            "required": ["workflow_id"]
+        })
+    }
+    fn execute(&self, args: Value, ctx: &ToolCtx, _cx: &App) -> Result<String, ToolError> {
+        let wf_id = args
+            .get("workflow_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArgs("missing 'workflow_id'".into()))?;
+        let auto_confirm = args
+            .get("auto_confirm")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let registry = crate::workflow::WorkflowRegistry::default();
+        let workflow = registry.get(wf_id).ok_or_else(|| {
+            ToolError::Execution(format!("workflow '{wf_id}' not found"))
+        })?;
+
+        // Pluggable runner that routes to target terminal if active, or falls back to system shell
+        let terms = ctx.terminals.clone();
+        let runner: crate::workflow::executor::CommandRunner = Arc::new(move |cmd, target_id, timeout| {
+            if let Some(tid) = target_id {
+                let term_opt = {
+                    let guard = terms.lock();
+                    guard.get(tid).cloned()
+                };
+                if let Some(term) = term_opt {
+                    let block_res = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                        tokio::task::block_in_place(|| {
+                            handle.block_on(term.execute_command_and_capture(cmd, timeout))
+                        })
+                    } else {
+                        futures::executor::block_on(term.execute_command_and_capture(cmd, timeout))
+                    };
+                    return match block_res {
+                        Ok(b) => Ok((b.exit_code, b.clean_output)),
+                        Err(e) => Err(e.to_string()),
+                    };
+                }
+            }
+            // Fallback to system command runner
+            let sys = crate::workflow::executor::default_system_command_runner();
+            sys(cmd, target_id, timeout)
+        });
+
+        let executor =
+            crate::workflow::WorkflowExecutor::new(runner).with_auto_confirm(auto_confirm);
+        let report = executor.execute(&workflow);
+
+        let mut out = format!(
+            "### Workflow Execution Report: {}\nStatus: {:?}\nDuration: {:.2}s\n\nSteps:\n",
+            report.workflow_name,
+            report.state,
+            report.total_duration_ms as f64 / 1000.0
+        );
+        for (idx, step) in report.step_results.iter().enumerate() {
+            let status = if step.success { "PASSED" } else { "FAILED" };
+            out.push_str(&format!(
+                "{}. [{status}] {} ({}ms)\n",
+                idx + 1,
+                step.step_name,
+                step.duration_ms
+            ));
+            if !step.output_preview.is_empty() {
+                out.push_str(&format!("   Output:\n```\n{}\n```\n", step.output_preview));
+            }
+            if let Some(err) = &step.error {
+                out.push_str(&format!("   Error: {}\n", err));
+            }
+        }
+
+        Ok(out)
+    }
+}
+
