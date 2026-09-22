@@ -25,28 +25,28 @@ impl SettingsPanel {
         let t = theme(cx);
         let s = settings_entity(cx).read(cx).settings.clone();
 
-        let local_section_title = i18n!(cx, "settings.terminal_section_local");
-        let display_section_title = i18n!(cx, "settings.terminal_display_section");
-        let behavior_section_title = i18n!(cx, "settings.terminal_section_behavior");
+        let local_section_title = i18n!(cx, "settings.terminal.section_local");
+        let display_section_title = i18n!(cx, "settings.terminal.section_general");
+        let behavior_section_title = i18n!(cx, "settings.terminal.section_behavior");
 
-        let show_shell_selector_label = i18n!(cx, "settings.show_shell_selector");
-        let show_shell_selector_desc = i18n!(cx, "settings.show_shell_selector_desc");
-        let cursor_blink_label = i18n!(cx, "settings.cursor_blink");
-        let scrollback_lines_label = i18n!(cx, "settings.scrollback_lines");
-        let scrollback_lines_desc = i18n!(cx, "settings.scrollback_lines_desc");
-        let ctrl_c_copies_label = i18n!(cx, "settings.ctrl_c_copies");
-        let copy_on_select_label = i18n!(cx, "settings.copy_on_select");
-        let right_click_paste_label = i18n!(cx, "settings.right_click_paste");
-        let right_click_paste_desc = i18n!(cx, "settings.right_click_paste_desc");
-        let show_line_numbers_label = i18n!(cx, "settings.show_line_numbers");
-        let restore_terminals_label = i18n!(cx, "settings.restore_terminals");
-        let idle_detection_label = i18n!(cx, "settings.idle_detection");
-        let undo_close_label = i18n!(cx, "settings.undo_close");
-        let idle_timeout_label = i18n!(cx, "settings.idle_timeout");
-        let undo_window_label = i18n!(cx, "settings.undo_window");
-        let terminal_bg_image_label = i18n!(cx, "settings.terminal_background_image");
-        let terminal_bg_image_blur_label = i18n!(cx, "settings.terminal_background_image_blur");
-        let terminal_bg_image_blur_desc = i18n!(cx, "settings.terminal_background_image_blur_desc");
+        let show_shell_selector_label = i18n!(cx, "settings.terminal.show_shell_selector");
+        let show_shell_selector_desc = i18n!(cx, "settings.terminal.show_shell_selector_desc");
+        let cursor_blink_label = i18n!(cx, "settings.terminal.cursor_blink");
+        let scrollback_lines_label = i18n!(cx, "settings.terminal.scrollback_lines");
+        let scrollback_lines_desc = i18n!(cx, "settings.terminal.scrollback_lines_desc");
+        let ctrl_c_copies_label = i18n!(cx, "settings.terminal.ctrl_c_copies");
+        let copy_on_select_label = i18n!(cx, "settings.terminal.copy_on_select");
+        let right_click_paste_label = i18n!(cx, "settings.terminal.right_click_paste");
+        let right_click_paste_desc = i18n!(cx, "settings.terminal.right_click_paste_desc");
+        let show_line_numbers_label = i18n!(cx, "settings.terminal.show_line_numbers");
+        let restore_terminals_label = i18n!(cx, "settings.terminal.restore_terminals");
+        let idle_detection_label = i18n!(cx, "settings.terminal.idle_detection");
+        let undo_close_label = i18n!(cx, "settings.terminal.undo_close");
+        let idle_timeout_label = i18n!(cx, "settings.terminal.idle_timeout");
+        let undo_window_label = i18n!(cx, "settings.terminal.undo_window");
+        let terminal_bg_image_label = i18n!(cx, "settings.terminal.bg_image");
+        let terminal_bg_image_blur_label = i18n!(cx, "settings.terminal.bg_image_blur");
+        let terminal_bg_image_blur_desc = i18n!(cx, "settings.terminal.bg_image_blur_desc");
 
         let has_bg_image = s
             .terminal_background_image
@@ -195,8 +195,8 @@ impl SettingsPanel {
                             ))
                             .child(self.render_toggle_with_desc(
                                 "shell-integration",
-                                &i18n!(cx, "settings.shell_integration"),
-                                &i18n!(cx, "settings.shell_integration_desc"),
+                                &i18n!(cx, "settings.terminal.shell_integration"),
+                                &i18n!(cx, "settings.terminal.shell_integration_desc"),
                                 s.shell_integration,
                                 true,
                                 |state, val, cx| state.set_shell_integration(val, cx),
@@ -204,8 +204,8 @@ impl SettingsPanel {
                             ))
                             .child(self.render_toggle_with_desc(
                                 "bracketed-paste",
-                                &i18n!(cx, "settings.bracketed_paste"),
-                                &i18n!(cx, "settings.bracketed_paste_desc"),
+                                &i18n!(cx, "settings.terminal.bracketed_paste"),
+                                &i18n!(cx, "settings.terminal.bracketed_paste_desc"),
                                 s.bracketed_paste,
                                 true,
                                 |state, val, cx| state.set_bracketed_paste(val, cx),
@@ -213,8 +213,8 @@ impl SettingsPanel {
                             ))
                             .child(self.render_toggle_with_desc(
                                 "osc52-clipboard",
-                                &i18n!(cx, "settings.osc52_clipboard"),
-                                &i18n!(cx, "settings.osc52_clipboard_desc"),
+                                &i18n!(cx, "settings.terminal.osc52_clipboard"),
+                                &i18n!(cx, "settings.terminal.osc52_clipboard_desc"),
                                 s.osc52_clipboard,
                                 true,
                                 |state, val, cx| state.set_osc52_clipboard(val, cx),
@@ -222,8 +222,8 @@ impl SettingsPanel {
                             ))
                             .child(self.render_toggle_with_desc(
                                 "true-color",
-                                &i18n!(cx, "settings.true_color"),
-                                &i18n!(cx, "settings.true_color_desc"),
+                                &i18n!(cx, "settings.terminal.true_color"),
+                                &i18n!(cx, "settings.terminal.true_color_desc"),
                                 s.true_color,
                                 true,
                                 |state, val, cx| state.set_true_color(val, cx),
@@ -254,8 +254,8 @@ impl SettingsPanel {
                             })
                             .child(self.render_toggle_with_desc(
                                 "confirm-close-tab",
-                                &i18n!(cx, "settings.confirm_close_tab"),
-                                &i18n!(cx, "settings.confirm_close_tab_desc"),
+                                &i18n!(cx, "settings.terminal.confirm_close_tab"),
+                                &i18n!(cx, "settings.terminal.confirm_close_tab_desc"),
                                 s.confirm_close_tab,
                                 true,
                                 |state, val, cx| state.set_confirm_close_tab(val, cx),
@@ -345,7 +345,7 @@ impl SettingsPanel {
 
     fn render_terminal_scrollbar_show_row(&mut self, current: ScrollbarShow, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let label = i18n!(cx, "settings.terminal_scrollbar_show");
+        let label = i18n!(cx, "settings.terminal.scrollbar_show");
         let focus_handle = self.get_or_create_radio_focus_handle("terminal-scrollbar-show", cx);
 
         settings_row("terminal-scrollbar-show".to_string(), &label, &t, cx, true).child(
@@ -369,7 +369,7 @@ impl SettingsPanel {
 
     fn render_cursor_style_row(&mut self, current: CursorShape, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let cursor_style_label = i18n!(cx, "settings.cursor_style");
+        let cursor_style_label = i18n!(cx, "settings.terminal.cursor_style");
         let focus_handle = self.get_or_create_radio_focus_handle("cursor-style", cx);
 
         settings_row("cursor-style".to_string(), &cursor_style_label, &t, cx, true).child(
@@ -460,8 +460,8 @@ impl SettingsPanel {
         t: &ThemeColors,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let label = i18n!(cx, "settings.word_selection_delimiters");
-        let desc = i18n!(cx, "settings.word_selection_delimiters_desc");
+        let label = i18n!(cx, "settings.terminal.delimiters");
+        let desc = i18n!(cx, "settings.terminal.delimiters_desc");
         settings_row_with_desc(
             "word-selection-delimiters".to_string(),
             &label,
@@ -531,25 +531,25 @@ impl SettingsPanel {
                             div()
                                 .text_size(ui_text_xs(cx))
                                 .text_color(p.text_muted)
-                                .child(i18n!(cx, "settings.terminal_background_image_processing")),
+                                .child(i18n!(cx, "settings.terminal.bg_image_processing")),
                         ),
                 )
             } else if let Some(err) = c.error() {
                 let msg = match err {
                     velowork_views_terminal::BackgroundImageError::NotFound => {
-                        i18n!(cx, "settings.terminal_bg_image_err_not_found")
+                        i18n!(cx, "settings.terminal.bg_image_err_not_found")
                     }
                     velowork_views_terminal::BackgroundImageError::IsDirectory => {
-                        i18n!(cx, "settings.terminal_bg_image_err_is_directory")
+                        i18n!(cx, "settings.terminal.bg_image_err_is_directory")
                     }
                     velowork_views_terminal::BackgroundImageError::PermissionDenied => {
-                        i18n!(cx, "settings.terminal_bg_image_err_permission_denied")
+                        i18n!(cx, "settings.terminal.bg_image_err_permission_denied")
                     }
                     velowork_views_terminal::BackgroundImageError::UnsupportedFormat => {
-                        i18n!(cx, "settings.terminal_bg_image_err_unsupported_format")
+                        i18n!(cx, "settings.terminal.bg_image_err_unsupported_format")
                     }
                     velowork_views_terminal::BackgroundImageError::DecodeFailed => {
-                        i18n!(cx, "settings.terminal_bg_image_err_corrupt")
+                        i18n!(cx, "settings.terminal.bg_image_err_corrupt")
                     }
                 };
                 Some(
@@ -582,7 +582,7 @@ impl SettingsPanel {
                             div()
                                 .text_size(ui_text_xs(cx))
                                 .text_color(p.status_success)
-                                .child(i18n!(cx, "settings.terminal_background_image_ready")),
+                                .child(i18n!(cx, "settings.terminal.bg_image_ready")),
                         ),
                 )
             } else {
@@ -633,7 +633,7 @@ impl SettingsPanel {
     /// restricted to image files. Icon-only (image svg) with a Chinese tooltip.
     fn render_image_picker_button(&self, is_loading: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let label = i18n!(cx, "settings.terminal_background_image_picker");
+        let label = i18n!(cx, "settings.terminal.bg_image_picker");
         let focus_handle = self.get_or_create_button_focus_handle("terminal-bg-image-picker", cx);
         Button::new("terminal-bg-image-picker", &t)
             .size(ControlSize::Default)
@@ -660,7 +660,7 @@ impl SettingsPanel {
 
     /// Open a native file picker (images only) and apply the chosen path.
     fn open_image_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let prompt = i18n!(cx, "settings.terminal_background_image_picker");
+        let prompt = i18n!(cx, "settings.terminal.bg_image_picker");
         let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,

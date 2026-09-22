@@ -64,10 +64,10 @@ impl ScrollbarShow {
 
     pub fn translation_key(&self) -> &'static str {
         match self {
-            ScrollbarShow::Scrolling => "settings.scrollbar_show_scrolling",
-            ScrollbarShow::Hover => "settings.scrollbar_show_hover",
-            ScrollbarShow::Always => "settings.scrollbar_show_always",
-            ScrollbarShow::Never => "settings.scrollbar_show_never",
+            ScrollbarShow::Scrolling => "settings.terminal.scrollbar_show_scrolling",
+            ScrollbarShow::Hover => "settings.terminal.scrollbar_show_hover",
+            ScrollbarShow::Always => "settings.terminal.scrollbar_show_always",
+            ScrollbarShow::Never => "settings.terminal.scrollbar_show_never",
         }
     }
 }
@@ -95,9 +95,9 @@ impl CursorShape {
 
     pub fn translation_key(self) -> &'static str {
         match self {
-            CursorShape::Block => "settings.cursor_shape.block",
-            CursorShape::Bar => "settings.cursor_shape.bar",
-            CursorShape::Underline => "settings.cursor_shape.underline",
+            CursorShape::Block => "settings.terminal.cursor_shape.block",
+            CursorShape::Bar => "settings.terminal.cursor_shape.bar",
+            CursorShape::Underline => "settings.terminal.cursor_shape.underline",
         }
     }
 

@@ -461,14 +461,14 @@ impl SettingsPanel {
 
     pub(super) fn render_shell_dropdown_row(&mut self, _current_shell: &ShellType, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let shell_label = i18n!(cx, "settings.default_shell");
+        let shell_label = i18n!(cx, "settings.terminal.default_shell");
         settings_row("default-shell".to_string(), &shell_label, &t, cx, true)
             .child(div().w(SELECT_WIDTH_MD).child(Select::new(&self.shell_select)))
     }
 
     pub(super) fn render_session_backend_dropdown_row(&mut self, _current_backend: &SessionBackend, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let session_label = i18n!(cx, "settings.session_backend");
+        let session_label = i18n!(cx, "settings.terminal.session_backend");
         let session_desc = i18n!(cx, "common.requires_restart");
         settings_row_with_desc("session-backend".to_string(), &session_label, &session_desc, &t, cx, true)
             .child(div().w(SELECT_WIDTH_MD).child(Select::new(&self.session_backend_select)))

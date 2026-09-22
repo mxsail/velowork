@@ -371,7 +371,7 @@ impl SettingsPanel {
         // Uses `PathAutoCompleteState` so the user gets filesystem path
         // completion while typing, and a "browse" button to pick an image.
         let terminal_bg_image_input = cx.new(PathAutoCompleteState::new);
-        let bg_placeholder = i18n!(cx, "settings.terminal_background_image_placeholder");
+        let bg_placeholder = i18n!(cx, "settings.terminal.bg_image_placeholder");
         terminal_bg_image_input.update(cx, |p, _cx| {
             p.set_placeholder(bg_placeholder);
         });
