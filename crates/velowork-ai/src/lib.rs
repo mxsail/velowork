@@ -17,11 +17,15 @@ pub mod completion;
 pub mod context;
 pub mod prompt;
 pub mod provider;
+pub mod recommendation;
 pub mod runtime;
 pub mod skill;
 pub mod tool;
 
 pub use completion::{clean_ghost_command, fast_local_history_match, generate_ghost_command};
+pub use recommendation::{
+    classify_selection_intent, SmartActionKind, SmartActionRecommendation,
+};
 
 pub use context::{
     capture_live_context, compress_chat_history, estimate_messages_tokens, estimate_tokens,
@@ -57,6 +61,7 @@ use velowork_workspace::state::Workspace;
 pub use agent::{run_agent_turn, run_agent_turn_with_tool_channel, AgentEvent};
 pub use context::{
     capture_terminal_snapshot, head_tail_truncate, strip_ansi, TerminalContextSnapshot,
+    TerminalSessionSummary,
 };
 pub use prompt::{render as render_prompt, render_inline_prompt, ContextBundle, PromptScene};
 

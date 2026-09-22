@@ -230,6 +230,21 @@ pub fn capture_live_context(
     live
 }
 
+/// 终端全局会话元数据摘要（供 AI 感知跨终端分屏与运行状态）。
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct TerminalSessionSummary {
+    pub terminal_id: String,
+    pub title: String,
+    pub session_name: Option<String>,
+    pub cwd: Option<String>,
+    pub is_active: bool,
+    pub is_remote: bool,
+    pub has_running_child: bool,
+    pub last_command: Option<String>,
+    pub last_exit_code: Option<i32>,
+    pub recent_preview: Option<String>,
+}
+
 /// 终端轻量上下文快照（供 Inline 浮窗与侧栏会话共享）。
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct TerminalContextSnapshot {
@@ -244,6 +259,7 @@ pub struct TerminalContextSnapshot {
     pub surrounding_buffer: Option<String>,
     pub active_input_draft: Option<String>,
     pub last_command: Option<String>,
+    pub active_sessions: Vec<TerminalSessionSummary>,
 }
 
 static RE_ANSI: LazyLock<regex::Regex> = LazyLock::new(|| {
@@ -301,36 +317,117 @@ pub fn capture_terminal_snapshot(
         }
     }
 
-    let guard = terms.lock();
-    if let Some(term) = guard.get(terminal_id) {
-        snapshot.cwd = term.current_cwd();
-        if term.has_selection() {
-            if let Some(sel) = term.get_selected_text() {
-                let cleaned = strip_ansi(&sel);
-                let masked = mask_sensitive_data(&cleaned);
-                let truncated = head_tail_truncate(&masked, 8000, 3000, 4000);
-                snapshot.selected_text = Some(truncated);
-            }
-            if let Some(surrounding) = term.get_surrounding_selection_lines(20) {
-                let cleaned = strip_ansi(&surrounding);
-                let masked = mask_sensitive_data(&cleaned);
-                let truncated = head_tail_truncate(&masked, 4000, 1500, 2000);
-                snapshot.surrounding_buffer = Some(truncated);
-            }
+    let (target_details, raw_summaries) = {
+        let guard = terms.lock();
+
+        let target_details = if let Some(term) = guard.get(terminal_id) {
+            let cwd = term.current_cwd();
+            let selected_text = if term.has_selection() {
+                term.get_selected_text()
+            } else {
+                None
+            };
+            let surrounding_buffer = if term.has_selection() {
+                term.get_surrounding_selection_lines(20)
+            } else {
+                let recent = term.get_recent_lines(50);
+                if !recent.trim().is_empty() {
+                    Some(recent)
+                } else {
+                    None
+                }
+            };
+            let active_draft = term.get_active_line();
+            let last_cmd = term.blocks().last().map(|b| b.command.clone());
+            Some((cwd, selected_text, surrounding_buffer, active_draft, last_cmd))
         } else {
-            let recent = term.get_recent_lines(50);
-            if !recent.trim().is_empty() {
-                let cleaned = strip_ansi(&recent);
-                let masked = mask_sensitive_data(&cleaned);
-                let truncated = head_tail_truncate(&masked, 4000, 1500, 2000);
-                snapshot.surrounding_buffer = Some(truncated);
-            }
+            None
+        };
+
+        let mut summaries = Vec::with_capacity(guard.len());
+        for (id, other_term) in guard.iter() {
+            let is_active = id == terminal_id;
+            let title = other_term.title().unwrap_or_else(|| "Terminal".to_string());
+            let cwd = Some(other_term.current_cwd());
+            let has_running_child = other_term.has_running_child();
+
+            let (last_command, last_exit_code, recent_preview) = {
+                let blocks = other_term.blocks();
+                if let Some(last_b) = blocks.last() {
+                    let preview = if !last_b.clean_output.is_empty() {
+                        Some(head_tail_truncate(&last_b.clean_output, 150, 70, 70))
+                    } else {
+                        None
+                    };
+                    (Some(last_b.command.clone()), last_b.exit_code, preview)
+                } else {
+                    (other_term.get_active_line(), None, None)
+                }
+            };
+
+            summaries.push((
+                id.clone(),
+                title,
+                cwd,
+                is_active,
+                has_running_child,
+                last_command,
+                last_exit_code,
+                recent_preview,
+            ));
         }
-        if let Some(active_line) = term.get_active_line() {
-            let cleaned = strip_ansi(&active_line);
+
+        (target_details, summaries)
+    };
+
+    if let Some((cwd, sel_opt, surr_opt, draft_opt, last_cmd)) = target_details {
+        snapshot.cwd = cwd;
+        snapshot.last_command = last_cmd;
+
+        if let Some(sel) = sel_opt {
+            let cleaned = strip_ansi(&sel);
+            let masked = mask_sensitive_data(&cleaned);
+            let truncated = head_tail_truncate(&masked, 8000, 3000, 4000);
+            snapshot.selected_text = Some(truncated);
+        }
+
+        if let Some(surrounding) = surr_opt {
+            let cleaned = strip_ansi(&surrounding);
+            let masked = mask_sensitive_data(&cleaned);
+            let truncated = head_tail_truncate(&masked, 4000, 1500, 2000);
+            snapshot.surrounding_buffer = Some(truncated);
+        }
+
+        if let Some(draft) = draft_opt {
+            let cleaned = strip_ansi(&draft);
             snapshot.active_input_draft = Some(cleaned);
         }
     }
+
+    let mut active_sessions = Vec::with_capacity(raw_summaries.len());
+    for (id, title, cwd, is_active, has_running_child, last_command, last_exit_code, recent_preview) in raw_summaries {
+        let (session_name, is_remote) = if let Some(p) = ws_read.find_project_for_terminal(&id) {
+            (Some(p.name.clone()), p.is_remote)
+        } else {
+            (None, false)
+        };
+        active_sessions.push(TerminalSessionSummary {
+            terminal_id: id,
+            title,
+            session_name,
+            cwd,
+            is_active,
+            is_remote,
+            has_running_child,
+            last_command,
+            last_exit_code,
+            recent_preview,
+        });
+    }
+
+    // Sort active first, then running children
+    active_sessions.sort_by_key(|s| (!s.is_active, !s.has_running_child));
+    snapshot.active_sessions = active_sessions;
 
     snapshot
 }

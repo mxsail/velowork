@@ -111,6 +111,7 @@ pub fn builtin_tools() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(RunTerminalCommand),
         Box::new(GetTerminalBlocks),
+        Box::new(GetTerminalOutput),
         Box::new(ReadTerminalScreen),
         Box::new(ListSessions),
         Box::new(GetSessionConfig),
@@ -376,6 +377,79 @@ impl Tool for GetTerminalBlocks {
             ));
         }
         Ok(out)
+    }
+}
+
+/// 读取指定终端（包括非聚焦的其它终端分屏）的最新输出或历史 Block。
+pub struct GetTerminalOutput;
+
+impl Tool for GetTerminalOutput {
+    fn name(&self) -> &str {
+        "get_terminal_output"
+    }
+    fn description(&self) -> &str {
+        "Read recent output lines or last command block from a specific terminal session by terminal_id."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "terminal_id": {
+                    "type": "string",
+                    "description": "ID of the target terminal session to inspect."
+                },
+                "max_lines": {
+                    "type": "integer",
+                    "description": "Maximum number of recent lines to retrieve (default 50, max 200)."
+                }
+            },
+            "required": ["terminal_id"]
+        })
+    }
+    fn execute(&self, args: Value, ctx: &ToolCtx, _cx: &App) -> Result<String, ToolError> {
+        let terminal_id = args
+            .get("terminal_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidArgs("missing terminal_id".into()))?;
+
+        let max_lines = args
+            .get("max_lines")
+            .and_then(|v| v.as_u64())
+            .map(|n| (n as usize).clamp(1, 200))
+            .unwrap_or(50);
+
+        let term_arc = {
+            let guard = ctx.terminals.lock();
+            guard.get(terminal_id).cloned()
+        };
+
+        let Some(term) = term_arc else {
+            return Err(ToolError::Execution(format!("terminal '{terminal_id}' not found")));
+        };
+
+        let title = term.title().unwrap_or_else(|| "Terminal".to_string());
+        let cwd = term.current_cwd();
+        let recent = term.get_recent_lines(max_lines);
+        let cleaned = crate::context::strip_ansi(&recent);
+        let masked = crate::context::mask_sensitive_data(&cleaned);
+
+        let last_block_info = {
+            let blocks = term.blocks();
+            if let Some(last_b) = blocks.last() {
+                let status = match last_b.exit_code {
+                    Some(0) => "SUCCESS (0)".to_string(),
+                    Some(code) => format!("FAILED ({code})"),
+                    None => "RUNNING / UNKNOWN".to_string(),
+                };
+                format!("\nLast Command: `{}` [{status}]\n", last_b.command)
+            } else {
+                String::new()
+            }
+        };
+
+        Ok(format!(
+            "### Terminal `{title}` ({terminal_id})\nCWD: `{cwd}`{last_block_info}\nOutput:\n```\n{masked}\n```"
+        ))
     }
 }
 

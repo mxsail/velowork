@@ -11,14 +11,15 @@ use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use velowork_ai::{
-    provider, render_inline_prompt, PromptScene, StreamChunk, TerminalContextSnapshot,
+    classify_selection_intent, provider, render_inline_prompt, PromptScene, StreamChunk,
+    TerminalContextSnapshot,
 };
 use velowork_i18n::i18n;
 use velowork_markdown::{
     find_line_boundaries, find_word_boundaries, MarkdownSelectionEvent,
 };
 use velowork_ui::capsule_toolbar::{
-    capsule_divider, capsule_icon_button, capsule_toolbar_container,
+    capsule_action_button, capsule_divider, capsule_icon_button, capsule_toolbar_container,
 };
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::icon::AppIcon;
@@ -940,6 +941,27 @@ impl TerminalAiInline {
         cx: &mut Context<Self>,
         _p: &SemanticPalette,
     ) -> impl IntoElement {
+        let last_exit_code = self.cached_snapshot.as_ref().and_then(|s| {
+            s.active_sessions
+                .iter()
+                .find(|sess| sess.terminal_id == self.terminal_id)
+                .and_then(|sess| sess.last_exit_code)
+        });
+
+        let rec = classify_selection_intent(&self.selection_text, last_exit_code);
+
+        let smart_icon = match rec.icon_name {
+            "terminal" => AppIcon::Terminal,
+            "external_link" => AppIcon::ExternalLink,
+            "file_text" => AppIcon::File,
+            "sparkle" => AppIcon::QuickCommand,
+            _ => AppIcon::AiAssistant,
+        };
+
+        let smart_label = i18n!(cx, rec.label_key);
+        let smart_tip: &'static str = Box::leak(i18n!(cx, rec.label_key).into_boxed_str());
+        let prompt_text = rec.prompt_text.clone();
+
         let explain_tip: &'static str =
             Box::leak(i18n!(cx, "terminal.ai_toolbar_explain_tip").into_boxed_str());
 
@@ -953,6 +975,16 @@ impl TerminalAiInline {
             Box::leak(i18n!(cx, "common.close").into_boxed_str());
 
         capsule_toolbar_container("terminal-ai-toolbar", cx)
+            .child(
+                capsule_action_button("ai-tb-smart-chip", smart_icon, smart_label, cx)
+                    .bg(_p.surface_accent.opacity(0.12))
+                    .text_color(_p.text_primary)
+                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(smart_tip)).into())
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.start_turn(prompt_text.clone(), Some(this.selection_text.clone()), cx);
+                    })),
+            )
+            .child(capsule_divider(cx))
             .child(
                 capsule_icon_button("ai-tb-explain", AppIcon::AiAssistant, cx)
                     .tooltip(move |_, cx| cx.new(|_| Tooltip::new(explain_tip)).into())

@@ -144,27 +144,58 @@ pub fn render_inline_prompt(
     } else if !snapshot.session_name.is_empty() {
         p.push_str(&format!("- Session: {} (Local)\n", snapshot.session_name));
     }
-    if let Some(ref draft) = snapshot.active_input_draft {
-        if !draft.trim().is_empty() {
-            p.push_str(&format!("- Active Prompt / Unexecuted Command Draft: `{}`\n", draft));
-        }
+    if let Some(ref draft) = snapshot.active_input_draft
+        && !draft.trim().is_empty()
+    {
+        p.push_str(&format!("- Active Prompt / Unexecuted Command Draft: `{}`\n", draft));
     }
-    if let Some(ref last_cmd) = snapshot.last_command {
-        if !last_cmd.trim().is_empty() {
-            p.push_str(&format!("- Last Executed Command: `{}`\n", last_cmd));
+    if let Some(ref last_cmd) = snapshot.last_command
+        && !last_cmd.trim().is_empty()
+    {
+        p.push_str(&format!("- Last Executed Command: `{}`\n", last_cmd));
+    }
+
+    if snapshot.active_sessions.len() > 1 {
+        p.push_str("\n# Other Active Terminal Sessions in Workspace\n");
+        let max_display = 8;
+        for s in snapshot.active_sessions.iter().take(max_display) {
+            let status = if s.is_active {
+                "[Active]"
+            } else if s.has_running_child {
+                "[Running Process]"
+            } else {
+                "[Idle]"
+            };
+            let loc = s.cwd.as_deref().unwrap_or("~");
+            let mut info = format!("- {} `{}` (cwd: `{}`)", status, s.title, loc);
+            if let Some(ref c) = s.last_command {
+                let code_str = s.last_exit_code.map(|c| format!(" (exit {})", c)).unwrap_or_default();
+                info.push_str(&format!(" | Last: `{}`{}", c, code_str));
+            }
+            if let Some(ref prev) = s.recent_preview {
+                let single_line = prev.lines().next().unwrap_or("").trim();
+                if !single_line.is_empty() {
+                    info.push_str(&format!(" | Output: `{}`", single_line));
+                }
+            }
+            p.push_str(&info);
+            p.push('\n');
+        }
+        if snapshot.active_sessions.len() > max_display {
+            p.push_str(&format!("  [... and {} more terminal sessions ...]\n", snapshot.active_sessions.len() - max_display));
         }
     }
 
-    if let Some(ref sel) = snapshot.selected_text {
-        if !sel.trim().is_empty() {
-            p.push_str(&format!("\n# Selected Terminal Text\n```\n{}\n```\n", sel));
-        }
+    if let Some(ref sel) = snapshot.selected_text
+        && !sel.trim().is_empty()
+    {
+        p.push_str(&format!("\n# Selected Terminal Text\n```\n{}\n```\n", sel));
     }
 
-    if let Some(ref buf) = snapshot.surrounding_buffer {
-        if !buf.trim().is_empty() {
-            p.push_str(&format!("\n# Recent Terminal Buffer Context\n```\n{}\n```\n", buf));
-        }
+    if let Some(ref buf) = snapshot.surrounding_buffer
+        && !buf.trim().is_empty()
+    {
+        p.push_str(&format!("\n# Recent Terminal Buffer Context\n```\n{}\n```\n", buf));
     }
 
     p
