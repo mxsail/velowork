@@ -167,7 +167,7 @@ fn render_user_message(
                 .when(on_copy.is_some(), |d| {
                     let on_copy = on_copy.unwrap();
                     let copy_tip: &'static str = if copied {
-                        Box::leak(i18n!(cx, "ai_assistant.copied").into_boxed_str())
+                        Box::leak(i18n!(cx, "ai.copied").into_boxed_str())
                     } else {
                         Box::leak(i18n!(cx, "common.action.copy").into_boxed_str())
                     };
@@ -205,7 +205,7 @@ fn render_assistant_message(
     p: &SemanticPalette,
     cx: &mut App,
 ) -> AnyElement {
-    let error_prefix = format!("{}:", i18n!(cx, "ai_assistant.error"));
+    let error_prefix = format!("{}:", i18n!(cx, "ai.error"));
     let is_error = msg.text.starts_with(&error_prefix);
     let is_loading = msg.streaming && msg.text.is_empty();
 
@@ -259,8 +259,8 @@ fn render_assistant_message(
         // 异常收尾但文本为空：兜底展示未收到模型有效回复卡片
         let fallback_err = format!(
             "{}: {}",
-            i18n!(cx, "ai_assistant.error"),
-            i18n!(cx, "ai_assistant.empty_response")
+            i18n!(cx, "ai.error"),
+            i18n!(cx, "ai.empty_response")
         );
         body_children.push(render_error_card(&fallback_err, p));
     }
@@ -288,7 +288,7 @@ fn render_assistant_message(
     if let Some(on_copy) = on_copy {
         if !is_loading && !msg.text.is_empty() {
             let copy_tip: &'static str = if copied {
-                Box::leak(i18n!(cx, "ai_assistant.copied").into_boxed_str())
+                Box::leak(i18n!(cx, "ai.copied").into_boxed_str())
             } else {
                 Box::leak(i18n!(cx, "common.action.copy").into_boxed_str())
             };
@@ -351,9 +351,9 @@ pub fn render_quote_capsule(
         });
 
     let toggle_hint: &'static str = if expanded {
-        Box::leak(i18n!(cx, "ai_assistant.quote_collapse").into_boxed_str())
+        Box::leak(i18n!(cx, "ai.quote_collapse").into_boxed_str())
     } else {
-        Box::leak(i18n!(cx, "ai_assistant.quote_expand").into_boxed_str())
+        Box::leak(i18n!(cx, "ai.quote_expand").into_boxed_str())
     };
 
     card.child(
@@ -453,7 +453,7 @@ pub fn render_error_card(error_text: &str, p: &SemanticPalette) -> AnyElement {
 
 /// 渲染思考过程折叠块
 pub fn render_thinking_block(content: &str, p: &SemanticPalette, cx: &mut App) -> AnyElement {
-    let header_label = i18n!(cx, "ai_assistant.thinking_process");
+    let header_label = i18n!(cx, "ai.thinking_process");
     div()
         .rounded(RADIUS_SM)
         .border_1()
@@ -602,7 +602,7 @@ pub fn render_command_card(
 /// 加载状态指示器：三个错相位呼吸跳动的圆点 + 文案，直观表达「等待回复中」。
 pub fn loading_indicator(cx: &App, frame: u64) -> impl IntoElement {
     let p = SemanticPalette::from_context(cx);
-    let label = i18n!(cx, "ai_assistant.thinking");
+    let label = i18n!(cx, "ai.thinking");
     let dots = (0..3).map(|i| {
         let phase = (frame + i * 10) % 30;
         let wave = (phase as f32 / 30.0 * std::f32::consts::PI * 2.0).sin();

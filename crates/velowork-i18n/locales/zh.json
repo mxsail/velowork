@@ -103,7 +103,7 @@
       "file_manager": "文件管理器",
       "security": "安全",
       "sync": "数据同步",
-      "ai_assistant": "AI 助手",
+      "ai": "AI 助手",
       "data_storage": "数据存储",
       "notifications": "通知",
       "search_engines": "搜索引擎"
@@ -352,7 +352,7 @@
         "layout": "布局"
       }
     },
-    "ai_assistant": {
+    "ai": {
       "enable": "启用 AI 助手",
       "enable_desc": "开启后可在右侧面板使用 AI 对话",
       "model_management": "模型管理",
@@ -2353,7 +2353,7 @@
     "collapse": "收起",
     "more_count": "+{count} 条通知"
   },
-  "ai_assistant": {
+  "ai": {
     "title": "AI 助手",
     "new_chat": "新建会话",
     "chat_history": "历史会话",
@@ -2442,11 +2442,11 @@
     "pending_send_now": "立即发送",
     "clear_tooltip": "清空聊天记录",
     "token_usage_hint": "当前会话估算 Token 使用量。接近限制时自动压缩历史上下文。",
-    "context_used": "上下文已使用"
-  },
-  "ghost_text": {
-    "tab_accept": "Tab 接受",
-    "esc_dismiss": "Esc 取消"
+    "context_used": "上下文已使用",
+    "ghost_text": {
+      "tab_accept": "Tab 接受",
+      "esc_dismiss": "Esc 取消"
+    }
   },
   "workspace": {
     "explorer": "会话管理器",

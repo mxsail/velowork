@@ -134,11 +134,11 @@ impl AiClient {
                 {
                     Some(content) if !content.trim().is_empty() => format!(
                         "{}:\n```\n{}\n```",
-                        i18n!(cx, "ai_assistant.terminal_content"),
+                        i18n!(cx, "ai.terminal_content"),
                         content
                     ),
-                    Some(_) => i18n!(cx, "ai_assistant.terminal_empty"),
-                    None => i18n!(cx, "ai_assistant.no_terminal"),
+                    Some(_) => i18n!(cx, "ai.terminal_empty"),
+                    None => i18n!(cx, "ai.no_terminal"),
                 }
             }
             RuleReply::ListSessions => list_sessions(&self.workspace, cx),
@@ -161,8 +161,8 @@ impl AiClient {
         let sessions = list_sessions(&self.workspace, cx);
         let term_info =
             match read_focused_terminal(&self.focus_manager, &self.workspace, &self.terminals, cx) {
-                Some(_) => i18n!(cx, "ai_assistant.terminal_connected"),
-                None => i18n!(cx, "ai_assistant.no_terminal"),
+                Some(_) => i18n!(cx, "ai.terminal_connected"),
+                None => i18n!(cx, "ai.no_terminal"),
             };
         format!("{}\n{}", sessions, term_info)
     }
@@ -383,9 +383,9 @@ pub fn permission_label(p: AiPermission, cx: &App) -> String {
     i18n!(
         cx,
         match p {
-            AiPermission::Deny => "ai_assistant.perm_deny",
-            AiPermission::ReadOnly => "ai_assistant.perm_readonly",
-            AiPermission::AllowAll => "ai_assistant.perm_allowall",
+            AiPermission::Deny => "ai.perm_deny",
+            AiPermission::ReadOnly => "ai.perm_readonly",
+            AiPermission::AllowAll => "ai.perm_allowall",
         }
     )
 }
@@ -439,11 +439,11 @@ pub fn run_skill_direct(
 fn generic_reply(cx: &App) -> String {
     format!(
         "{}\n- {}\n- {}\n- {}\n- {}\n- {}",
-        i18n!(cx, "ai_assistant.capabilities_intro"),
-        i18n!(cx, "ai_assistant.cap_read_terminal"),
-        i18n!(cx, "ai_assistant.cap_exec"),
-        i18n!(cx, "ai_assistant.cap_script"),
-        i18n!(cx, "ai_assistant.cap_list_sessions"),
-        i18n!(cx, "ai_assistant.cap_config"),
+        i18n!(cx, "ai.capabilities_intro"),
+        i18n!(cx, "ai.cap_read_terminal"),
+        i18n!(cx, "ai.cap_exec"),
+        i18n!(cx, "ai.cap_script"),
+        i18n!(cx, "ai.cap_list_sessions"),
+        i18n!(cx, "ai.cap_config"),
     )
 }

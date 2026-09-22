@@ -226,10 +226,10 @@ pub fn execute_ai_command(
     cx: &App,
 ) -> String {
     if !perm.allows(cmd) {
-        return i18n!(cx, "ai_assistant.perm_denied");
+        return i18n!(cx, "ai.perm_denied");
     }
     send_command_to_focused_terminal(fm, ws, terms, cmd, cx);
-    format!("{}: {}", i18n!(cx, "ai_assistant.executed"), cmd)
+    format!("{}: {}", i18n!(cx, "ai.executed"), cmd)
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +324,7 @@ impl Tool for RunTerminalCommand {
                 }
                 Ok(format!(
                     "{}: {} (capture degraded: {})",
-                    i18n!(cx, "ai_assistant.executed"),
+                    i18n!(cx, "ai.executed"),
                     cmd,
                     e
                 ))
@@ -471,8 +471,8 @@ impl Tool for ReadTerminalScreen {
     fn execute(&self, _args: Value, ctx: &ToolCtx, cx: &App) -> Result<String, ToolError> {
         match read_focused_terminal(&ctx.focus_manager, &ctx.workspace, &ctx.terminals, cx) {
             Some(c) if !c.trim().is_empty() => Ok(c),
-            Some(_) => Ok(i18n!(cx, "ai_assistant.terminal_empty")),
-            None => Ok(i18n!(cx, "ai_assistant.no_terminal")),
+            Some(_) => Ok(i18n!(cx, "ai.terminal_empty")),
+            None => Ok(i18n!(cx, "ai.no_terminal")),
         }
     }
 }
@@ -548,7 +548,7 @@ impl Tool for ReadFile {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("missing 'path'".into()))?;
         std::fs::read_to_string(path).map_err(|e| {
-            ToolError::Execution(format!("{}: {}", i18n!(cx, "ai_assistant.read_failed"), e))
+            ToolError::Execution(format!("{}: {}", i18n!(cx, "ai.read_failed"), e))
         })
     }
 }
@@ -583,9 +583,9 @@ impl Tool for WriteFile {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidArgs("missing 'content'".into()))?;
         std::fs::write(path, content).map_err(|e| {
-            ToolError::Execution(format!("{}: {}", i18n!(cx, "ai_assistant.write_failed"), e))
+            ToolError::Execution(format!("{}: {}", i18n!(cx, "ai.write_failed"), e))
         })?;
-        Ok(format!("{}: {}", i18n!(cx, "ai_assistant.write_ok"), path))
+        Ok(format!("{}: {}", i18n!(cx, "ai.write_ok"), path))
     }
 }
 
@@ -625,7 +625,7 @@ impl Tool for SearchLogs {
         if !p.exists() {
             return Err(ToolError::Execution(format!(
                 "{}: {}",
-                i18n!(cx, "ai_assistant.search_no_path"),
+                i18n!(cx, "ai.search_no_path"),
                 path
             )));
         }
@@ -687,7 +687,7 @@ impl Tool for SearchLogs {
         search_dir(p, p, &re, &mut count, &mut out);
 
         if count == 0 {
-            out.push_str(&i18n!(cx, "ai_assistant.search_none"));
+            out.push_str(&i18n!(cx, "ai.search_none"));
         }
         Ok(out)
     }
@@ -739,7 +739,7 @@ impl Tool for GenerateConfig {
             other => {
                 return Err(ToolError::Execution(format!(
                     "{}: {}",
-                    i18n!(cx, "ai_assistant.config_unknown"),
+                    i18n!(cx, "ai.config_unknown"),
                     other
                 )))
             }

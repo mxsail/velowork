@@ -889,7 +889,7 @@ fn render_code_block(
     };
 
     let copy_label = if is_copied {
-        i18n!(cx, "ai_assistant.copied")
+        i18n!(cx, "ai.copied")
     } else {
         i18n!(cx, "common.action.copy")
     };

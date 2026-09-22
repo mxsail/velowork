@@ -39,7 +39,7 @@ impl SettingsCategory {
             Self::FileManager => i18n!(cx, "settings.nav.file_manager"),
             Self::Security => i18n!(cx, "settings.nav.security"),
             Self::Sync => i18n!(cx, "settings.nav.sync"),
-            Self::AiAssistant => i18n!(cx, "settings.nav.ai_assistant"),
+            Self::AiAssistant => i18n!(cx, "settings.nav.ai"),
 
             Self::SearchEngines => i18n!(cx, "settings.nav.search_engines"),
 

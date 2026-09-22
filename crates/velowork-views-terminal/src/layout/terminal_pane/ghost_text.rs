@@ -72,7 +72,7 @@ pub fn render_ghost_text_overlay(
                         .bg(surface_bg_t(t.bg_selection, t))
                         .text_color(with_alpha(t.text_secondary, 0.75))
                         .text_size(px(10.0))
-                        .child(i18n!(cx, "ghost_text.tab_accept")),
+                        .child(i18n!(cx, "ai.ghost_text.tab_accept")),
                 )
                 .child(
                     div()
@@ -82,7 +82,7 @@ pub fn render_ghost_text_overlay(
                         .bg(surface_bg_t(t.bg_selection, t))
                         .text_color(with_alpha(t.text_muted, 0.6))
                         .text_size(px(10.0))
-                        .child(i18n!(cx, "ghost_text.esc_dismiss")),
+                        .child(i18n!(cx, "ai.ghost_text.esc_dismiss")),
                 ),
         )
         .into_any_element()

@@ -803,7 +803,7 @@ impl AiAssistantPanel {
         let project_chat_sessions = std::collections::HashMap::new();
         let messages = vec![ChatMessage {
             is_user: false,
-            text: i18n!(cx, "ai_assistant.welcome"),
+            text: i18n!(cx, "ai.welcome"),
             streaming: false,
             document_views: std::cell::RefCell::new(Vec::new()),
             tool_call: None,
@@ -820,7 +820,7 @@ impl AiAssistantPanel {
 
         let ai_model_select = cx.new(|cx| {
             let mut s = SelectState::new(cx)
-                .placeholder(i18n!(cx, "ai_assistant.model"))
+                .placeholder(i18n!(cx, "ai.model"))
                 .placement(SelectPlacement::Above)
                 .ghost(true)
                 .size(ControlSize::Compact)
@@ -870,8 +870,8 @@ impl AiAssistantPanel {
         let ai_sessions_search_scope_select = cx.new(|cx| {
             let mut s = SelectState::new(cx)
                 .options(vec![
-                    SelectOption::new(false, i18n!(cx, "ai_assistant.search_scope_title")),
-                    SelectOption::new(true, i18n!(cx, "ai_assistant.search_scope_content")),
+                    SelectOption::new(false, i18n!(cx, "ai.search_scope_title")),
+                    SelectOption::new(true, i18n!(cx, "ai.search_scope_content")),
                 ])
                 .selected(Some(false))
                 .placement(SelectPlacement::Below)
@@ -1226,7 +1226,7 @@ impl AiAssistantPanel {
             } else {
                 self.messages = vec![ChatMessage {
                     is_user: false,
-                    text: i18n!(cx, "ai_assistant.welcome"),
+                    text: i18n!(cx, "ai.welcome"),
                     streaming: false,
                     document_views: std::cell::RefCell::new(Vec::new()),
                     tool_call: None,
@@ -1358,7 +1358,7 @@ impl AiAssistantPanel {
                     } else {
                         this.messages = vec![ChatMessage {
                             is_user: false,
-                            text: i18n!(cx, "ai_assistant.welcome"),
+                            text: i18n!(cx, "ai.welcome"),
                             streaming: false,
                             document_views: std::cell::RefCell::new(Vec::new()),
                             tool_call: None,
@@ -1828,7 +1828,7 @@ impl AiAssistantPanel {
             files: true,
             directories: false,
             multiple: true,
-            prompt: Some(i18n!(cx, "ai_assistant.attach").into()),
+            prompt: Some(i18n!(cx, "ai.attach").into()),
         });
         let _this = cx.entity().clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
@@ -2202,11 +2202,11 @@ impl AiAssistantPanel {
         let is_streaming = self.ai_streaming_index.is_some();
         let has_input = self.has_input_content(cx);
         if is_streaming && !has_input {
-            i18n!(cx, "ai_assistant.stop")
+            i18n!(cx, "ai.stop")
         } else if is_streaming && has_input {
-            i18n!(cx, "ai_assistant.pending_send_now")
+            i18n!(cx, "ai.pending_send_now")
         } else {
-            i18n!(cx, "ai_assistant.send")
+            i18n!(cx, "ai.send")
         }
     }
 
@@ -2307,8 +2307,8 @@ impl AiAssistantPanel {
                                                     if this.messages[idx].text.is_empty() {
                                                         this.messages[idx].text = format!(
                                                             "{}: {}",
-                                                            i18n!(cx, "ai_assistant.error"),
-                                                            i18n!(cx, "ai_assistant.empty_response")
+                                                            i18n!(cx, "ai.error"),
+                                                            i18n!(cx, "ai.empty_response")
                                                         );
                                                     }
                                                     this.update_message_input_states(idx, cx);
@@ -2332,7 +2332,7 @@ impl AiAssistantPanel {
                                                 if let Some(idx) = this.ai_streaming_index {
                                                     this.messages[idx].text = format!(
                                                         "{}: {}",
-                                                        i18n!(cx, "ai_assistant.error"),
+                                                        i18n!(cx, "ai.error"),
                                                         e
                                                     );
                                                     this.messages[idx].streaming = false;
@@ -2364,8 +2364,8 @@ impl AiAssistantPanel {
                                                 if this.messages[idx].text.is_empty() {
                                                     this.messages[idx].text = format!(
                                                         "{}: {}",
-                                                        i18n!(cx, "ai_assistant.error"),
-                                                        i18n!(cx, "ai_assistant.network_interrupted")
+                                                        i18n!(cx, "ai.error"),
+                                                        i18n!(cx, "ai.network_interrupted")
                                                     );
                                                 }
                                                 this.update_message_input_states(idx, cx);
@@ -2701,7 +2701,7 @@ impl AiAssistantPanel {
                                             if let Some(idx) = this.ai_streaming_index {
                                                 this.messages[idx].text = format!(
                                                     "{}: {}",
-                                                    i18n!(cx, "ai_assistant.error"),
+                                                    i18n!(cx, "ai.error"),
                                                     e
                                                 );
                                                 this.messages[idx].streaming = false;
@@ -2719,8 +2719,8 @@ impl AiAssistantPanel {
                                             if this.messages[idx].text.is_empty() {
                                                 this.messages[idx].text = format!(
                                                     "{}: {}",
-                                                    i18n!(cx, "ai_assistant.error"),
-                                                    i18n!(cx, "ai_assistant.network_interrupted")
+                                                    i18n!(cx, "ai.error"),
+                                                    i18n!(cx, "ai.network_interrupted")
                                                 );
                                             }
                                             this.update_message_input_states(idx, cx);
@@ -2746,8 +2746,8 @@ impl AiAssistantPanel {
                                         if this.messages[idx].text.is_empty() {
                                             this.messages[idx].text = format!(
                                                 "{}: {}",
-                                                i18n!(cx, "ai_assistant.error"),
-                                                i18n!(cx, "ai_assistant.service_terminated")
+                                                i18n!(cx, "ai.error"),
+                                                i18n!(cx, "ai.service_terminated")
                                             );
                                         }
                                         this.update_message_input_states(idx, cx);
@@ -2859,7 +2859,7 @@ impl AiAssistantPanel {
                         }
                         Err(e) => {
                             this.messages[idx].text =
-                                format!("{}: {}", i18n!(cx, "ai_assistant.error"), e);
+                                format!("{}: {}", i18n!(cx, "ai.error"), e);
                         }
                     }
                     this.messages[idx].streaming = false;
@@ -2888,7 +2888,7 @@ impl AiAssistantPanel {
         let edit_input = self.ai_edit_input.get_or_insert_with(|| {
             cx.new(|cx| {
                 InputState::new(cx)
-                    .placeholder(i18n!(cx, "ai_assistant.title"))
+                    .placeholder(i18n!(cx, "ai.title"))
             })
         });
         edit_input.update(cx, |input, cx| {
@@ -3095,7 +3095,7 @@ impl AiAssistantPanel {
                 let att_path = att.path.clone();
                 let is_image = att.is_image;
                 let name = att.name.clone();
-                let remove_tip = i18n!(cx, "ai_assistant.attachment_remove");
+                let remove_tip = i18n!(cx, "ai.attachment_remove");
                 div()
                     .id(ElementId::Name(format!("ai-att-{}", i).into()))
                     .relative()
@@ -3177,9 +3177,9 @@ impl AiAssistantPanel {
         let p = SemanticPalette::from_context(cx);
         let _this = cx.entity();
         let quote = self.ai_quote.clone().unwrap_or_default();
-        let edit_tip = i18n!(cx, "ai_assistant.quote_edit");
-        let delete_tip = i18n!(cx, "ai_assistant.quote_delete");
-        let save_tip = i18n!(cx, "ai_assistant.quote_save");
+        let edit_tip = i18n!(cx, "ai.quote_edit");
+        let delete_tip = i18n!(cx, "ai.quote_delete");
+        let save_tip = i18n!(cx, "ai.quote_save");
 
         div()
             .w_full()
@@ -3286,8 +3286,8 @@ impl AiAssistantPanel {
     fn render_pending_queue(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let p = SemanticPalette::from_context(cx);
-        let title = i18n!(cx, "ai_assistant.pending_queue");
-        let remove_tip = i18n!(cx, "ai_assistant.pending_remove");
+        let title = i18n!(cx, "ai.pending_queue");
+        let remove_tip = i18n!(cx, "ai.pending_remove");
 
         div().w_full().px(SPACE_XS).pb(SPACE_XS).child(
             div()
@@ -3303,7 +3303,7 @@ impl AiAssistantPanel {
                 )
                 .children(self.ai_pending_queue.iter().enumerate().map(|(i, item)| {
                     let text = if item.text.is_empty() {
-                        i18n!(cx, "ai_assistant.quote")
+                        i18n!(cx, "ai.quote")
                     } else {
                         item.text.clone()
                     };
@@ -3366,7 +3366,7 @@ impl AiAssistantPanel {
                     .wrap(true)
                     .submit_on_enter(true)
                     .pass_enter(false)
-                    .placeholder(i18n!(cx, "ai_assistant.title"))
+                    .placeholder(i18n!(cx, "ai.title"))
             })
         });
         if is_new {
@@ -3432,7 +3432,7 @@ impl AiAssistantPanel {
         let this = cx.entity();
         let history = self.ai_history.clone();
 
-        let title = i18n!(cx, "ai_assistant.history");
+        let title = i18n!(cx, "ai.history");
         let close_tip = i18n!(cx, "common.action.close");
 
         // 标题栏（固定，不随列表滚动）+ 右侧关闭按钮。
@@ -3483,7 +3483,7 @@ impl AiAssistantPanel {
                 .py(px(10.0))
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.text_muted))
-                .child(i18n!(cx, "ai_assistant.history_empty"))
+                .child(i18n!(cx, "ai.history_empty"))
                 .into_any_element()
         } else {
             let scroll_handle = &self.ai_history_scroll;
@@ -3829,7 +3829,7 @@ impl AiAssistantPanel {
         if self.ai_sessions_search_input.is_none() {
             let input = cx.new(|cx| {
                 InputState::new(cx)
-                    .placeholder(i18n!(cx, "ai_assistant.search_sessions_placeholder"))
+                    .placeholder(i18n!(cx, "ai.search_sessions_placeholder"))
             });
             let input_clone = input.clone();
             cx.subscribe(
@@ -3930,7 +3930,7 @@ impl AiAssistantPanel {
         self.ai_history.clear();
         self.push_message(ChatMessage {
             is_user: false,
-            text: i18n!(cx, "ai_assistant.welcome"),
+            text: i18n!(cx, "ai.welcome"),
             streaming: false,
             document_views: std::cell::RefCell::new(Vec::new()),
             tool_call: None,
@@ -4039,7 +4039,7 @@ impl AiAssistantPanel {
                 self.active_conversation_id = Some(new_id);
                 self.push_message(ChatMessage {
                     is_user: false,
-                    text: i18n!(cx, "ai_assistant.welcome"),
+                    text: i18n!(cx, "ai.welcome"),
                     streaming: false,
                     document_views: std::cell::RefCell::new(Vec::new()),
                     tool_call: None,
@@ -4057,8 +4057,8 @@ impl AiAssistantPanel {
     }
 
     fn confirm_clear_all_conversations(&mut self, cx: &mut Context<Self>) {
-        let title = i18n!(cx, "ai_assistant.clear_all_history");
-        let msg = i18n!(cx, "ai_assistant.clear_all_history_confirm");
+        let title = i18n!(cx, "ai.clear_all_history");
+        let msg = i18n!(cx, "ai.clear_all_history_confirm");
 
         let dialog = cx.new(|cx| {
             ConfirmDialog::new(
@@ -4108,7 +4108,7 @@ impl AiAssistantPanel {
         self.active_conversation_id = Some(new_id);
         self.push_message(ChatMessage {
             is_user: false,
-            text: i18n!(cx, "ai_assistant.welcome"),
+            text: i18n!(cx, "ai.welcome"),
             streaming: false,
             document_views: std::cell::RefCell::new(Vec::new()),
             tool_call: None,
@@ -4194,8 +4194,8 @@ impl AiAssistantPanel {
         self.ai_sessions_search_scope_select.update(cx, |state, cx| {
             state.set_options(
                 vec![
-                    SelectOption::new(false, i18n!(cx, "ai_assistant.search_scope_title")),
-                    SelectOption::new(true, i18n!(cx, "ai_assistant.search_scope_content")),
+                    SelectOption::new(false, i18n!(cx, "ai.search_scope_title")),
+                    SelectOption::new(true, i18n!(cx, "ai.search_scope_content")),
                 ],
                 cx,
             );
@@ -4247,7 +4247,7 @@ impl AiAssistantPanel {
                             div()
                                 .text_size(ui_text_md(cx))
                                 .text_color(p.text_muted)
-                                .child(i18n!(cx, "ai_assistant.no_sessions_found")),
+                                .child(i18n!(cx, "ai.no_sessions_found")),
                         )
                         .into_any_element(),
                 ]
@@ -4257,7 +4257,7 @@ impl AiAssistantPanel {
                     .map(|res| {
                         let is_active = active_id.as_deref() == Some(&res.conversation.id);
                         let conv_id = res.conversation.id.clone();
-                        let default_title = i18n!(cx, "ai_assistant.new_chat_title");
+                        let default_title = i18n!(cx, "ai.new_chat_title");
                         let title = res.conversation.title.as_deref().unwrap_or(&default_title);
                         let rel_time = format_relative_time(&res.conversation.updated_at, cx);
                         let title_str = title.to_string();
@@ -4265,7 +4265,7 @@ impl AiAssistantPanel {
                         let group_name = SharedString::from(format!("session-search-row-{}", conv_id));
                         let row_id = SharedString::from(format!("ai-session-search-row-{}", conv_id));
                         let search_q = self.ai_sessions_search_query.clone();
-                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.delete_chat").into_boxed_str());
+                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai.delete_chat").into_boxed_str());
 
                         v_flex()
                             .id(row_id)
@@ -4359,7 +4359,7 @@ impl AiAssistantPanel {
                                     ),
                             )
                             .when_some(snippet, |d, snip| {
-                                let snippet_prefix = i18n!(cx, "ai_assistant.snippet_prefix");
+                                let snippet_prefix = i18n!(cx, "ai.snippet_prefix");
                                 d.child(
                                     div()
                                         .w_full()
@@ -4391,7 +4391,7 @@ impl AiAssistantPanel {
                         div()
                             .text_size(ui_text_md(cx))
                             .text_color(p.text_muted)
-                            .child(i18n!(cx, "ai_assistant.no_chat_history")),
+                            .child(i18n!(cx, "ai.no_chat_history")),
                     )
                     .into_any_element(),
             ]
@@ -4402,7 +4402,7 @@ impl AiAssistantPanel {
                     let is_active = active_id.as_deref() == Some(&conv.id);
                     let is_renaming = renaming_id.as_deref() == Some(&conv.id);
                     let conv_id = conv.id.clone();
-                    let default_title = i18n!(cx, "ai_assistant.new_chat_title");
+                    let default_title = i18n!(cx, "ai.new_chat_title");
                     let title = conv.title.as_deref().unwrap_or(&default_title);
                     let rel_time = format_relative_time(&conv.updated_at, cx);
                     let title_str = title.to_string();
@@ -4469,8 +4469,8 @@ impl AiAssistantPanel {
                     } else {
                         let group_name = SharedString::from(format!("session-row-{}", conv_id));
                         let row_id = SharedString::from(format!("ai-session-row-{}", conv_id));
-                        let rename_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.rename_chat").into_boxed_str());
-                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai_assistant.delete_chat").into_boxed_str());
+                        let rename_tip: &'static str = Box::leak(i18n!(cx, "ai.rename_chat").into_boxed_str());
+                        let delete_tip: &'static str = Box::leak(i18n!(cx, "ai.delete_chat").into_boxed_str());
 
                         h_flex()
                             .id(row_id)
@@ -4641,9 +4641,9 @@ impl AiAssistantPanel {
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(p.text_primary)
                                     .child(if let Some(ref search_results) = self.ai_sessions_search_results {
-                                        format!("{} ({})", i18n!(cx, "ai_assistant.chat_history"), search_results.len())
+                                        format!("{} ({})", i18n!(cx, "ai.chat_history"), search_results.len())
                                     } else {
-                                        format!("{} ({})", i18n!(cx, "ai_assistant.chat_history"), conv_count)
+                                        format!("{} ({})", i18n!(cx, "ai.chat_history"), conv_count)
                                     }),
                             ),
                     )
@@ -4662,7 +4662,7 @@ impl AiAssistantPanel {
                                         .text_size(ui_text_md(cx))
                                         .text_color(p.text_muted)
                                         .hover(|s| s.text_color(p.status_error).bg(p.surface_hover))
-                                        .child(i18n!(cx, "ai_assistant.clear_all_history"))
+                                        .child(i18n!(cx, "ai.clear_all_history"))
                                         .on_click({
                                             let panel_weak = panel_weak.clone();
                                             move |_, _, cx| {
@@ -4808,7 +4808,7 @@ impl AiAssistantPanel {
                     .border_color(p.border_subtle)
                     .child(
                         Button::new("ai-popover-footer-new-chat-btn", &t)
-                            .label(format!("+ {}", i18n!(cx, "ai_assistant.new_chat")))
+                            .label(format!("+ {}", i18n!(cx, "ai.new_chat")))
                             .small()
                             .text_size(ui_text_md(cx))
                             .variant(ControlVariant::Secondary)
@@ -4852,7 +4852,7 @@ impl AiAssistantPanel {
         self.ai_history.clear();
         self.push_message(ChatMessage {
             is_user: false,
-            text: i18n!(cx, "ai_assistant.cleared"),
+            text: i18n!(cx, "ai.cleared"),
             streaming: false,
             document_views: std::cell::RefCell::new(Vec::new()),
             tool_call: None,
@@ -4891,7 +4891,7 @@ impl AiAssistantPanel {
             let input = self.ai_search_input.get_or_insert_with(|| {
                 let input = cx.new(|cx| {
                     InputState::new(cx)
-                        .placeholder(i18n!(cx, "ai_assistant.search_placeholder"))
+                        .placeholder(i18n!(cx, "ai.search_placeholder"))
                 });
                 let input_clone = input.clone();
                 cx.subscribe(
@@ -4980,7 +4980,7 @@ impl AiAssistantPanel {
         if self.ai_search_open && self.ai_search_input.is_none() {
             let input = cx.new(|cx| {
                 InputState::new(cx)
-                    .placeholder(i18n!(cx, "ai_assistant.search_placeholder"))
+                    .placeholder(i18n!(cx, "ai.search_placeholder"))
             });
             let input_clone = input.clone();
             cx.subscribe(
@@ -5043,13 +5043,13 @@ impl AiAssistantPanel {
                                 .text_size(ui_text_md(cx))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(p.text_secondary)
-                                .child(i18n!(cx, "ai_assistant.no_model")),
+                                .child(i18n!(cx, "ai.no_model")),
                         )
                         .child(
                             div()
                                 .text_size(ui_text_md(cx))
                                 .text_color(p.text_muted)
-                                .child(i18n!(cx, "ai_assistant.no_model_hint")),
+                                .child(i18n!(cx, "ai.no_model_hint")),
                         )
                         .child(
                             div()
@@ -5066,7 +5066,7 @@ impl AiAssistantPanel {
                                     hover_bg: p.surface_accent_hover,
                                     ..Default::default()
                                 })
-                                .child(i18n!(cx, "ai_assistant.go_settings"))
+                                .child(i18n!(cx, "ai.go_settings"))
                                 .on_click(cx.listener(|_, _, window, cx| {
                                     window.dispatch_action(
                                         Box::new(crate::keybindings::ShowAiSettings),
@@ -5121,7 +5121,7 @@ impl AiAssistantPanel {
                     let input = this.ai_search_input.get_or_insert_with(|| {
                         let input = cx.new(|cx| {
                             InputState::new(cx)
-                                .placeholder(i18n!(cx, "ai_assistant.search_placeholder"))
+                                .placeholder(i18n!(cx, "ai.search_placeholder"))
                         });
                         let input_clone = input.clone();
                         cx.subscribe(
@@ -5182,7 +5182,7 @@ impl AiAssistantPanel {
                     .child(self.ai_icon_btn(
                         "ai-new-chat",
                         AppIcon::Plus,
-                        i18n!(cx, "ai_assistant.new_chat"),
+                        i18n!(cx, "ai.new_chat"),
                         &t,
                         cx,
                         |this, _, cx| this.new_ai_chat(cx),
@@ -5190,7 +5190,7 @@ impl AiAssistantPanel {
                     .child(self.ai_icon_btn(
                         "ai-history-btn",
                         AppIcon::History,
-                        i18n!(cx, "ai_assistant.chat_history"),
+                        i18n!(cx, "ai.chat_history"),
                         &t,
                         cx,
                         |this, _, cx| this.toggle_sessions_popover(cx),
@@ -5198,7 +5198,7 @@ impl AiAssistantPanel {
                     .child(self.ai_icon_btn(
                         "ai-clear-chat",
                         AppIcon::Trash,
-                        i18n!(cx, "ai_assistant.clear_tooltip"),
+                        i18n!(cx, "ai.clear_tooltip"),
                         &t,
                         cx,
                         |this, _, cx| this.clear_ai_chat(cx),
@@ -5215,7 +5215,7 @@ impl AiAssistantPanel {
                     .child(self.ai_icon_btn(
                         "ai-search",
                         AppIcon::Search,
-                        i18n!(cx, "ai_assistant.search"),
+                        i18n!(cx, "ai.search"),
                         &t,
                         cx,
                         |this, window, cx| this.toggle_ai_search(window, cx),
@@ -5233,7 +5233,7 @@ impl AiAssistantPanel {
                             pct,
                             used_str,
                             max_str,
-                            i18n!(cx, "ai_assistant.context_used")
+                            i18n!(cx, "ai.context_used")
                         );
                         div()
                             .id("ai-token-usage-ring")
@@ -5577,7 +5577,7 @@ impl AiAssistantPanel {
                             .child(self.ai_icon_btn(
                                 "ai-attach-btn",
                                 AppIcon::NewFile,
-                                i18n!(cx, "ai_assistant.attach"),
+                                i18n!(cx, "ai.attach"),
                                 &t,
                                 cx,
                                 |this, window, cx| this.attach_files(window, cx),
@@ -5585,7 +5585,7 @@ impl AiAssistantPanel {
                             .child(self.ai_icon_btn(
                                 "ai-history-btn",
                                 AppIcon::MonitorClock,
-                                i18n!(cx, "ai_assistant.history"),
+                                i18n!(cx, "ai.history"),
                                 &t,
                                 cx,
                                 |this, window, cx| this.toggle_history(window, cx),
@@ -6142,7 +6142,7 @@ impl Panel for AiAssistantPanel {
     fn metadata(&self, cx: &App) -> PanelInfo {
         PanelInfo::new(
             "ai_assistant",
-            i18n!(cx, "ai_assistant.title"),
+            i18n!(cx, "ai.title"),
             AppIcon::AiAssistant,
             velowork_ui::dock::types::PanelKind::Custom,
         )
@@ -6455,7 +6455,7 @@ fn render_ai_message(
         }
 
         // 错误状态卡片：当 AI 回复内容为错误信息时，以显著红色告警卡片展示。
-        let error_prefix = format!("{}:", i18n!(cx, "ai_assistant.error"));
+        let error_prefix = format!("{}:", i18n!(cx, "ai.error"));
         let is_error = msg.text.starts_with(&error_prefix);
 
         if is_error {
@@ -6619,7 +6619,7 @@ fn render_ai_message(
                 let _ = cnt;
                 children.push(el);
             } else if !msg.streaming {
-                let err_msg = format!("{}: {}", i18n!(cx, "ai_assistant.error"), i18n!(cx, "ai_assistant.empty_response"));
+                let err_msg = format!("{}: {}", i18n!(cx, "ai.error"), i18n!(cx, "ai.empty_response"));
                 let is_multiline = err_msg.contains('\n') || err_msg.chars().count() > 36;
                 children.push(
                     h_flex()
@@ -6662,9 +6662,9 @@ fn render_ai_message(
                 .iter()
                 .map(|tc| {
                     if tc.kind == ToolCallKind::Result {
-                        i18n!(cx, "ai_assistant.tool_result").to_string()
+                        i18n!(cx, "ai.tool_result").to_string()
                     } else if tc.name.is_empty() {
-                        i18n!(cx, "ai_assistant.tool_use").to_string()
+                        i18n!(cx, "ai.tool_use").to_string()
                     } else {
                         tc.name.clone()
                     }
@@ -6672,9 +6672,9 @@ fn render_ai_message(
                 .collect();
             let tool_entity = panel_entity.clone();
             let toggle_label = if expanded {
-                i18n!(cx, "ai_assistant.tool_calls_expanded")
+                i18n!(cx, "ai.tool_calls_expanded")
             } else {
-                i18n!(cx, "ai_assistant.tool_calls_collapsed").replace("{count}", &count.to_string())
+                i18n!(cx, "ai.tool_calls_collapsed").replace("{count}", &count.to_string())
             };
             let mut group = div()
                 .mt(SPACE_SM)
@@ -6803,7 +6803,7 @@ fn render_ai_message(
                 let panel_send = panel_entity.clone();
                 let send_btn = button_primary(
                     format!("ai-edit-send-{}", msg_index),
-                    i18n!(cx, "ai_assistant.send"),
+                    i18n!(cx, "ai.send"),
                     &t,
                 )
                 .small()
@@ -6946,7 +6946,7 @@ fn render_ai_message(
 /// 加载状态指示器：三个错相位呼吸跳动的圆点 + 文案，直观表达「等待回复中」。
 fn loading_indicator(_t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement {
     let p = SemanticPalette::from_context(cx);
-    let label = i18n!(cx, "ai_assistant.thinking");
+    let label = i18n!(cx, "ai.thinking");
     let dots = (0..3).map(|i| {
         // 每个圆点相位错开，形成波浪式呼吸效果。
         let phase = (frame + i * 10) % 30;
@@ -6977,7 +6977,7 @@ fn loading_indicator(_t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement
 
 /// 可折叠的思考过程展示区块。
 fn thinking_block(content: &str, t: &ThemeColors, cx: &App) -> impl IntoElement {
-    let header_label = i18n!(cx, "ai_assistant.thinking_process");
+    let header_label = i18n!(cx, "ai.thinking_process");
     div()
         .rounded(px(6.0))
         .border_1()
@@ -7023,7 +7023,7 @@ fn msg_copy_btn(
     cx: &App,
 ) -> impl IntoElement {
     let label = if copied {
-        i18n!(cx, "ai_assistant.copy_done")
+        i18n!(cx, "ai.copy_done")
     } else {
         i18n!(cx, "common.action.copy")
     };
@@ -7201,7 +7201,7 @@ fn code_block_with_actions(
                                 }),
                         )
                         .child(
-                            button_primary("code-send-btn", i18n!(cx, "ai_assistant.send"), &t)
+                            button_primary("code-send-btn", i18n!(cx, "ai.send"), &t)
                                 .small()
                                 .on_click(move |_ev, _window, cx| {
                                     send_command_to_focused_terminal(
@@ -7523,9 +7523,9 @@ fn tool_call_card(
 ) -> AnyElement {
     let is_result = data.kind == ToolCallKind::Result;
     let header_label = if is_result {
-        i18n!(cx, "ai_assistant.tool_result")
+        i18n!(cx, "ai.tool_result")
     } else {
-        i18n!(cx, "ai_assistant.tool_use")
+        i18n!(cx, "ai.tool_use")
     };
 
     let header = h_flex()
@@ -7581,7 +7581,7 @@ fn tool_call_card(
         let extra: Vec<&(String, String)> =
             data.params.iter().filter(|(k, _)| k != "command").collect();
         if !extra.is_empty() {
-            let params_label = i18n!(cx, "ai_assistant.tool_params");
+            let params_label = i18n!(cx, "ai.tool_params");
             let mut list = v_flex().gap(px(2.0)).child(
                 div()
                     .text_size(ui_text_md(cx))
@@ -7626,7 +7626,7 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
     registry.register(velowork_ui::dock::ToolbarPanelSpec {
         id: "ai_assistant".to_string(),
         icon: velowork_ui::icon::AppIcon::AiAssistant,
-        title_key: "ai_assistant.title".to_string(),
+        title_key: "ai.title".to_string(),
         order: 10,
         is_visible: std::sync::Arc::new(|cx| {
             crate::settings::settings_entity(cx).read(cx).settings.ai_enabled

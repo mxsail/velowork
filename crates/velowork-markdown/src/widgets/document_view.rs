@@ -280,7 +280,7 @@ impl Render for DocumentView {
                     let lang = language.as_deref().unwrap_or("");
                     let is_copied = self.copied_code_index == Some(i);
                     let copy_label = if is_copied {
-                        i18n!(cx, "ai_assistant.copied")
+                        i18n!(cx, "ai.copied")
                     } else {
                         i18n!(cx, "common.action.copy")
                     };

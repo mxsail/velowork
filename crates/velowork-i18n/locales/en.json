@@ -103,7 +103,7 @@
       "file_manager": "File Manager",
       "security": "Security",
       "sync": "Data Sync",
-      "ai_assistant": "AI Assistant",
+      "ai": "AI Assistant",
       "data_storage": "Data Storage",
       "notifications": "Notifications",
       "search_engines": "Search Engines"
@@ -352,7 +352,7 @@
         "layout": "Layout"
       }
     },
-    "ai_assistant": {
+    "ai": {
       "enable": "Enable AI Assistant",
       "enable_desc": "Enable to use AI chat in the right panel",
       "model_management": "Model Management",
@@ -2353,7 +2353,7 @@
     "collapse": "Collapse",
     "more_count": "+{count} more"
   },
-  "ai_assistant": {
+  "ai": {
     "title": "AI Assistant",
     "new_chat": "New Chat",
     "chat_history": "Chat History",
@@ -2442,11 +2442,11 @@
     "pending_send_now": "Send now",
     "clear_tooltip": "Clear chat history",
     "token_usage_hint": "Estimated token usage for the current session. Context is automatically compressed when approaching the limit.",
-    "context_used": "context used"
-  },
-  "ghost_text": {
-    "tab_accept": "Tab to accept",
-    "esc_dismiss": "Esc to dismiss"
+    "context_used": "context used",
+    "ghost_text": {
+      "tab_accept": "Tab to accept",
+      "esc_dismiss": "Esc to dismiss"
+    }
   },
   "workspace": {
     "explorer": "Session Manager",

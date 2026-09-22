@@ -197,8 +197,8 @@ impl AiChatSession {
                                                 if last.text.is_empty() {
                                                     let err_str = format!(
                                                         "{}: {}",
-                                                        i18n!(cx, "ai_assistant.error"),
-                                                        i18n!(cx, "ai_assistant.empty_response")
+                                                        i18n!(cx, "ai.error"),
+                                                        i18n!(cx, "ai.empty_response")
                                                     );
                                                     this.error_message = Some(err_str.clone());
                                                     last.text = err_str;
@@ -218,7 +218,7 @@ impl AiChatSession {
                                                 last.streaming = false;
                                                 let full_err = format!(
                                                     "{}: {}",
-                                                    i18n!(cx, "ai_assistant.error"),
+                                                    i18n!(cx, "ai.error"),
                                                     err_str
                                                 );
                                                 last.text = full_err;
@@ -239,8 +239,8 @@ impl AiChatSession {
                                             if last.text.is_empty() {
                                                 let err_str = format!(
                                                     "{}: {}",
-                                                    i18n!(cx, "ai_assistant.error"),
-                                                    i18n!(cx, "ai_assistant.network_interrupted")
+                                                    i18n!(cx, "ai.error"),
+                                                    i18n!(cx, "ai.network_interrupted")
                                                 );
                                                 this.error_message = Some(err_str.clone());
                                                 last.text = err_str;

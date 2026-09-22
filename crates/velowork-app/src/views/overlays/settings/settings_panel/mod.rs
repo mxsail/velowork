@@ -1221,15 +1221,15 @@ impl SettingsPanel {
             let options = vec![
                 SelectOption::new(
                     velowork_workspace::settings::AiCompressionStrategy::Summarize,
-                    i18n!(cx, "settings.ai_assistant.strategy_summarize"),
+                    i18n!(cx, "settings.ai.strategy_summarize"),
                 ),
                 SelectOption::new(
                     velowork_workspace::settings::AiCompressionStrategy::SlidingWindow,
-                    i18n!(cx, "settings.ai_assistant.strategy_sliding_window"),
+                    i18n!(cx, "settings.ai.strategy_sliding_window"),
                 ),
                 SelectOption::new(
                     velowork_workspace::settings::AiCompressionStrategy::TruncateOldest,
-                    i18n!(cx, "settings.ai_assistant.strategy_truncate_oldest"),
+                    i18n!(cx, "settings.ai.strategy_truncate_oldest"),
                 ),
             ];
             SelectState::new(cx)

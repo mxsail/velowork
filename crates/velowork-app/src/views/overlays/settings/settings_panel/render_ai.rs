@@ -26,18 +26,18 @@ impl SettingsPanel {
         let t = theme(cx);
         let s = settings_entity(cx).read(cx).settings.clone();
 
-        let title = i18n!(cx, "settings.nav.ai_assistant");
-        let enable_label = i18n!(cx, "settings.ai_assistant.enable");
-        let enable_desc = i18n!(cx, "settings.ai_assistant.enable_desc");
-        let model_mgmt_label = i18n!(cx, "settings.ai_assistant.model_management");
-        let add_model_label = i18n!(cx, "settings.ai_assistant.add_model");
-        let default_config_label = i18n!(cx, "settings.ai_assistant.default_config");
-        let default_model_label = i18n!(cx, "settings.ai_assistant.default_model");
-        let default_model_desc = i18n!(cx, "settings.ai_assistant.default_model_desc");
-        let temperature_label = i18n!(cx, "settings.ai_assistant.temperature");
-        let temperature_desc = i18n!(cx, "settings.ai_assistant.temperature_desc");
-        let max_tokens_label = i18n!(cx, "settings.ai_assistant.max_tokens");
-        let max_tokens_desc = i18n!(cx, "settings.ai_assistant.max_tokens_desc");
+        let title = i18n!(cx, "settings.nav.ai");
+        let enable_label = i18n!(cx, "settings.ai.enable");
+        let enable_desc = i18n!(cx, "settings.ai.enable_desc");
+        let model_mgmt_label = i18n!(cx, "settings.ai.model_management");
+        let add_model_label = i18n!(cx, "settings.ai.add_model");
+        let default_config_label = i18n!(cx, "settings.ai.default_config");
+        let default_model_label = i18n!(cx, "settings.ai.default_model");
+        let default_model_desc = i18n!(cx, "settings.ai.default_model_desc");
+        let temperature_label = i18n!(cx, "settings.ai.temperature");
+        let temperature_desc = i18n!(cx, "settings.ai.temperature_desc");
+        let max_tokens_label = i18n!(cx, "settings.ai.max_tokens");
+        let max_tokens_desc = i18n!(cx, "settings.ai.max_tokens_desc");
 
         let models = s.ai_models.clone();
         let ai_enabled = s.ai_enabled;
@@ -96,7 +96,7 @@ impl SettingsPanel {
                             }),
                     )
                     // Skill management section
-                    .child(section_header(&i18n!(cx, "settings.ai_assistant.skill_management"), &t, cx))
+                    .child(section_header(&i18n!(cx, "settings.ai.skill_management"), &t, cx))
                     .child({
                         let mut section = section_container(&t);
                         let builtin_skills = velowork_ai::SkillRegistry::new(velowork_ai::builtin_skills()).metas();
@@ -193,14 +193,14 @@ impl SettingsPanel {
                         section
                     })
                     // Context and Memory section
-                    .child(section_header(&i18n!(cx, "settings.ai_assistant.context_and_memory"), &t, cx))
+                    .child(section_header(&i18n!(cx, "settings.ai.context_and_memory"), &t, cx))
                     .child({
                         section_container(&t)
                             // Auto Compress toggle
                             .child(self.render_toggle_with_desc(
                                 "ai-auto-compress",
-                                &i18n!(cx, "settings.ai_assistant.auto_compress"),
-                                &i18n!(cx, "settings.ai_assistant.auto_compress_desc"),
+                                &i18n!(cx, "settings.ai.auto_compress"),
+                                &i18n!(cx, "settings.ai.auto_compress_desc"),
                                 s.ai_auto_compress,
                                 true,
                                 |state, val, cx| state.set_ai_auto_compress(val, cx),
@@ -210,8 +210,8 @@ impl SettingsPanel {
                             .child(
                                 settings_row_with_desc(
                                     "ai-compression-strategy",
-                                    &i18n!(cx, "settings.ai_assistant.compression_strategy"),
-                                    &i18n!(cx, "settings.ai_assistant.compression_strategy_desc"),
+                                    &i18n!(cx, "settings.ai.compression_strategy"),
+                                    &i18n!(cx, "settings.ai.compression_strategy_desc"),
                                     &t,
                                     cx,
                                     true,
@@ -222,8 +222,8 @@ impl SettingsPanel {
                             .child(
                                 settings_row_with_desc(
                                     "ai-max-context-tokens",
-                                    &i18n!(cx, "settings.ai_assistant.max_context_tokens"),
-                                    &i18n!(cx, "settings.ai_assistant.max_context_tokens_desc"),
+                                    &i18n!(cx, "settings.ai.max_context_tokens"),
+                                    &i18n!(cx, "settings.ai.max_context_tokens_desc"),
                                     &t,
                                     cx,
                                     true,
@@ -238,8 +238,8 @@ impl SettingsPanel {
                             .child(
                                 settings_row_with_desc(
                                     "ai-max-history-messages",
-                                    &i18n!(cx, "settings.ai_assistant.max_history_messages"),
-                                    &i18n!(cx, "settings.ai_assistant.max_history_messages_desc"),
+                                    &i18n!(cx, "settings.ai.max_history_messages"),
+                                    &i18n!(cx, "settings.ai.max_history_messages_desc"),
                                     &t,
                                     cx,
                                     false,
@@ -252,12 +252,12 @@ impl SettingsPanel {
                             )
                     })
                     // Terminal Interaction section
-                    .child(section_header(&i18n!(cx, "settings.ai_assistant.terminal_interaction"), &t, cx))
+                    .child(section_header(&i18n!(cx, "settings.ai.terminal_interaction"), &t, cx))
                     .child({
                         section_container(&t).child(self.render_toggle_with_desc(
                             "terminal-ai-floating-toolbar",
-                            &i18n!(cx, "settings.ai_assistant.floating_toolbar"),
-                            &i18n!(cx, "settings.ai_assistant.floating_toolbar_desc"),
+                            &i18n!(cx, "settings.ai.floating_toolbar"),
+                            &i18n!(cx, "settings.ai.floating_toolbar_desc"),
                             s.terminal_ai_floating_toolbar_enabled,
                             false,
                             |state, val, cx| state.set_terminal_ai_floating_toolbar_enabled(val, cx),
@@ -398,20 +398,20 @@ impl SettingsPanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let title = if self.ai_edit_model_id.is_some() {
-            i18n!(cx, "settings.ai_assistant.edit_model_title")
+            i18n!(cx, "settings.ai.edit_model_title")
         } else {
-            i18n!(cx, "settings.ai_assistant.add_model_title")
+            i18n!(cx, "settings.ai.add_model_title")
         };
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
-        let name_label = i18n!(cx, "settings.ai_assistant.model_name");
-        let base_url_label = i18n!(cx, "settings.ai_assistant.base_url");
-        let api_key_label = i18n!(cx, "settings.ai_assistant.api_key");
-        let model_id_label = i18n!(cx, "settings.ai_assistant.model_id");
-        let desc_label = i18n!(cx, "settings.ai_assistant.description");
+        let name_label = i18n!(cx, "settings.ai.model_name");
+        let base_url_label = i18n!(cx, "settings.ai.base_url");
+        let api_key_label = i18n!(cx, "settings.ai.api_key");
+        let model_id_label = i18n!(cx, "settings.ai.model_id");
+        let desc_label = i18n!(cx, "settings.ai.description");
         let cancel_label = i18n!(cx, "common.action.cancel");
         let save_label = i18n!(cx, "common.action.save");
         let test_label = i18n!(cx, "common.test");
-        let test_testing_label = i18n!(cx, "settings.ai_assistant.test_testing");
+        let test_testing_label = i18n!(cx, "settings.ai.test_testing");
         let _test_success_label = i18n!(cx, "status.test_success");
         let test_in_progress = self.ai_test_in_progress;
         let test_result = self.ai_test_result.clone();

@@ -462,7 +462,7 @@ impl TerminalAiInline {
             let mut s = SelectState::new(cx)
                 .options(options)
                 .selected(selected)
-                .placeholder(i18n!(cx, "ai_assistant.model"))
+                .placeholder(i18n!(cx, "ai.model"))
                 .placement(SelectPlacement::Above)
                 .ghost(true)
                 .size(ControlSize::Compact)
@@ -618,7 +618,7 @@ impl TerminalAiInline {
                                         if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
                                             last.streaming = false;
                                             if last.text.is_empty() {
-                                                let err_str = format!("{}: {}", i18n!(cx, "ai_assistant.error"), i18n!(cx, "ai_assistant.empty_response"));
+                                                let err_str = format!("{}: {}", i18n!(cx, "ai.error"), i18n!(cx, "ai.empty_response"));
                                                 this.error_message = Some(err_str.clone());
                                                 last.text = err_str.clone();
                                                 this.reply_text = err_str;
@@ -634,7 +634,7 @@ impl TerminalAiInline {
                                         this.is_streaming = false;
                                         if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
                                             last.streaming = false;
-                                            let full_err = format!("{}: {}", i18n!(cx, "ai_assistant.error"), err_str);
+                                            let full_err = format!("{}: {}", i18n!(cx, "ai.error"), err_str);
                                             last.text = full_err.clone();
                                             this.reply_text = full_err;
                                         }
@@ -650,7 +650,7 @@ impl TerminalAiInline {
                                     if let Some(last) = this.messages.last_mut().filter(|m| !m.is_user) {
                                         last.streaming = false;
                                         if last.text.is_empty() {
-                                            let err_str = format!("{}: {}", i18n!(cx, "ai_assistant.error"), i18n!(cx, "ai_assistant.network_interrupted"));
+                                            let err_str = format!("{}: {}", i18n!(cx, "ai.error"), i18n!(cx, "ai.network_interrupted"));
                                             this.error_message = Some(err_str.clone());
                                             last.text = err_str.clone();
                                             this.reply_text = err_str;
@@ -1135,9 +1135,9 @@ impl TerminalAiInline {
             "btn-followup-send"
         };
         let btn_tip: &'static str = if is_streaming {
-            Box::leak(i18n!(cx, "ai_assistant.stop").into_boxed_str())
+            Box::leak(i18n!(cx, "ai.stop").into_boxed_str())
         } else {
-            Box::leak(i18n!(cx, "ai_assistant.send").into_boxed_str())
+            Box::leak(i18n!(cx, "ai.send").into_boxed_str())
         };
 
         div()
@@ -1237,7 +1237,7 @@ impl TerminalAiInline {
                                     .text_size(ui_text_md(cx))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(p.text_primary)
-                                    .child(i18n!(cx, "ai_assistant.title")),
+                                    .child(i18n!(cx, "ai.title")),
                             ),
                     )
                     .child(

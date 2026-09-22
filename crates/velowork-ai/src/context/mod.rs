@@ -67,9 +67,9 @@ fn terminal_screen_text(term: &Terminal) -> String {
 pub fn list_sessions(ws: &Entity<Workspace>, cx: &App) -> String {
     let projects = ws.read(cx).projects();
     if projects.is_empty() {
-        return i18n!(cx, "ai_assistant.no_sessions");
+        return i18n!(cx, "ai.no_sessions");
     }
-    let mut s = String::from(i18n!(cx, "ai_assistant.sessions_header")) + "\n";
+    let mut s = String::from(i18n!(cx, "ai.sessions_header")) + "\n";
     for p in projects {
         let kind = if p.is_remote { "remote" } else { "local" };
         s.push_str(&format!("- {} [{}]\n", p.name, kind));
@@ -86,10 +86,10 @@ pub fn session_config(name: &str, ws: &Entity<Workspace>, cx: &App) -> String {
     match proj {
         Some(p) => format!(
             "{}:\n  name: {}\n  id: {}\n  path: {}\n  is_remote: {}\n  connection_id: {:?}\n  pinned: {}\n  last_activity_at: {:?}",
-            i18n!(cx, "ai_assistant.session_config"),
+            i18n!(cx, "ai.session_config"),
             p.name, p.id, p.path, p.is_remote, p.connection_id, p.pinned, p.last_activity_at
         ),
-        None => format!("{}: {}", i18n!(cx, "ai_assistant.session_notfound"), name),
+        None => format!("{}: {}", i18n!(cx, "ai.session_notfound"), name),
     }
 }
 
