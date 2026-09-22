@@ -220,7 +220,7 @@ mod tests {
         assert_eq!(store.translate(Locale::Zh, "workspace.explorer"), "会话管理器");
         assert_eq!(store.translate(Locale::En, "common.action.cancel"), "Cancel");
         assert_eq!(
-            store.translate(Locale::Zh, "search_dialogs.file_search.title"),
+            store.translate(Locale::Zh, "search.file_search.title"),
             "跳转到文件"
         );
     }

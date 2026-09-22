@@ -995,7 +995,7 @@
     "manage_tooltip": "打开终端配色方案管理器",
     "builtin_readonly_tip": "默认配色方案不允许修改，可点击“制作副本”后进行自定义"
   },
-  "search_dialogs": {
+  "search": {
     "command_palette": {
       "title": "命令面板",
       "search": "输入以搜索命令…",

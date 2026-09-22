@@ -409,9 +409,9 @@ pub fn file_filter_button(
         .hover(|s: StyleRefinement| s.bg(rgb(t.bg_hover)))
         .on_mouse_down(MouseButton::Left, on_click)
         .child(if active_count > 0 {
-            t_fmt(cx, "search_dialogs.file_search.filter.filters_count", &[("count", &active_count.to_string())])
+            t_fmt(cx, "search.file_search.filter.filters_count", &[("count", &active_count.to_string())])
         } else {
-            i18n!(cx, "search_dialogs.file_search.filter.filters")
+            i18n!(cx, "search.file_search.filter.filters")
         })
         .child(canvas(on_bounds, |_, _, _, _| {}).absolute().size_full())
 }
@@ -435,7 +435,7 @@ pub fn file_filter_popover(
                     .min_w(px(180.0))
                     .py(px(4.0))
                     .child(
-                        file_filter_option("ignored", &i18n!(cx, "search_dialogs.file_search.filter.include_gitignored"), show_ignored, t, cx,
+                        file_filter_option("ignored", &i18n!(cx, "search.file_search.filter.include_gitignored"), show_ignored, t, cx,
                             move |_, window, cx| on_toggle("ignored", window, cx))
                     )
             ),

@@ -995,7 +995,7 @@
     "manage_tooltip": "Open Terminal Color Scheme Manager",
     "builtin_readonly_tip": "Default schemes cannot be modified. Click 'Duplicate' to customize."
   },
-  "search_dialogs": {
+  "search": {
     "command_palette": {
       "title": "Command Palette",
       "search": "Type to search commands...",

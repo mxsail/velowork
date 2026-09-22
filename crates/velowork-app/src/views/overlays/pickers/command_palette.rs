@@ -109,16 +109,16 @@ impl CommandPalette {
             }
         });
 
-        let config = QuickPickerConfig::new(&i18n!(cx, "search_dialogs.command_palette.title"))
-            .searchable(&i18n!(cx, "search_dialogs.command_palette.search"))
+        let config = QuickPickerConfig::new(&i18n!(cx, "search.command_palette.title"))
+            .searchable(&i18n!(cx, "search.command_palette.search"))
             .size(550.0, 450.0)
-            .empty_message(&i18n!(cx, "search_dialogs.command_palette.no_commands"))
+            .empty_message(&i18n!(cx, "search.command_palette.no_commands"))
             .keyboard_hints(vec![
                 (
                     "Enter",
-                    i18n!(cx, "search_dialogs.command_palette.to_select"),
+                    i18n!(cx, "search.command_palette.to_select"),
                 ),
-                ("Esc", i18n!(cx, "search_dialogs.command_palette.to_close")),
+                ("Esc", i18n!(cx, "search.command_palette.to_close")),
             ])
             .key_context("CommandPalette");
 
@@ -339,7 +339,7 @@ impl Render for CommandPalette {
             let initial_query = self.state.search_query.clone();
             let input = cx.new(|cx| {
                 let mut st = InputState::new(cx)
-                    .placeholder(i18n!(cx, "search_dialogs.command_palette.search"))
+                    .placeholder(i18n!(cx, "search.command_palette.search"))
                     .pass_enter(true);
                 if !initial_query.is_empty() {
                     st = st.default_value(&initial_query);
@@ -435,11 +435,11 @@ impl Render for CommandPalette {
                 let hints: Vec<(String, String)> = vec![
                     (
                         "Enter".to_string(),
-                        i18n!(cx, "search_dialogs.command_palette.to_select"),
+                        i18n!(cx, "search.command_palette.to_select"),
                     ),
                     (
                         "Esc".to_string(),
-                        i18n!(cx, "search_dialogs.command_palette.to_close"),
+                        i18n!(cx, "search.command_palette.to_close"),
                     ),
                 ];
                 let hint_refs: Vec<(&str, &str)> = hints
