@@ -87,7 +87,9 @@ pub const BUILTIN_SECTIONS: &[SectionDescriptor] = &[
         default_expand: true,
         search_keywords: &[
             "basic", "name", "icon", "folder", "startup", "command",
+            "host", "port", "addr", "address",
             "基础", "常规", "名称", "启动命令", "图标", "文件夹", "目录",
+            "主机", "端口", "地址",
         ],
     },
     SectionDescriptor {
@@ -96,9 +98,8 @@ pub const BUILTIN_SECTIONS: &[SectionDescriptor] = &[
         icon: AppIcon::Link,
         default_expand: true,
         search_keywords: &[
-            "connection", "host", "port", "proxy", "keepalive", "idle", "timeout",
-            "username", "user", "addr", "address", "jump",
-            "连接", "主机", "端口", "代理", "保活", "空闲", "超时", "用户名", "地址", "跳板机",
+            "connection", "proxy", "timeout", "sftp", "monitor", "jump",
+            "连接", "代理", "超时", "跳板机", "监控",
         ],
     },
     SectionDescriptor {

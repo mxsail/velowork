@@ -1095,7 +1095,10 @@ impl SessionDialogModel {
         }
 
         match self.config.protocol {
-            velowork_state::SessionProtocol::Ssh => {}
+            velowork_state::SessionProtocol::Ssh => {
+                out.push(self.inputs.host.focus_handle(cx));
+                out.push(self.inputs.port.focus_handle(cx));
+            }
             velowork_state::SessionProtocol::Serial => {
                 out.push(self.inputs.serial_port.focus_handle(cx));
                 if !self.ui.detected_serial_ports.is_empty() {
@@ -1144,8 +1147,6 @@ impl SessionDialogModel {
 
     /// 连接设置分组焦点句柄（SSH 专属）
     fn connection_focus_handles(&self, cx: &App, out: &mut Vec<FocusHandle>) {
-        out.push(self.inputs.host.focus_handle(cx));
-        out.push(self.inputs.port.focus_handle(cx));
         out.push(self.inputs.connection_timeout.focus_handle(cx));
         out.push(self.focus.sftp.clone());
         out.push(self.focus.monitor.clone());
@@ -1358,7 +1359,15 @@ impl SessionDialogModel {
                     return 1;
                 }
                 match self.config.protocol {
-                    velowork_state::SessionProtocol::Ssh => 2,
+                    velowork_state::SessionProtocol::Ssh => {
+                        if handle == &self.inputs.host.focus_handle(cx)
+                            || handle == &self.inputs.port.focus_handle(cx)
+                        {
+                            2
+                        } else {
+                            3
+                        }
+                    }
                     velowork_state::SessionProtocol::Serial => {
                         if handle == &self.inputs.serial_port.focus_handle(cx)
                             || handle == self.selects.serial_port_picker.read(cx).focus_handle()
@@ -1391,23 +1400,19 @@ impl SessionDialogModel {
                 }
             }
             SshSection::Connection => {
-                if handle == &self.inputs.host.focus_handle(cx)
-                    || handle == &self.inputs.port.focus_handle(cx)
-                {
+                if handle == &self.inputs.connection_timeout.focus_handle(cx) {
                     0
-                } else if handle == &self.inputs.connection_timeout.focus_handle(cx) {
-                    1
                 } else if handle == &self.focus.sftp {
-                    2
+                    1
                 } else if handle == &self.focus.monitor {
-                    3
+                    2
                 } else if handle == &self.focus.monitor_cpu
                     || handle == &self.focus.monitor_mem
                     || handle == &self.focus.monitor_disk
                 {
-                    4
+                    3
                 } else {
-                    5
+                    4
                 }
             }
             SshSection::Authentication => {
@@ -1591,11 +1596,13 @@ pub fn default_expanded_height(section: SshSection, protocol: velowork_state::Se
                 800.0
             } else if protocol == velowork_state::SessionProtocol::Local {
                 320.0
+            } else if protocol == velowork_state::SessionProtocol::Ssh {
+                350.0
             } else {
                 280.0
             }
         }
-        SshSection::Connection => 380.0,
+        SshSection::Connection => 300.0,
         SshSection::Authentication => 360.0,
         SshSection::Terminal => {
             if protocol == velowork_state::SessionProtocol::Serial {
@@ -2094,27 +2101,43 @@ mod tests {
             let name_handle = model.inputs.name.focus_handle(cx);
             assert!(name_handle.is_focused(window), "Tab from active nav tab must enter first card input (name)");
 
-            // 4. Shift+Tab from first card input -> returns to active nav tab
+            // 4. Tab through Basic fields: name -> parent_folder -> new_parent_folder -> host -> port -> startup
+            assert!(model.cycle_focus(false, window, cx));
+            assert!(model.selects.parent_folder.read(cx).focus_handle().is_focused(window));
+            assert!(model.cycle_focus(false, window, cx));
+            assert!(model.focus.new_parent_folder.is_focused(window));
+            assert!(model.cycle_focus(false, window, cx));
+            let host_handle = model.inputs.host.focus_handle(cx);
+            assert!(host_handle.is_focused(window), "Tab must enter host input in Basic");
+            assert!(model.cycle_focus(false, window, cx));
+            let port_handle = model.inputs.port.focus_handle(cx);
+            assert!(port_handle.is_focused(window), "Tab must enter port input in Basic");
+            assert!(model.cycle_focus(false, window, cx));
+            let startup_handle = model.inputs.startup_command.focus_handle(cx);
+            assert!(startup_handle.is_focused(window), "Tab must enter startup_command input in Basic");
+
+            // 5. Shift+Tab from name input -> returns to active nav tab
+            window.focus(&name_handle, cx);
             assert!(model.cycle_focus(true, window, cx));
             assert!(basic_nav.is_focused(window), "Shift+Tab from first card input must return to active nav tab");
 
-            // 5. Shift+Tab from nav tab -> returns to search input
+            // 6. Shift+Tab from nav tab -> returns to search input
             assert!(model.cycle_focus(true, window, cx));
             assert!(search_handle.is_focused(window), "Shift+Tab from active nav tab must return to search input");
 
-            // 6. Switch active section to Connection and verify Tab lands on Connection's host input
+            // 7. Switch active section to Connection and verify Tab lands on Connection's timeout input
             model.ui.active_section = SshSection::Connection;
             let conn_nav = model.focus.nav.get(&SshSection::Connection).unwrap();
             window.focus(conn_nav, cx);
             assert!(conn_nav.is_focused(window));
 
             assert!(model.cycle_focus(false, window, cx));
-            let host_handle = model.inputs.host.focus_handle(cx);
-            assert!(host_handle.is_focused(window), "Tab from Connection nav tab must enter host input");
+            let timeout_handle = model.inputs.connection_timeout.focus_handle(cx);
+            assert!(timeout_handle.is_focused(window), "Tab from Connection nav tab must enter timeout input");
 
-            // 7. Shift+Tab from host input -> returns to Connection nav tab
+            // 8. Shift+Tab from timeout input -> returns to Connection nav tab
             assert!(model.cycle_focus(true, window, cx));
-            assert!(conn_nav.is_focused(window), "Shift+Tab from host input must return to Connection nav tab");
+            assert!(conn_nav.is_focused(window), "Shift+Tab from timeout input must return to Connection nav tab");
 
             gpui::Empty
         });

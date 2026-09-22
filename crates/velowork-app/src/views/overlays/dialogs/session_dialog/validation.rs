@@ -125,13 +125,13 @@ impl FieldId {
     pub fn section(self) -> SshSection {
         match self {
             FieldId::Name
+            | FieldId::Host
+            | FieldId::Port
             | FieldId::StartupCommand
             | FieldId::SerialPort
             | FieldId::TelnetHost
             | FieldId::TelnetPort => SshSection::Basic,
-            FieldId::Host
-            | FieldId::Port
-            | FieldId::ConnectionTimeout
+            FieldId::ConnectionTimeout
             | FieldId::ProxyHost
             | FieldId::ProxyPort
             | FieldId::ProxyUsername

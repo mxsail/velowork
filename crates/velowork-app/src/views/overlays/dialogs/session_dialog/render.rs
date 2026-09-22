@@ -1451,6 +1451,33 @@ fn render_local_basic_fields(
         .into_any_element()
 }
 
+fn render_ssh_basic_fields(
+    model: &SessionDialogModel,
+    t: &ThemeColors,
+    cx: &App,
+) -> AnyElement {
+    let inputs = &model.inputs;
+    let host_lbl = i18n!(cx, "ssh.field.host");
+    let port_lbl = i18n!(cx, "ssh.field.port");
+
+    div()
+        .flex()
+        .gap(SPACE_LG)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.0))
+                .child(field_block("host", &host_lbl, &inputs.host, model, t, cx)),
+        )
+        .child(
+            div()
+                .w(px(110.0))
+                .flex_shrink_0()
+                .child(field_block("port", &port_lbl, &inputs.port, model, t, cx)),
+        )
+        .into_any_element()
+}
+
 fn render_basic(
     model: &mut SessionDialogModel,
     panel: Entity<SessionPanel>,
@@ -1484,7 +1511,9 @@ fn render_basic(
 
     // 根据所选协议自适应渲染专属子表单字段
     match current_protocol {
-        velowork_state::SessionProtocol::Ssh => {}
+        velowork_state::SessionProtocol::Ssh => {
+            content = content.child(render_ssh_basic_fields(model, t, cx));
+        }
         velowork_state::SessionProtocol::Serial => {
             content = content.child(render_serial_basic_fields(model, panel.clone(), t, cx));
         }
@@ -1703,23 +1732,12 @@ fn render_connection(
         .flex_col()
         .gap(px(10.0))
         .child(field_block(
-            "host",
-            &i18n!(cx, "ssh.field.host"),
-            &inputs.host,
+            "timeout",
+            &i18n!(cx, "ssh.field.connection_timeout"),
+            &inputs.connection_timeout,
             model,
             t,
             cx,
-        ))
-        .child(two_col(
-            field_block("port", &i18n!(cx, "ssh.field.port"), &inputs.port, model, t, cx),
-            field_block(
-                "timeout",
-                &i18n!(cx, "ssh.field.connection_timeout"),
-                &inputs.connection_timeout,
-                model,
-                t,
-                cx,
-            ),
         ))
         .child(sftp_row)
         .child(monitor_row)
