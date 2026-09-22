@@ -2888,7 +2888,7 @@ impl OverlayManager {
         if ids.is_empty() {
             return;
         }
-        let title = i18n!(cx, "service_monitor.confirm_delete");
+        let title = i18n!(cx, "service.confirm_delete");
         let name = if let Some(store) = cx.try_global::<GlobalServiceStore>() {
             let nodes = store.0.read(cx).nodes().to_vec();
             let mut names: Vec<String> = nodes
@@ -2907,7 +2907,7 @@ impl OverlayManager {
         } else {
             ids.join(", ")
         };
-        let body = i18n!(cx, "service_monitor.confirm_delete_msg").replace("{name}", &name);
+        let body = i18n!(cx, "service.confirm_delete_msg").replace("{name}", &name);
         let dialog = cx.new(|cx| {
             ConfirmDialog::new(
                 cx,
@@ -3044,7 +3044,7 @@ impl OverlayManager {
         self.close_modal(cx);
         self.close_all_context_menus();
 
-        let title = i18n!(cx, "service_monitor.confirm_title");
+        let title = i18n!(cx, "service.confirm_title");
         let body = format!("{}: {} ({})", op_label, service_name, cmd);
         let overlay_registry = self.overlay_registry.clone();
 
@@ -3163,14 +3163,14 @@ impl OverlayManager {
         }
 
         let nodes = tunnel_nodes_snapshot(cx);
-        let title = i18n!(cx, "tunnels.delete_title");
+        let title = i18n!(cx, "tunnel.delete_title");
         let message = if ids.len() == 1 {
             let name = tunnel_find_node_ref(&nodes, &ids[0])
                 .map(|n| n.name().to_string())
                 .unwrap_or_default();
-            i18n!(cx, "tunnels.delete_confirm").replace("{name}", &name)
+            i18n!(cx, "tunnel.delete_confirm").replace("{name}", &name)
         } else {
-            i18n!(cx, "tunnels.delete_confirm_multi")
+            i18n!(cx, "tunnel.delete_confirm_multi")
                 .replace("{count}", &ids.len().to_string())
         };
 

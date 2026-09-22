@@ -313,11 +313,11 @@ impl TunnelsPanel {
 
     fn session_name(&self, session_id: &str, cx: &App) -> String {
         if session_id.is_empty() {
-            return i18n!(cx, "tunnels.no_session");
+            return i18n!(cx, "tunnel.no_session");
         }
         self.find_session(session_id, cx)
             .map(|s| s.name)
-            .unwrap_or_else(|| i18n!(cx, "tunnels.unknown_session"))
+            .unwrap_or_else(|| i18n!(cx, "tunnel.unknown_session"))
     }
 
     // ── 启动 / 停止 ──────────────────────────────────────────────────────────
@@ -1085,7 +1085,7 @@ impl TunnelsPanel {
             let input = self.filter_input.get_or_insert_with(|| {
                 let input = cx.new(|cx| {
                     InputState::new(cx)
-                        .placeholder(i18n!(cx, "tunnels.search_tooltip"))
+                        .placeholder(i18n!(cx, "tunnel.search_tooltip"))
                 });
                 let input_clone = input.clone();
                 cx.subscribe(
@@ -1312,7 +1312,7 @@ impl TunnelsPanel {
                             div()
                                 .text_size(ui_text(11.0, cx))
                                 .text_color(rgb(t.error))
-                                .child(i18n!(cx, "tunnels.duplicate_folder_error")),
+                                .child(i18n!(cx, "tunnel.duplicate_folder_error")),
                         ),
                 )
             })
@@ -1721,7 +1721,7 @@ impl Panel for TunnelsPanel {
     fn metadata(&self, cx: &App) -> PanelInfo {
         PanelInfo::new(
             "tunnels",
-            i18n!(cx, "tunnels.title"),
+            i18n!(cx, "tunnel.title"),
             AppIcon::Tunnel,
             PanelKind::Custom,
         )
@@ -1743,7 +1743,7 @@ impl Render for TunnelsPanel {
         if self.show_tunnel_search && self.filter_input.is_none() {
             let input = cx.new(|cx| {
                 InputState::new(cx)
-                    .placeholder(i18n!(cx, "tunnels.search_tooltip"))
+                    .placeholder(i18n!(cx, "tunnel.search_tooltip"))
             });
             let input_clone = input.clone();
             cx.subscribe(&input_clone, |_this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
@@ -1833,9 +1833,9 @@ impl Render for TunnelsPanel {
         let tree_children = vec![tree_widget.render(self, window, cx)];
         let is_empty = roots.is_empty();
 
-        let add_tip = i18n!(cx, "tunnels.add");
+        let add_tip = i18n!(cx, "tunnel.add");
         let folder_tip = i18n!(cx, "workspace.folder.create");
-        let search_tip = i18n!(cx, "tunnels.search_tooltip");
+        let search_tip = i18n!(cx, "tunnel.search_tooltip");
 
         v_flex()
             .size_full()
@@ -1870,7 +1870,7 @@ impl Render for TunnelsPanel {
                     let input = this.filter_input.get_or_insert_with(|| {
                         let input = cx.new(|cx| {
                             InputState::new(cx)
-                                .placeholder(i18n!(cx, "tunnels.search_tooltip"))
+                                .placeholder(i18n!(cx, "tunnel.search_tooltip"))
                         });
                         let input_clone = input.clone();
                         cx.subscribe(
@@ -2078,7 +2078,7 @@ impl Render for TunnelsPanel {
                                 window.focus(&this.focus_handle, cx);
                             }))
                             .when(is_empty, |d| {
-                                d.child(velowork_ui::empty_state::empty_state(i18n!(cx, "tunnels.no_tunnels"), &t, cx))
+                                d.child(velowork_ui::empty_state::empty_state(i18n!(cx, "tunnel.no_tunnels"), &t, cx))
                             })
                             .children(tree_children)
                             .child(
@@ -2226,7 +2226,7 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
     registry.register(velowork_ui::dock::ToolbarPanelSpec {
         id: "tunnels".to_string(),
         icon: velowork_ui::icon::AppIcon::Tunnel,
-        title_key: "tunnels.title".to_string(),
+        title_key: "tunnel.title".to_string(),
         order: 30,
         is_visible: std::sync::Arc::new(|_cx| true),
         factory: std::sync::Arc::new(|ctx, _window, cx| {
@@ -2344,28 +2344,28 @@ pub fn tunnel_tooltip(
 
     // 1. 类型与名称
     let type_label = match &profile.kind {
-        TunnelKind::Local { .. } => i18n!(cx, "tunnels.tooltip.type_local"),
-        TunnelKind::Remote { .. } => i18n!(cx, "tunnels.tooltip.type_remote"),
-        TunnelKind::Dynamic { .. } => i18n!(cx, "tunnels.tooltip.type_dynamic"),
+        TunnelKind::Local { .. } => i18n!(cx, "tunnel.tooltip.type_local"),
+        TunnelKind::Remote { .. } => i18n!(cx, "tunnel.tooltip.type_remote"),
+        TunnelKind::Dynamic { .. } => i18n!(cx, "tunnel.tooltip.type_dynamic"),
     };
     lines.push(format!("[{}] {}", type_label, profile.name));
 
     // 2. 转发规则
     lines.push(format!(
         "{}: {}",
-        i18n!(cx, "tunnels.tooltip.endpoints"),
+        i18n!(cx, "tunnel.tooltip.endpoints"),
         profile.kind.display_summary()
     ));
 
     // 3. 关联 SSH 会话
     let session_display = if session_name.is_empty() {
-        i18n!(cx, "tunnels.no_session")
+        i18n!(cx, "tunnel.no_session")
     } else {
         session_name.to_string()
     };
     lines.push(format!(
         "{}: {}",
-        i18n!(cx, "tunnels.tooltip.associated_session"),
+        i18n!(cx, "tunnel.tooltip.associated_session"),
         session_display
     ));
 
@@ -2381,37 +2381,37 @@ pub fn tunnel_tooltip(
             let conns = info.map(|r| r.active_connections).unwrap_or(0);
             lines.push(format!(
                 "{}: {} (Rx {:.2} MB / Tx {:.2} MB, {} {})",
-                i18n!(cx, "tunnels.tooltip.status"),
+                i18n!(cx, "tunnel.tooltip.status"),
                 i18n!(cx, "common.status.running"),
                 rx_mb,
                 tx_mb,
                 conns,
-                i18n!(cx, "tunnels.tooltip.active_connections")
+                i18n!(cx, "tunnel.tooltip.active_connections")
             ));
         }
         TunnelStatus::Stopped => {
             lines.push(format!(
                 "{}: {}",
-                i18n!(cx, "tunnels.tooltip.status"),
+                i18n!(cx, "tunnel.tooltip.status"),
                 i18n!(cx, "common.status.stopped")
             ));
         }
         TunnelStatus::Reconnecting { attempt, backoff_secs } => {
-            let detail = i18n!(cx, "tunnels.tooltip.reconnecting_detail")
+            let detail = i18n!(cx, "tunnel.tooltip.reconnecting_detail")
                 .replace("{attempt}", &attempt.to_string())
                 .replace("{secs}", &backoff_secs.to_string());
             lines.push(format!(
                 "{}: {} ({})",
-                i18n!(cx, "tunnels.tooltip.status"),
-                i18n!(cx, "tunnels.tooltip.status_reconnecting"),
+                i18n!(cx, "tunnel.tooltip.status"),
+                i18n!(cx, "tunnel.tooltip.status_reconnecting"),
                 detail
             ));
         }
         TunnelStatus::Error(err) => {
             lines.push(format!(
                 "{}: {} ({})",
-                i18n!(cx, "tunnels.tooltip.status"),
-                i18n!(cx, "tunnels.tooltip.status_error"),
+                i18n!(cx, "tunnel.tooltip.status"),
+                i18n!(cx, "tunnel.tooltip.status_error"),
                 err
             ));
         }
@@ -2419,18 +2419,18 @@ pub fn tunnel_tooltip(
 
     // 5. 重连策略与自启
     let reconnect_desc = match profile.reconnect {
-        ReconnectPolicy::InheritSession => i18n!(cx, "tunnels.tooltip.reconnect_inherit"),
-        ReconnectPolicy::Always => i18n!(cx, "tunnels.tooltip.reconnect_always"),
-        ReconnectPolicy::Never => i18n!(cx, "tunnels.tooltip.reconnect_never"),
+        ReconnectPolicy::InheritSession => i18n!(cx, "tunnel.tooltip.reconnect_inherit"),
+        ReconnectPolicy::Always => i18n!(cx, "tunnel.tooltip.reconnect_always"),
+        ReconnectPolicy::Never => i18n!(cx, "tunnel.tooltip.reconnect_never"),
     };
     let auto_start_desc = if profile.auto_start {
-        format!(" ({})", i18n!(cx, "tunnels.tooltip.auto_start"))
+        format!(" ({})", i18n!(cx, "tunnel.tooltip.auto_start"))
     } else {
         String::new()
     };
     lines.push(format!(
         "{}: {}{}",
-        i18n!(cx, "tunnels.tooltip.reconnect_policy"),
+        i18n!(cx, "tunnel.tooltip.reconnect_policy"),
         reconnect_desc,
         auto_start_desc
     ));
@@ -2439,7 +2439,7 @@ pub fn tunnel_tooltip(
     if let Some(desc) = profile.description.as_deref() {
         let trimmed = desc.trim();
         if !trimmed.is_empty() {
-            lines.push(format!("{}: {}", i18n!(cx, "tunnels.tooltip.notes"), trimmed));
+            lines.push(format!("{}: {}", i18n!(cx, "tunnel.tooltip.notes"), trimmed));
         }
     }
 

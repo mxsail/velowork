@@ -650,7 +650,7 @@
     "reconnecting": "重连中…",
     "connected": "连接正常"
   },
-  "service_monitor": {
+  "service": {
     "add": "新增服务",
     "new_folder": "新增目录",
     "search_tooltip": "搜索服务…",
@@ -1834,7 +1834,7 @@
       "fullscreen": "全屏"
     }
   },
-  "tunnels": {
+  "tunnel": {
     "add": "新建隧道",
     "edit": "编辑隧道",
     "type_local": "本地转发（-L）",

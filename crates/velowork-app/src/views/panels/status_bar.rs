@@ -540,7 +540,7 @@ impl StatusBar {
         }
 
         let service_search_input = cx.new(|cx| {
-            SimpleInputState::new(cx).placeholder(i18n!(cx, "service_monitor.search_placeholder"))
+            SimpleInputState::new(cx).placeholder(i18n!(cx, "service.search_placeholder"))
         });
         cx.subscribe(&service_search_input, |_, _, _: &InputChangedEvent, cx| {
             cx.notify();
@@ -2750,9 +2750,9 @@ impl StatusBar {
         let svc_name = service.name.clone();
         let svc_id = service.id.clone();
         let op_label = match op {
-            ServiceOp::Start => i18n!(cx, "service_monitor.start"),
-            ServiceOp::Stop => i18n!(cx, "service_monitor.stop"),
-            ServiceOp::Restart => i18n!(cx, "service_monitor.restart"),
+            ServiceOp::Start => i18n!(cx, "service.start"),
+            ServiceOp::Stop => i18n!(cx, "service.stop"),
+            ServiceOp::Restart => i18n!(cx, "service.restart"),
         };
 
         match &service.session_id {
@@ -2968,17 +2968,17 @@ impl StatusBar {
             ServiceStatus::Starting => (
                 p.status_warning,
                 p.status_warning.opacity(0.10),
-                i18n!(cx, "service_monitor.status.starting"),
+                i18n!(cx, "service.status.starting"),
             ),
             ServiceStatus::Stopping => (
                 p.status_warning,
                 p.status_warning.opacity(0.10),
-                i18n!(cx, "service_monitor.status.stopping"),
+                i18n!(cx, "service.status.stopping"),
             ),
             _ => (
                 p.text_muted,
                 p.surface_card,
-                i18n!(cx, "service_monitor.status.not_checked"),
+                i18n!(cx, "service.status.not_checked"),
             ),
         };
 
@@ -3038,7 +3038,7 @@ impl StatusBar {
         let s_start = service.clone();
         let s_restart = service.clone();
         let s_refresh_id = service.id.clone();
-        let refresh_tip = i18n!(cx, "service_monitor.refresh_single");
+        let refresh_tip = i18n!(cx, "service.refresh_single");
 
         let current_op = self.service_operating_ids.get(&service.id).copied();
         let is_operating = current_op.is_some();
@@ -3070,7 +3070,7 @@ impl StatusBar {
                     .opacity(0.50)
                     .cursor(CursorStyle::Arrow)
                     .child(spinner)
-                    .child(i18n!(cx, "service_monitor.start"))
+                    .child(i18n!(cx, "service.start"))
             } else if !is_running && !is_any_busy {
                 base.border_1()
                     .border_color(p.status_success)
@@ -3082,7 +3082,7 @@ impl StatusBar {
                     .on_click(cx.listener(move |this, _, _w, cx| {
                         this.execute_service_op(&s_start, ServiceOp::Start, cx);
                     }))
-                    .child(i18n!(cx, "service_monitor.start"))
+                    .child(i18n!(cx, "service.start"))
             } else {
                 base.border_1()
                     .border_color(p.border_subtle)
@@ -3091,7 +3091,7 @@ impl StatusBar {
                     .font_weight(FontWeight::NORMAL)
                     .opacity(0.35)
                     .cursor(CursorStyle::Arrow)
-                    .child(i18n!(cx, "service_monitor.start"))
+                    .child(i18n!(cx, "service.start"))
             }
         };
 
@@ -3121,7 +3121,7 @@ impl StatusBar {
                     .opacity(0.50)
                     .cursor(CursorStyle::Arrow)
                     .child(spinner)
-                    .child(i18n!(cx, "service_monitor.stop"))
+                    .child(i18n!(cx, "service.stop"))
             } else if is_running && !is_any_busy {
                 base.border_1()
                     .border_color(p.border_subtle)
@@ -3133,7 +3133,7 @@ impl StatusBar {
                     .on_click(cx.listener(move |this, _, _w, cx| {
                         this.execute_service_op(&s_stop, ServiceOp::Stop, cx);
                     }))
-                    .child(i18n!(cx, "service_monitor.stop"))
+                    .child(i18n!(cx, "service.stop"))
             } else {
                 base.border_1()
                     .border_color(p.border_subtle)
@@ -3142,7 +3142,7 @@ impl StatusBar {
                     .font_weight(FontWeight::NORMAL)
                     .opacity(0.35)
                     .cursor(CursorStyle::Arrow)
-                    .child(i18n!(cx, "service_monitor.stop"))
+                    .child(i18n!(cx, "service.stop"))
             }
         };
 
@@ -3172,7 +3172,7 @@ impl StatusBar {
                     .opacity(0.50)
                     .cursor(CursorStyle::Arrow)
                     .child(spinner)
-                    .child(i18n!(cx, "service_monitor.restart"))
+                    .child(i18n!(cx, "service.restart"))
             } else if !is_any_busy {
                 base.border_1()
                     .border_color(p.border_subtle)
@@ -3184,7 +3184,7 @@ impl StatusBar {
                     .on_click(cx.listener(move |this, _, _w, cx| {
                         this.execute_service_op(&s_restart, ServiceOp::Restart, cx);
                     }))
-                    .child(i18n!(cx, "service_monitor.restart"))
+                    .child(i18n!(cx, "service.restart"))
             } else {
                 base.border_1()
                     .border_color(p.border_subtle)
@@ -3193,7 +3193,7 @@ impl StatusBar {
                     .font_weight(FontWeight::NORMAL)
                     .opacity(0.35)
                     .cursor(CursorStyle::Arrow)
-                    .child(i18n!(cx, "service_monitor.restart"))
+                    .child(i18n!(cx, "service.restart"))
             }
         };
 
@@ -3321,7 +3321,7 @@ impl StatusBar {
 
         if services.is_empty() {
             let active_session_id = self.focused_ssh_info(cx).0;
-            let btn_tip = i18n!(cx, "service_monitor.go_to_add_service");
+            let btn_tip = i18n!(cx, "service.go_to_add_service");
             return v_flex()
                 .w_full()
                 .px(SPACE_LG)
@@ -3336,7 +3336,7 @@ impl StatusBar {
                 )
                 .child(
                     div()
-                        .child(i18n!(cx, "service_monitor.no_services"))
+                        .child(i18n!(cx, "service.no_services"))
                         .text_color(p.text_primary)
                         .text_size(ui_text_md(cx))
                         .font_weight(FontWeight::SEMIBOLD)
@@ -3344,7 +3344,7 @@ impl StatusBar {
                 )
                 .child(
                     div()
-                        .child(i18n!(cx, "service_monitor.no_services_hint"))
+                        .child(i18n!(cx, "service.no_services_hint"))
                         .text_color(p.text_muted)
                         .text_size(ui_text_md(cx))
                         .whitespace_nowrap(),
@@ -3379,7 +3379,7 @@ impl StatusBar {
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(rgb(t.text_primary))
                                 .whitespace_nowrap()
-                                .child(i18n!(cx, "service_monitor.go_to_add_service")),
+                                .child(i18n!(cx, "service.go_to_add_service")),
                         )
                         .on_click(cx.listener(move |this, _, _window, cx| {
                             this.monitor_open = false;
@@ -3444,7 +3444,7 @@ impl StatusBar {
             .w_full()
             .gap(SPACE_MD)
             .child(stat_card(
-                i18n!(cx, "service_monitor.stat_all"),
+                i18n!(cx, "service.stat_all"),
                 total,
                 rgb(t.accent).into(),
                 ServiceFilterState::All,
@@ -3464,7 +3464,7 @@ impl StatusBar {
 
         // 2. Toolbar: Search input + Filter pills + Refresh button
         let is_refreshing_all = self.service_is_refreshing_all;
-        let refresh_tip = i18n!(cx, "service_monitor.refresh_all");
+        let refresh_tip = i18n!(cx, "service.refresh_all");
         let active_filter = self.service_filter;
 
         let filter_pill = |label: String, filter: ServiceFilterState| {
@@ -3511,7 +3511,7 @@ impl StatusBar {
                         h_flex()
                             .gap(SPACE_XS)
                             .items_center()
-                            .child(filter_pill(i18n!(cx, "service_monitor.filter_all"), ServiceFilterState::All))
+                            .child(filter_pill(i18n!(cx, "service.filter_all"), ServiceFilterState::All))
                             .child(filter_pill(i18n!(cx, "common.status.running"), ServiceFilterState::Running))
                             .child(filter_pill(i18n!(cx, "common.status.stopped"), ServiceFilterState::Stopped)),
                     ),
@@ -3569,13 +3569,13 @@ impl StatusBar {
                         .text_size(ui_text_md(cx))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(p.text_secondary)
-                        .child(i18n!(cx, "service_monitor.no_match")),
+                        .child(i18n!(cx, "service.no_match")),
                 )
                 .child(
                     div()
                         .text_size(ui_text_sm(cx))
                         .text_color(p.text_muted)
-                        .child(i18n!(cx, "service_monitor.no_match_hint")),
+                        .child(i18n!(cx, "service.no_match_hint")),
                 )
                 .into_any_element()
         } else {

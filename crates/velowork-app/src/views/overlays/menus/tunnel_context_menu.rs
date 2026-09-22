@@ -61,7 +61,7 @@ pub fn open_tunnel_context_menu(
 
     let pid1 = parent_id.clone();
     let ev1 = on_event.clone();
-    let label_new = i18n!(cx, "tunnels.add");
+    let label_new = i18n!(cx, "tunnel.add");
     items.push(
         PopupMenuItem::item("tunnel-menu-new", label_new, move |_, cx| {
             ev1(TunnelContextMenuEvent::NewTunnel { parent_id: pid1.clone() }, cx);

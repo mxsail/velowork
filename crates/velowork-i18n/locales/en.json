@@ -650,7 +650,7 @@
     "reconnecting": "Reconnecting...",
     "connected": "Connected"
   },
-  "service_monitor": {
+  "service": {
     "add": "Add Service",
     "new_folder": "New Directory",
     "search_tooltip": "Search services...",
@@ -1834,7 +1834,7 @@
       "fullscreen": "Fullscreen"
     }
   },
-  "tunnels": {
+  "tunnel": {
     "add": "New Tunnel",
     "edit": "Edit Tunnel",
     "type_local": "Local Forwarding (-L)",

@@ -562,7 +562,7 @@ impl ServiceMonitorPanel {
             let input = self.filter_input.get_or_insert_with(|| {
                 let input = cx.new(|cx| {
                     InputState::new(cx)
-                        .placeholder(i18n!(cx, "service_monitor.search_tooltip"))
+                        .placeholder(i18n!(cx, "service.search_tooltip"))
                 });
                 let input_clone = input.clone();
                 cx.subscribe(
@@ -604,7 +604,7 @@ impl ServiceMonitorPanel {
     }
 
     fn inline_create_folder(&mut self, parent_id: Option<String>, cx: &mut Context<Self>) {
-        let placeholder = i18n!(cx, "service_monitor.new_folder");
+        let placeholder = i18n!(cx, "service.new_folder");
         self.inline_folder = Some(InlineServiceFolderState::Creating {
             parent_id,
             input: None,
@@ -1057,7 +1057,7 @@ impl ServiceMonitorPanel {
                             .map(|s| s.name.clone())
                             .unwrap_or_else(|| sid.clone())
                     }
-                    None => i18n!(cx, "service_monitor.session_current"),
+                    None => i18n!(cx, "service.session_current"),
                 };
 
                 let group_id = SharedString::from(format!("svc-row-{}", service_id));
@@ -1069,7 +1069,7 @@ impl ServiceMonitorPanel {
                 let start_btn = if show_start {
                     self.action_icon_btn(
                         AppIcon::Play,
-                        i18n!(cx, "service_monitor.start"),
+                        i18n!(cx, "service.start"),
                         ServiceOp::Start,
                         &def_action,
                         t,
@@ -1083,7 +1083,7 @@ impl ServiceMonitorPanel {
                 let stop_btn = if show_stop {
                     self.action_icon_btn(
                         AppIcon::Stop,
-                        i18n!(cx, "service_monitor.stop"),
+                        i18n!(cx, "service.stop"),
                         ServiceOp::Stop,
                         &def_action,
                         t,
@@ -1097,7 +1097,7 @@ impl ServiceMonitorPanel {
                 let restart_btn = if show_restart {
                     self.action_icon_btn(
                         AppIcon::Refresh,
-                        i18n!(cx, "service_monitor.restart"),
+                        i18n!(cx, "service.restart"),
                         ServiceOp::Restart,
                         &def_action,
                         t,
@@ -1335,9 +1335,9 @@ impl ServiceMonitorPanel {
 
                         let action_fn = move |cx: &mut App| {
                             let op_label = match op {
-                                ServiceOp::Start => i18n_t(cx, "service_monitor.start"),
-                                ServiceOp::Stop => i18n_t(cx, "service_monitor.stop"),
-                                ServiceOp::Restart => i18n_t(cx, "service_monitor.restart"),
+                                ServiceOp::Start => i18n_t(cx, "service.start"),
+                                ServiceOp::Stop => i18n_t(cx, "service.stop"),
+                                ServiceOp::Restart => i18n_t(cx, "service.restart"),
                             };
                             if def_clone.session_id.is_some() {
                                 if let Some(engine) = cx.try_global::<velowork_terminal::GlobalServiceMonitorEngine>() {
@@ -1448,7 +1448,7 @@ impl Panel for ServiceMonitorPanel {
     fn metadata(&self, cx: &App) -> PanelInfo {
         PanelInfo::new(
             "services",
-            i18n!(cx, "service_monitor.title"),
+            i18n!(cx, "service.title"),
             AppIcon::SquareActivity,
             PanelKind::Custom,
         )
@@ -1466,7 +1466,7 @@ impl Render for ServiceMonitorPanel {
         if self.show_service_search && self.filter_input.is_none() {
             let input = cx.new(|cx| {
                 InputState::new(cx)
-                    .placeholder(i18n!(cx, "service_monitor.search_tooltip"))
+                    .placeholder(i18n!(cx, "service.search_tooltip"))
             });
             let input_clone = input.clone();
             cx.subscribe(&input_clone, |_this: &mut Self, _, _: &velowork_ui::input::InputEvent, cx| {
@@ -1575,9 +1575,9 @@ impl Render for ServiceMonitorPanel {
                 }
             });
 
-        let add_tip = i18n!(cx, "service_monitor.add");
-        let folder_tip = i18n!(cx, "service_monitor.new_folder");
-        let search_tip = i18n!(cx, "service_monitor.search_tooltip");
+        let add_tip = i18n!(cx, "service.add");
+        let folder_tip = i18n!(cx, "service.new_folder");
+        let search_tip = i18n!(cx, "service.search_tooltip");
 
         v_flex()
             .size_full()
@@ -1621,7 +1621,7 @@ impl Render for ServiceMonitorPanel {
                     let input = this.filter_input.get_or_insert_with(|| {
                         let input = cx.new(|cx| {
                             InputState::new(cx)
-                                .placeholder(i18n!(cx, "service_monitor.search_tooltip"))
+                                .placeholder(i18n!(cx, "service.search_tooltip"))
                         });
                         let input_clone = input.clone();
                         cx.subscribe(
@@ -1859,7 +1859,7 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
     registry.register(velowork_ui::dock::ToolbarPanelSpec {
         id: "services".to_string(),
         icon: AppIcon::SquareActivity,
-        title_key: "service_monitor.title".to_string(),
+        title_key: "service.title".to_string(),
         order: 40,
         is_visible: std::sync::Arc::new(|_cx| true),
         factory: std::sync::Arc::new(|ctx, _window, cx| {

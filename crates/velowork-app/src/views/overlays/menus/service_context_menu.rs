@@ -114,14 +114,14 @@ pub fn open_service_context_menu(
             let show_stop = stop_cmd.is_some() && status != velowork_state::ServiceStatus::Stopped;
             let show_restart = restart_cmd.is_some() && status != velowork_state::ServiceStatus::Stopped;
 
-            let terminal_hint: SharedString = i18n!(cx, "service_monitor.send_to_terminal").into();
+            let terminal_hint: SharedString = i18n!(cx, "service.send_to_terminal").into();
             let mut has_op_items = false;
 
             if show_start {
                 has_op_items = true;
                 let n_start = n.clone();
                 let ev_start = on_event.clone();
-                let label_start = i18n!(cx, "service_monitor.start");
+                let label_start = i18n!(cx, "service.start");
                 items.push(
                     PopupMenuItem::item("service-menu-start", label_start, move |_, cx| {
                         ev_start(
@@ -141,7 +141,7 @@ pub fn open_service_context_menu(
                 has_op_items = true;
                 let n_stop = n.clone();
                 let ev_stop = on_event.clone();
-                let label_stop = i18n!(cx, "service_monitor.stop");
+                let label_stop = i18n!(cx, "service.stop");
                 items.push(
                     PopupMenuItem::item("service-menu-stop", label_stop, move |_, cx| {
                         ev_stop(
@@ -161,7 +161,7 @@ pub fn open_service_context_menu(
                 has_op_items = true;
                 let n_restart = n.clone();
                 let ev_restart = on_event.clone();
-                let label_restart = i18n!(cx, "service_monitor.restart");
+                let label_restart = i18n!(cx, "service.restart");
                 items.push(
                     PopupMenuItem::item("service-menu-restart", label_restart, move |_, cx| {
                         ev_restart(
@@ -201,7 +201,7 @@ pub fn open_service_context_menu(
 
     let pid1 = parent_id.clone();
     let ev1 = on_event.clone();
-    let label_new = i18n!(cx, "service_monitor.add");
+    let label_new = i18n!(cx, "service.add");
     items.push(
         PopupMenuItem::item("service-menu-new", label_new, move |_, cx| {
             ev1(ServiceContextMenuEvent::NewService { parent_id: pid1.clone() }, cx);
@@ -211,7 +211,7 @@ pub fn open_service_context_menu(
 
     let pid2 = parent_id.clone();
     let ev2 = on_event.clone();
-    let label_new_folder = i18n!(cx, "service_monitor.new_folder");
+    let label_new_folder = i18n!(cx, "service.new_folder");
     items.push(
         PopupMenuItem::item("service-menu-new-folder", label_new_folder, move |_, cx| {
             ev2(ServiceContextMenuEvent::NewFolder { parent_id: pid2.clone() }, cx);

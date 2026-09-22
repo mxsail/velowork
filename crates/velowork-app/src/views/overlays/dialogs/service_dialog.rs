@@ -422,7 +422,7 @@ impl ServiceDialog {
             .trim()
             .to_string();
         if name.is_empty() {
-            self.error_msg = Some(i18n!(cx, "service_monitor.name_required"));
+            self.error_msg = Some(i18n!(cx, "service.name_required"));
             cx.notify();
             return;
         }
@@ -435,7 +435,7 @@ impl ServiceDialog {
             .trim()
             .to_string();
         if alive.is_empty() {
-            self.error_msg = Some(i18n!(cx, "service_monitor.alive_required"));
+            self.error_msg = Some(i18n!(cx, "service.alive_required"));
             cx.notify();
             return;
         }
@@ -640,36 +640,36 @@ fn uuid_short() -> String {
 
 fn build_strings(cx: &App) -> ServiceDialogStrings {
     ServiceDialogStrings {
-        title_create: i18n!(cx, "service_monitor.add"),
-        title_edit: i18n!(cx, "service_monitor.edit"),
-        name: i18n!(cx, "service_monitor.name"),
-        kind: i18n!(cx, "service_monitor.kind"),
-        session: i18n!(cx, "service_monitor.session"),
-        directory: i18n!(cx, "service_monitor.directory"),
-        no_directory: i18n!(cx, "service_monitor.no_directory"),
+        title_create: i18n!(cx, "service.add"),
+        title_edit: i18n!(cx, "service.edit"),
+        name: i18n!(cx, "service.name"),
+        kind: i18n!(cx, "service.kind"),
+        session: i18n!(cx, "service.session"),
+        directory: i18n!(cx, "service.directory"),
+        no_directory: i18n!(cx, "service.no_directory"),
         new_folder: i18n!(cx, "workspace.folder.create"),
         new_folder_placeholder: i18n!(cx, "workspace.folder.create_placeholder"),
-        session_placeholder: i18n!(cx, "service_monitor.session_unbound"),
-        alive: i18n!(cx, "service_monitor.alive_command"),
-        alive_help: i18n!(cx, "service_monitor.alive_command_help"),
-        alive_tooltip: i18n!(cx, "service_monitor.alive_command_tooltip"),
-        alive_placeholder_command: i18n!(cx, "service_monitor.alive_placeholder_command"),
-        alive_placeholder_systemd: i18n!(cx, "service_monitor.alive_placeholder_systemd"),
-        alive_placeholder_docker: i18n!(cx, "service_monitor.alive_placeholder_docker"),
-        start: i18n!(cx, "service_monitor.start_command"),
-        stop: i18n!(cx, "service_monitor.stop_command"),
-        restart: i18n!(cx, "service_monitor.restart_command"),
-        workdir: i18n!(cx, "service_monitor.workdir"),
-        workdir_placeholder: i18n!(cx, "service_monitor.workdir"),
-        monitor: i18n!(cx, "service_monitor.monitor_enabled"),
-        policy: i18n!(cx, "service_monitor.command_policy"),
-        policy_always: i18n!(cx, "service_monitor.policy_always_confirm"),
-        policy_dangerous: i18n!(cx, "service_monitor.policy_confirm_dangerous"),
-        policy_direct: i18n!(cx, "service_monitor.policy_direct"),
-        kind_command: i18n!(cx, "service_monitor.type_command"),
-        kind_systemd: i18n!(cx, "service_monitor.type_systemd"),
-        kind_docker: i18n!(cx, "service_monitor.type_docker"),
-        hint: i18n!(cx, "service_monitor.hint"),
+        session_placeholder: i18n!(cx, "service.session_unbound"),
+        alive: i18n!(cx, "service.alive_command"),
+        alive_help: i18n!(cx, "service.alive_command_help"),
+        alive_tooltip: i18n!(cx, "service.alive_command_tooltip"),
+        alive_placeholder_command: i18n!(cx, "service.alive_placeholder_command"),
+        alive_placeholder_systemd: i18n!(cx, "service.alive_placeholder_systemd"),
+        alive_placeholder_docker: i18n!(cx, "service.alive_placeholder_docker"),
+        start: i18n!(cx, "service.start_command"),
+        stop: i18n!(cx, "service.stop_command"),
+        restart: i18n!(cx, "service.restart_command"),
+        workdir: i18n!(cx, "service.workdir"),
+        workdir_placeholder: i18n!(cx, "service.workdir"),
+        monitor: i18n!(cx, "service.monitor_enabled"),
+        policy: i18n!(cx, "service.command_policy"),
+        policy_always: i18n!(cx, "service.policy_always_confirm"),
+        policy_dangerous: i18n!(cx, "service.policy_confirm_dangerous"),
+        policy_direct: i18n!(cx, "service.policy_direct"),
+        kind_command: i18n!(cx, "service.type_command"),
+        kind_systemd: i18n!(cx, "service.type_systemd"),
+        kind_docker: i18n!(cx, "service.type_docker"),
+        hint: i18n!(cx, "service.hint"),
     }
 }
 

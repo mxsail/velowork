@@ -2959,7 +2959,7 @@ pub(crate) fn dropdown_option_list(
         "jump_session" => {
             // 跳板机会话：列出所有已保存的 SSH 会话（排除当前编辑的会话自身）。
             let mut opts: Vec<(String, String, bool)> = vec![(
-                i18n!(cx, "tunnels.no_session"),
+                i18n!(cx, "tunnel.no_session"),
                 String::new(),
                 model.config.jump_session_id.is_none(),
             )];

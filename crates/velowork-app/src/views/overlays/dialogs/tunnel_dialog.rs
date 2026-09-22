@@ -259,9 +259,9 @@ impl TunnelDialog {
     /// 将当前配置同步到三个 Select 组件的选项与选中值（目录 / 会话列表为动态数据）。
     pub fn refresh_selects(&mut self, cx: &mut Context<Self>) {
         let kind_opts: Vec<SelectOption<SharedString>> = vec![
-            SelectOption::new(SharedString::from("0"), i18n!(cx, "tunnels.type_local")),
-            SelectOption::new(SharedString::from("1"), i18n!(cx, "tunnels.type_remote")),
-            SelectOption::new(SharedString::from("2"), i18n!(cx, "tunnels.type_dynamic")),
+            SelectOption::new(SharedString::from("0"), i18n!(cx, "tunnel.type_local")),
+            SelectOption::new(SharedString::from("1"), i18n!(cx, "tunnel.type_remote")),
+            SelectOption::new(SharedString::from("2"), i18n!(cx, "tunnel.type_dynamic")),
         ];
         self.kind_select.update(cx, |s, cx| {
             s.set_options(kind_opts, cx);
@@ -272,7 +272,7 @@ impl TunnelDialog {
         tunnel_collect_folders(&tunnel_tree(cx), "", &mut folders);
         let mut dir_opts: Vec<SelectOption<SharedString>> = vec![SelectOption::new(
             SharedString::from(""),
-            i18n!(cx, "tunnels.no_directory"),
+            i18n!(cx, "tunnel.no_directory"),
         )];
         for (id, label) in folders {
             dir_opts.push(SelectOption::new(SharedString::from(id), label));
@@ -286,7 +286,7 @@ impl TunnelDialog {
         let sessions = self.collect_sessions(cx);
         let mut sess_opts: Vec<SelectOption<SharedString>> = vec![SelectOption::new(
             SharedString::from(""),
-            i18n!(cx, "tunnels.no_session"),
+            i18n!(cx, "tunnel.no_session"),
         )];
         for (id, name) in &sessions {
             sess_opts.push(SelectOption::new(SharedString::from(id.clone()), name.clone()));
@@ -316,7 +316,7 @@ impl TunnelDialog {
             .trim()
             .to_string();
         if name.is_empty() {
-            self.error_msg = Some(i18n!(cx, "tunnels.name_required"));
+            self.error_msg = Some(i18n!(cx, "tunnel.name_required"));
             cx.notify();
             return;
         }
@@ -338,7 +338,7 @@ impl TunnelDialog {
 
         let session_id = self.selected_session_id.clone();
         if session_id.is_empty() {
-            self.error_msg = Some(i18n!(cx, "tunnels.session_required"));
+            self.error_msg = Some(i18n!(cx, "tunnel.session_required"));
             cx.notify();
             return;
         }
@@ -378,7 +378,7 @@ impl TunnelDialog {
                     match bind_port_str.parse::<u16>() {
                         Ok(p) => p,
                         Err(_) => {
-                            self.error_msg = Some(i18n!(cx, "tunnels.invalid_port"));
+                            self.error_msg = Some(i18n!(cx, "tunnel.invalid_port"));
                             cx.notify();
                             return;
                         }
@@ -392,14 +392,14 @@ impl TunnelDialog {
                 };
 
                 if target_port_str.is_empty() {
-                    self.error_msg = Some(i18n!(cx, "tunnels.target_port_required"));
+                    self.error_msg = Some(i18n!(cx, "tunnel.target_port_required"));
                     cx.notify();
                     return;
                 }
                 let target_port: u16 = match target_port_str.parse::<u16>() {
                     Ok(p) if p > 0 => p,
                     _ => {
-                        self.error_msg = Some(i18n!(cx, "tunnels.invalid_port"));
+                        self.error_msg = Some(i18n!(cx, "tunnel.invalid_port"));
                         cx.notify();
                         return;
                     }
@@ -416,14 +416,14 @@ impl TunnelDialog {
             1 => {
                 // 远程端口转发 (-R): remote_bind -> local_target
                 if bind_port_str.is_empty() {
-                    self.error_msg = Some(i18n!(cx, "tunnels.remote_bind_required"));
+                    self.error_msg = Some(i18n!(cx, "tunnel.remote_bind_required"));
                     cx.notify();
                     return;
                 }
                 let remote_port: u16 = match bind_port_str.parse::<u16>() {
                     Ok(p) if p > 0 => p,
                     _ => {
-                        self.error_msg = Some(i18n!(cx, "tunnels.invalid_port"));
+                        self.error_msg = Some(i18n!(cx, "tunnel.invalid_port"));
                         cx.notify();
                         return;
                     }
@@ -436,14 +436,14 @@ impl TunnelDialog {
                 };
 
                 if target_port_str.is_empty() {
-                    self.error_msg = Some(i18n!(cx, "tunnels.target_port_required"));
+                    self.error_msg = Some(i18n!(cx, "tunnel.target_port_required"));
                     cx.notify();
                     return;
                 }
                 let local_port: u16 = match target_port_str.parse::<u16>() {
                     Ok(p) if p > 0 => p,
                     _ => {
-                        self.error_msg = Some(i18n!(cx, "tunnels.invalid_port"));
+                        self.error_msg = Some(i18n!(cx, "tunnel.invalid_port"));
                         cx.notify();
                         return;
                     }
@@ -455,7 +455,7 @@ impl TunnelDialog {
                     match local_host.parse() {
                         Ok(ip) => ip,
                         Err(_) => {
-                            self.error_msg = Some(i18n!(cx, "tunnels.invalid_local_target"));
+                            self.error_msg = Some(i18n!(cx, "tunnel.invalid_local_target"));
                             cx.notify();
                             return;
                         }
@@ -478,7 +478,7 @@ impl TunnelDialog {
                     match bind_port_str.parse::<u16>() {
                         Ok(p) => p,
                         Err(_) => {
-                            self.error_msg = Some(i18n!(cx, "tunnels.invalid_port"));
+                            self.error_msg = Some(i18n!(cx, "tunnel.invalid_port"));
                             cx.notify();
                             return;
                         }
@@ -573,16 +573,16 @@ impl Render for TunnelDialog {
         let bind_ph = if self.kind_index == 1 {
             "8080".to_string()
         } else {
-            i18n!(cx, "tunnels.bind_port_placeholder")
+            i18n!(cx, "tunnel.bind_port_placeholder")
         };
-        let target_port_ph = i18n!(cx, "tunnels.target_port_placeholder");
+        let target_port_ph = i18n!(cx, "tunnel.target_port_placeholder");
 
         if let Some(bind_input) = self.bind_port_input.as_ref() {
             bind_input.update(cx, |input, _| input.set_placeholder(&bind_ph));
         }
 
         if self.name_input.is_none() {
-            let placeholder = i18n!(cx, "tunnels.name_placeholder");
+            let placeholder = i18n!(cx, "tunnel.name_placeholder");
             let default_val = self.prefill_name.clone();
             let input = cx.new(|cx| {
                 InputState::new(cx)
@@ -632,7 +632,7 @@ impl Render for TunnelDialog {
         }
 
         if self.description_input.is_none() {
-            let placeholder = i18n!(cx, "tunnels.description");
+            let placeholder = i18n!(cx, "tunnel.description");
             let default_val = self.prefill_desc.clone();
             let input = cx.new(|cx| {
                 TextareaState::new(cx)
@@ -655,9 +655,9 @@ impl Render for TunnelDialog {
 
         let is_editing = matches!(self.mode, TunnelDialogMode::Edit { .. });
         let title_text = if is_editing {
-            i18n!(cx, "tunnels.edit")
+            i18n!(cx, "tunnel.edit")
         } else {
-            i18n!(cx, "tunnels.add")
+            i18n!(cx, "tunnel.add")
         };
 
         let focus_group = FocusGroup::new().with_scroll(self.scroll_handle.clone());
@@ -707,7 +707,7 @@ impl Render for TunnelDialog {
                             // 1. 隧道名称
                             .child(
                                 form_item("tunnel-name")
-                                    .label(i18n!(cx, "tunnels.name"))
+                                    .label(i18n!(cx, "tunnel.name"))
                                     .required(true)
                                     .focus_opt(self.name_input.as_ref().map(|i| i.read(cx).focus_handle(cx)))
                                     .child(
@@ -720,7 +720,7 @@ impl Render for TunnelDialog {
                             // 2. 所属目录（紧随名称之后）
                             .child(
                                 form_item("tunnel-directory")
-                                    .label(i18n!(cx, "tunnels.directory"))
+                                    .label(i18n!(cx, "tunnel.directory"))
                                     .focus(self.directory_select.read(cx).focus_handle())
                                     .child(self.render_directory_selector(cx))
                                     .render(&t, cx),
@@ -728,7 +728,7 @@ impl Render for TunnelDialog {
                             // 3. 关联会话（仅列出 SSH 会话）
                             .child(
                                 form_item("tunnel-session")
-                                    .label(i18n!(cx, "tunnels.session"))
+                                    .label(i18n!(cx, "tunnel.session"))
                                     .required(true)
                                     .focus(self.session_select.read(cx).focus_handle())
                                     .child(self.render_session_selector(cx))
@@ -737,7 +737,7 @@ impl Render for TunnelDialog {
                             // 4. 转发类型
                             .child(
                                 form_item("tunnel-kind")
-                                    .label(i18n!(cx, "tunnels.kind"))
+                                    .label(i18n!(cx, "tunnel.kind"))
                                     .focus(self.kind_select.read(cx).focus_handle())
                                     .child(self.render_kind_selector(cx))
                                     .render(&t, cx),
@@ -746,9 +746,9 @@ impl Render for TunnelDialog {
                             .child(
                                 form_item("tunnel-bind-port")
                                     .label(if self.kind_index == 1 {
-                                        i18n!(cx, "tunnels.remote_bind_port")
+                                        i18n!(cx, "tunnel.remote_bind_port")
                                     } else {
-                                        i18n!(cx, "tunnels.bind_port")
+                                        i18n!(cx, "tunnel.bind_port")
                                     })
                                     .required(self.kind_index == 1)
                                     .focus_opt(self.bind_port_input.as_ref().map(|i| i.read(cx).focus_handle(cx)))
@@ -763,9 +763,9 @@ impl Render for TunnelDialog {
                                 d.child(
                                     form_item("tunnel-target-endpoints")
                                         .label(if self.kind_index == 1 {
-                                            i18n!(cx, "tunnels.local_target")
+                                            i18n!(cx, "tunnel.local_target")
                                         } else {
-                                            i18n!(cx, "tunnels.remote_target")
+                                            i18n!(cx, "tunnel.remote_target")
                                         })
                                         .required(true)
                                         .focus_opt(self.target_host_input.as_ref().map(|i| i.read(cx).focus_handle(cx)))
@@ -790,7 +790,7 @@ impl Render for TunnelDialog {
                             // 6. 策略开关组
                             .child(
                                 form_item("tunnel-autostart-item")
-                                    .label(i18n!(cx, "tunnels.auto_start"))
+                                    .label(i18n!(cx, "tunnel.auto_start"))
                                     .layout(FormLayout::Horizontal)
                                     .focus(&self.auto_start_focus)
                                     .child(
@@ -812,7 +812,7 @@ impl Render for TunnelDialog {
                             )
                             .child(
                                 form_item("tunnel-localonly-item")
-                                    .label(i18n!(cx, "tunnels.local_only"))
+                                    .label(i18n!(cx, "tunnel.local_only"))
                                     .layout(FormLayout::Horizontal)
                                     .focus(&self.local_only_focus)
                                     .child(
@@ -835,7 +835,7 @@ impl Render for TunnelDialog {
                             // 7. 备注说明
                             .child(
                                 form_item("tunnel-description")
-                                    .label(i18n!(cx, "tunnels.description"))
+                                    .label(i18n!(cx, "tunnel.description"))
                                     .focus_opt(self.description_input.as_ref().map(|i| i.read(cx).focus_handle(cx)))
                                     .child(
                                         div().flex_1().when_some(self.description_input.as_ref(), |this, desc| {
