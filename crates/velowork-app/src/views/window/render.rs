@@ -323,7 +323,7 @@ impl WindowView {
                         div()
                             .text_size(ui_text_xl(cx))
                             .text_color(rgb(t.text_muted))
-                            .child(i18n!(cx, "window.no_projects_in_folder")),
+                            .child(i18n!(cx, "workspace.window.no_projects_in_folder")),
                     )
                     .child(
                         div()
@@ -332,7 +332,7 @@ impl WindowView {
                             .text_color(rgb(t.border_active))
                             .cursor_pointer()
                             .hover(|s| s.underline())
-                            .child(i18n!(cx, "window.show_all_projects"))
+                            .child(i18n!(cx, "workspace.window.show_all_projects"))
                             .on_click(move |_, _window, cx| {
                                 workspace.update(cx, |ws, cx| {
                                     ws.set_folder_filter(window_id, None, cx);
@@ -360,13 +360,13 @@ impl WindowView {
                         div()
                             .text_size(ui_text_xl(cx))
                             .text_color(rgb(t.text_muted))
-                            .child(i18n!(cx, "window.no_projects_in_window")),
+                            .child(i18n!(cx, "workspace.window.no_projects_in_window")),
                     )
                     .child(
                         div()
                             .text_size(ui_text_md(cx))
                             .text_color(rgb(t.text_muted))
-                            .child(i18n!(cx, "window.click_sidebar_hint")),
+                            .child(i18n!(cx, "workspace.window.click_sidebar_hint")),
                     )
                     .into_any_element();
             }

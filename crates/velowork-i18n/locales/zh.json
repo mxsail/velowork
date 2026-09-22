@@ -637,18 +637,6 @@
       "col_status": "状态",
       "col_actions": "操作"
     },
-    "transfers": {
-      "label": "传输管理",
-      "clear_done": "清除已完成",
-      "pause_all": "全部暂停",
-      "collapse": "收起",
-      "empty": "暂无传输任务",
-      "pause": "暂停",
-      "resume": "继续",
-      "remove": "移除",
-      "complete": "已完成",
-      "error": "传输失败"
-    },
     "reconnecting": "重连中…",
     "connected": "连接正常"
   },
@@ -1204,19 +1192,13 @@
     "show_in_window": "在此窗口显示",
     "rename_directory": "重命名目录…",
     "reload_services": "重新加载服务",
-    "focus_parent": "聚焦父项目"
-  },
-  "folder_context_menu": {
-    "show_all": "显示所有项目",
-    "show_only": "仅显示此文件夹",
-    "delete_with_count": "删除文件夹（{count} 个项目将取消分组）",
-    "delete": "删除文件夹"
-  },
-  "window": {
-    "no_projects_in_folder": "此文件夹中没有项目",
-    "show_all_projects": "显示所有项目",
-    "no_projects_in_window": "此窗口中没有项目",
-    "click_sidebar_hint": "点击侧边栏中的项目以在此处显示"
+    "focus_parent": "聚焦父项目",
+    "folder": {
+      "show_all": "显示所有项目",
+      "show_only": "仅显示此文件夹",
+      "delete_with_count": "删除文件夹（{count} 个项目将取消分组）",
+      "delete": "删除文件夹"
+    }
   },
   "sftp": {
     "dir_inaccessible": "目录不存在或无法访问：{path}",
@@ -2448,6 +2430,18 @@
       "esc_dismiss": "Esc 取消"
     }
   },
+  "transfers": {
+    "label": "传输管理",
+    "clear_done": "清除已完成",
+    "pause_all": "全部暂停",
+    "collapse": "收起",
+    "empty": "暂无传输任务",
+    "pause": "暂停",
+    "resume": "继续",
+    "remove": "移除",
+    "complete": "已完成",
+    "error": "传输失败"
+  },
   "workspace": {
     "explorer": "会话管理器",
     "folder": {
@@ -2455,6 +2449,12 @@
       "create_placeholder": "请输入目录名称（支持多级如 A/B）",
       "name_placeholder": "文件夹名称…",
       "duplicate_error": "此位置已存在同名文件夹，请选择其他名字"
+    },
+    "window": {
+      "no_projects_in_folder": "此文件夹中没有项目",
+      "show_all_projects": "显示所有项目",
+      "no_projects_in_window": "此窗口中没有项目",
+      "click_sidebar_hint": "点击侧边栏中的项目以在此处显示"
     }
   }
 }

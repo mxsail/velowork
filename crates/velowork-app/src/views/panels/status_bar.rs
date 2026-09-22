@@ -789,7 +789,7 @@ impl Render for StatusBar {
                 TransferStatus::Paused => palette.status_warning,
                 TransferStatus::Complete => palette.text_muted,
             };
-            let transfers_label = i18n!(cx, "status.transfers.label");
+            let transfers_label = i18n!(cx, "transfers.label");
             let transfer_bounds = self.transfer_bounds.clone();
             let trigger = div()
                 .id("transfers-btn")

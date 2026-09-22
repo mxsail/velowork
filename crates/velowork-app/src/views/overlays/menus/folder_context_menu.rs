@@ -118,7 +118,7 @@ impl Render for FolderContextMenu {
                             menu_item(
                                 "folder-ctx-filter",
                                 if is_active_filter { AppIcon::EyeOff } else { AppIcon::Eye },
-                                if is_active_filter { i18n!(cx, "folder_context_menu.show_all") } else { i18n!(cx, "folder_context_menu.show_only") },
+                                if is_active_filter { i18n!(cx, "context_menu.folder.show_all") } else { i18n!(cx, "context_menu.folder.show_only") },
                                 &t, cx,
                             )
                             .on_click(cx.listener(|this, _, _window, cx| {
@@ -140,10 +140,10 @@ impl Render for FolderContextMenu {
                                 "folder-ctx-delete",
                                 AppIcon::Trash,
                                 if project_count > 0 {
-                                    let template = i18n!(cx, "folder_context_menu.delete_with_count");
+                                    let template = i18n!(cx, "context_menu.folder.delete_with_count");
                                     template.replace("{count}", &project_count.to_string())
                                 } else {
-                                    i18n!(cx, "folder_context_menu.delete")
+                                    i18n!(cx, "context_menu.folder.delete")
                                 },
                                 t.error,
                                 t.error,

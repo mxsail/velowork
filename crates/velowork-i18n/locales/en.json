@@ -637,18 +637,6 @@
       "col_status": "Status",
       "col_actions": "Actions"
     },
-    "transfers": {
-      "label": "Transfer Manager",
-      "clear_done": "Clear Done",
-      "pause_all": "Pause All",
-      "collapse": "Collapse",
-      "empty": "No transfer tasks",
-      "pause": "Pause",
-      "resume": "Resume",
-      "remove": "Remove",
-      "complete": "Completed",
-      "error": "Transfer Failed"
-    },
     "reconnecting": "Reconnecting...",
     "connected": "Connected"
   },
@@ -1204,19 +1192,13 @@
     "show_in_window": "Show in this window",
     "rename_directory": "Rename Directory...",
     "reload_services": "Reload Services",
-    "focus_parent": "Focus Parent Project"
-  },
-  "folder_context_menu": {
-    "show_all": "Show All Projects",
-    "show_only": "Show Only This Folder",
-    "delete_with_count": "Delete Folder ({count} projects will be ungrouped)",
-    "delete": "Delete Folder"
-  },
-  "window": {
-    "no_projects_in_folder": "No projects in this folder",
-    "show_all_projects": "Show all projects",
-    "no_projects_in_window": "No projects in this window",
-    "click_sidebar_hint": "Click a project in the sidebar to show it here"
+    "focus_parent": "Focus Parent Project",
+    "folder": {
+      "show_all": "Show All Projects",
+      "show_only": "Show Only This Folder",
+      "delete_with_count": "Delete Folder ({count} projects will be ungrouped)",
+      "delete": "Delete Folder"
+    }
   },
   "sftp": {
     "dir_inaccessible": "Directory does not exist or cannot be accessed: {path}",
@@ -2448,6 +2430,18 @@
       "esc_dismiss": "Esc to dismiss"
     }
   },
+  "transfers": {
+    "label": "Transfer Manager",
+    "clear_done": "Clear Done",
+    "pause_all": "Pause All",
+    "collapse": "Collapse",
+    "empty": "No transfer tasks",
+    "pause": "Pause",
+    "resume": "Resume",
+    "remove": "Remove",
+    "complete": "Completed",
+    "error": "Transfer Failed"
+  },
   "workspace": {
     "explorer": "Session Manager",
     "folder": {
@@ -2455,6 +2449,12 @@
       "create_placeholder": "Enter folder name (supports nested like A/B)",
       "name_placeholder": "Folder name...",
       "duplicate_error": "A folder with this name already exists in this location"
+    },
+    "window": {
+      "no_projects_in_folder": "No projects in this folder",
+      "show_all_projects": "Show all projects",
+      "no_projects_in_window": "No projects in this window",
+      "click_sidebar_hint": "Click a project in the sidebar to show it here"
     }
   }
 }

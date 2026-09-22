@@ -79,11 +79,11 @@ impl TransferPopup {
         let tasks = store.tasks.clone();
         // Whether at least one transfer is currently in-flight (active).
         let has_active = tasks.iter().any(|t| t.status == TransferStatus::Active);
-        let title = i18n!(cx, "status.transfers.label");
-        let clear_label = i18n!(cx, "status.transfers.clear_done");
-        let pause_label = i18n!(cx, "status.transfers.pause_all");
-        let collapse_label = i18n!(cx, "status.transfers.collapse");
-        let empty_label = i18n!(cx, "status.transfers.empty");
+        let title = i18n!(cx, "transfers.label");
+        let clear_label = i18n!(cx, "transfers.clear_done");
+        let pause_label = i18n!(cx, "transfers.pause_all");
+        let collapse_label = i18n!(cx, "transfers.collapse");
+        let empty_label = i18n!(cx, "transfers.empty");
 
         let store_clear = self.store.clone();
         let store_pause = self.store.clone();
@@ -282,7 +282,7 @@ impl TransferPopup {
                 t,
                 "transfer-remove",
                 AppIcon::Trash,
-                i18n!(cx, "status.transfers.remove"),
+                i18n!(cx, "transfers.remove"),
                 move |_this, _ev, _w, cx| {
                     store.update(cx, |s, cx| {
                         s.remove(&id);
@@ -292,9 +292,9 @@ impl TransferPopup {
             )]
         } else {
             let (pause_icon, pause_label) = if is_paused {
-                (AppIcon::Play, i18n!(cx, "status.transfers.resume"))
+                (AppIcon::Play, i18n!(cx, "transfers.resume"))
             } else {
-                (AppIcon::Pause, i18n!(cx, "status.transfers.pause"))
+                (AppIcon::Pause, i18n!(cx, "transfers.pause"))
             };
             let new_status = if is_paused {
                 TransferStatus::Active
@@ -332,12 +332,12 @@ impl TransferPopup {
             div()
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.success))
-                .child(i18n!(cx, "status.transfers.complete"))
+                .child(i18n!(cx, "transfers.complete"))
         } else if is_error {
             div()
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.error))
-                .child(task.error.clone().unwrap_or_else(|| i18n!(cx, "status.transfers.error")))
+                .child(task.error.clone().unwrap_or_else(|| i18n!(cx, "transfers.error")))
         } else {
             div()
                 .text_size(ui_text_md(cx))
