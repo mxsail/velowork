@@ -8900,11 +8900,13 @@ dependencies = [
 name = "velowork-ai"
 version = "0.1.0"
 dependencies = [
+ "futures",
  "gpui",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "tokio",
  "velowork-core",
  "velowork-i18n",
  "velowork-terminal",

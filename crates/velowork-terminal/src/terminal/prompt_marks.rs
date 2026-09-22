@@ -1,4 +1,5 @@
 use alacritty_terminal::event::EventListener;
+use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::Point;
 use alacritty_terminal::term::Term;
 use alacritty_terminal::vte::Perform;
@@ -129,23 +130,67 @@ impl Perform for PromptSidecarPerform {
     }
 }
 
+use super::blocks::{BlockTracker, TerminalBlock};
+
+fn extract_single_line<L: EventListener>(term: &Term<L>, line_idx: i32) -> String {
+    use alacritty_terminal::index::{Column, Line, Point};
+    use alacritty_terminal::term::cell::Flags;
+    let grid = term.grid();
+    let cols = grid.columns();
+    let line = Line(line_idx);
+    let mut s = String::new();
+    for c in 0..cols {
+        let cell = &grid[Point::new(line, Column(c))];
+        if !cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+            s.push(cell.c);
+        }
+    }
+    s.trim().to_string()
+}
+
+fn extract_grid_lines<L: EventListener>(term: &Term<L>, start_line: i32, end_line: i32) -> String {
+    use alacritty_terminal::index::{Column, Line, Point};
+    use alacritty_terminal::term::cell::Flags;
+    let grid = term.grid();
+    let cols = grid.columns();
+    let mut out = String::new();
+    let start = start_line.min(end_line);
+    let end = start_line.max(end_line);
+    for l in start..=end {
+        let line = Line(l);
+        let mut line_str = String::new();
+        for c in 0..cols {
+            let cell = &grid[Point::new(line, Column(c))];
+            if !cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                line_str.push(cell.c);
+            }
+        }
+        let trimmed = line_str.trim_end();
+        out.push_str(trimmed);
+        out.push('\n');
+    }
+    out
+}
+
 /// Feed `data` to both the main alacritty processor and the prompt sidecar
 /// in lockstep. Whenever the sidecar sees an `OSC 133` sequence it flags
 /// itself as terminated; we advance the main processor up to the same byte
 /// offset (so the cursor is at its post-OSC position, which is unchanged
 /// since OSC sequences are zero-width) and then record the mark.
 ///
-/// Returns `true` if at least one `CommandFinished` (OSC 133 ;D) mark was
-/// recorded in this chunk, so the caller can raise the per-terminal
-/// command-finished activity edge exactly once per drain.
+/// Returns `(command_finished, Option<TerminalBlock>)` if at least one
+/// `CommandFinished` (OSC 133 ;D) mark was recorded in this chunk.
 pub(super) fn advance_with_prompt_marks<L: EventListener>(
     term: &mut Term<L>,
     processor: &mut Processor,
     sidecar: &mut PromptSidecar,
     tracker: &mut PromptTracker,
+    block_tracker: &mut BlockTracker,
+    cwd: Option<String>,
     data: &[u8],
-) -> bool {
+) -> (bool, Option<TerminalBlock>) {
     let mut command_finished = false;
+    let mut finished_block = None;
     let mut pos = 0;
     while pos < data.len() {
         let consumed = sidecar
@@ -153,11 +198,24 @@ pub(super) fn advance_with_prompt_marks<L: EventListener>(
             .advance_until_terminated(&mut sidecar.perform, &data[pos..]);
         processor.advance(term, &data[pos..pos + consumed]);
         if let Some(kind) = sidecar.perform.pending.take() {
-            if matches!(kind, PromptMarkKind::CommandFinished { .. }) {
-                command_finished = true;
-            }
             let point = term.grid().cursor.point;
             tracker.record(kind, point);
+
+            match kind {
+                PromptMarkKind::CommandExecuted => {
+                    let cmd_line = extract_single_line(term, point.line.0);
+                    block_tracker.on_command_executed(point.line.0, Some(cmd_line), cwd.clone());
+                }
+                PromptMarkKind::CommandFinished { exit_code } => {
+                    command_finished = true;
+                    if let Some(b) = block_tracker.on_command_finished(point.line.0, exit_code, |start, end| {
+                        extract_grid_lines(term, start, end)
+                    }) {
+                        finished_block = Some(b);
+                    }
+                }
+                _ => {}
+            }
         }
         if consumed == 0 {
             // Safety net: `advance_until_terminated` is expected to make
@@ -168,5 +226,5 @@ pub(super) fn advance_with_prompt_marks<L: EventListener>(
         }
         pos += consumed;
     }
-    command_finished
+    (command_finished, finished_block)
 }

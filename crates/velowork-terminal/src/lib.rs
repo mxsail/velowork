@@ -11,6 +11,7 @@ pub mod resolved_config;
 pub mod serial_session;
 pub mod session_backend;
 pub mod shell_config;
+pub mod shell_integration;
 pub mod ssh_agent;
 pub mod ssh_monitor;
 pub mod service_monitor;

@@ -8,6 +8,7 @@ use std::time::Instant;
 
 mod ansi_snapshot;
 mod app_version;
+pub mod blocks;
 mod child_processes;
 mod event_listener;
 mod idle;
@@ -46,6 +47,7 @@ pub use types::{
     TerminalSize,
 };
 
+pub use blocks::{BlockTracker, CommandCaptureError, TerminalBlock};
 pub use osc_sidecar::TerminalNotification;
 
 use event_listener::ZedEventListener;
@@ -214,6 +216,15 @@ pub struct Terminal {
     /// timestamp exactly once. Mirrors `bell_pending`; not Arc-shared since it
     /// is only ever set on the GPUI thread. GPUI thread only.
     pub(super) command_finished_pending: AtomicBool,
+
+    /// Structured command execution blocks.
+    pub(super) block_tracker: Mutex<blocks::BlockTracker>,
+
+    /// Broadcast channel notifying listeners when a command finishes execution.
+    pub(super) command_finish_tx: tokio::sync::broadcast::Sender<Arc<blocks::TerminalBlock>>,
+
+    /// Whether this terminal is currently busy executing an AI/automated command capture.
+    pub(super) capturing_state: AtomicBool,
 
     /// Reverse index into the current list of `PromptStart` marks (0 =
     /// newest). `Some` while the user is walking through prompts with
@@ -500,6 +511,9 @@ impl Terminal {
             prompt_sidecar: Mutex::new(PromptSidecar::new()),
             prompt_tracker: Mutex::new(PromptTracker::new()),
             command_finished_pending: AtomicBool::new(false),
+            block_tracker: Mutex::new(blocks::BlockTracker::default()),
+            command_finish_tx: tokio::sync::broadcast::channel(64).0,
+            capturing_state: AtomicBool::new(false),
             prompt_jump_index: Mutex::new(None),
             last_output_time: Arc::new(Mutex::new(Instant::now())),
             shell_pid: Mutex::new(None),
@@ -559,4 +573,63 @@ impl Terminal {
             state.cooldown_ms = cooldown_ms;
         }
     }
+
+    /// Return all tracked execution blocks, oldest first.
+    pub fn blocks(&self) -> Vec<blocks::TerminalBlock> {
+        self.block_tracker.lock().blocks()
+    }
+
+    /// Return the most recent completed execution block.
+    pub fn last_block(&self) -> Option<blocks::TerminalBlock> {
+        self.block_tracker.lock().last_block()
+    }
+
+    /// Toggle collapsed status of a block by its ID.
+    pub fn toggle_block_collapse(&self, block_id: u64) -> bool {
+        self.block_tracker.lock().toggle_collapsed(block_id)
+    }
+
+    /// Whether this terminal is currently busy executing an AI/automated command capture.
+    pub fn is_capturing(&self) -> bool {
+        self.capturing_state.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Try to acquire capture lock. Returns a guard that resets the lock on drop.
+    pub fn acquire_capture_lock(&self) -> Option<CaptureGuard<'_>> {
+        if self
+            .capturing_state
+            .compare_exchange(
+                false,
+                true,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            Some(CaptureGuard { term: self })
+        } else {
+            None
+        }
+    }
+
+    /// Subscribe to command-finished notifications.
+    pub fn subscribe_command_finished(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<Arc<blocks::TerminalBlock>> {
+        self.command_finish_tx.subscribe()
+    }
 }
+
+/// RAII guard releasing the terminal's capturing state lock on drop.
+pub struct CaptureGuard<'a> {
+    term: &'a Terminal,
+}
+
+impl<'a> Drop for CaptureGuard<'a> {
+    fn drop(&mut self) {
+        self.term
+            .capturing_state
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+

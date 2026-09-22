@@ -60,23 +60,32 @@ impl Terminal {
         // byte where each mark arrives. `advance_until_terminated` stops
         // the prompt sidecar at every OSC 133 so the main processor can
         // catch up before we read `grid.cursor.point`.
-        let command_finished = advance_with_prompt_marks(
+        let mut block_tracker = self.block_tracker.lock();
+        let cwd = self.reported_cwd.lock().clone();
+        let (command_finished, finished_block) = advance_with_prompt_marks(
             &mut *term,
             &mut processor,
             &mut prompt_sidecar,
             &mut prompt_tracker,
+            &mut block_tracker,
+            cwd,
             data,
         );
         if command_finished {
             self.command_finished_pending.store(true, Ordering::Relaxed);
         }
+        if let Some(block) = finished_block {
+            let _ = self.command_finish_tx.send(std::sync::Arc::new(block));
+        }
 
         let history_after = term.grid().history_size();
+        let delta = history_after.saturating_sub(history_before);
         prompt_tracker.on_history_changed(
             history_before,
             history_after,
             term.grid().topmost_line().0,
         );
+        block_tracker.on_history_changed(delta, term.grid().topmost_line().0);
 
         // New output disengages the prompt-jump walker so the next
         // Above jump starts from the newest prompt again.
@@ -150,22 +159,31 @@ impl Terminal {
 
         let history_before = term.grid().history_size();
         sidecar.advance(&data);
-        let command_finished = advance_with_prompt_marks(
+        let mut block_tracker = self.block_tracker.lock();
+        let cwd = self.reported_cwd.lock().clone();
+        let (command_finished, finished_block) = advance_with_prompt_marks(
             &mut *term,
             &mut processor,
             &mut prompt_sidecar,
             &mut prompt_tracker,
+            &mut block_tracker,
+            cwd,
             &data,
         );
         if command_finished {
             self.command_finished_pending.store(true, Ordering::Relaxed);
         }
+        if let Some(block) = finished_block {
+            let _ = self.command_finish_tx.send(std::sync::Arc::new(block));
+        }
         let history_after = term.grid().history_size();
+        let delta = history_after.saturating_sub(history_before);
         prompt_tracker.on_history_changed(
             history_before,
             history_after,
             term.grid().topmost_line().0,
         );
+        block_tracker.on_history_changed(delta, term.grid().topmost_line().0);
         self.content_generation.fetch_add(1, Ordering::Relaxed);
     }
 

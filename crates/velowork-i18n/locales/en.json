@@ -815,6 +815,9 @@
       "search_online": "Search Online",
       "zmodem_upload": "Upload File (rz)"
     },
+    "no_blocks_recorded": "No recorded command blocks yet",
+    "rerun": "Re-run",
+    "ask_ai": "Ask AI",
     "creating": "Creating terminal...",
     "empty_tabs": "No open tabs (tabs detached)",
     "no_layout": "No layout",

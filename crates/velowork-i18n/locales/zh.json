@@ -815,6 +815,9 @@
       "search_online": "在线搜索",
       "zmodem_upload": "上传文件（rz）"
     },
+    "no_blocks_recorded": "暂无记录的命令执行块",
+    "rerun": "重新执行",
+    "ask_ai": "问 AI",
     "creating": "正在创建终端…",
     "empty_tabs": "无打开的标签（标签已分离）",
     "no_layout": "无布局",

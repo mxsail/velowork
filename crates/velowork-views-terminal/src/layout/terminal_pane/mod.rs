@@ -1,6 +1,7 @@
 //! Terminal pane view - composition of child entity views.
 
 mod actions;
+pub mod blocks_popup;
 pub mod commands_panel;
 mod content;
 pub mod file_row;

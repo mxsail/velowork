@@ -110,6 +110,7 @@ impl ToolRegistry {
 pub fn builtin_tools() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(RunTerminalCommand),
+        Box::new(GetTerminalBlocks),
         Box::new(ReadTerminalScreen),
         Box::new(ListSessions),
         Box::new(GetSessionConfig),
@@ -123,6 +124,57 @@ pub fn builtin_tools() -> Vec<Box<dyn Tool>> {
 // ---------------------------------------------------------------------------
 // 低层发送（不含权限判断，供工具与面板复用）
 // ---------------------------------------------------------------------------
+
+/// 获取当前聚焦的终端实例（若存在）。
+pub fn get_focused_terminal(
+    focus_manager: &Entity<FocusManager>,
+    workspace: &Entity<Workspace>,
+    terminals: &TerminalsRegistry,
+    cx: &App,
+) -> Option<Arc<velowork_terminal::terminal::Terminal>> {
+    let terminal_id = focus_manager
+        .read(cx)
+        .focused_terminal_state()
+        .and_then(|state| {
+            workspace
+                .read(cx)
+                .project(&state.project_id)
+                .and_then(|p| p.layout.as_ref())
+                .and_then(|layout| layout.get_at_path(&state.layout_path))
+                .and_then(|node| match node {
+                    velowork_workspace::state::LayoutNode::Terminal { terminal_id, .. } => {
+                        terminal_id.clone()
+                    }
+                    _ => None,
+                })
+        })?;
+
+    let guard = terminals.lock();
+    guard.get(&terminal_id).cloned()
+}
+
+/// 在聚焦终端上执行命令并等待捕获其结构化输出与退出码。
+pub fn execute_and_capture_on_focused_terminal(
+    focus_manager: &Entity<FocusManager>,
+    workspace: &Entity<Workspace>,
+    terminals: &TerminalsRegistry,
+    cmd: &str,
+    timeout: std::time::Duration,
+    cx: &App,
+) -> Result<velowork_terminal::terminal::TerminalBlock, String> {
+    let terminal = get_focused_terminal(focus_manager, workspace, terminals, cx)
+        .ok_or_else(|| "no focused terminal found".to_string())?;
+
+    let block_res = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| {
+            handle.block_on(terminal.execute_command_and_capture(cmd, timeout))
+        })
+    } else {
+        futures::executor::block_on(terminal.execute_command_and_capture(cmd, timeout))
+    };
+
+    block_res.map_err(|e| e.to_string())
+}
 
 /// 将命令发送到当前聚焦的终端（低层发送，不含权限判断）。
 pub fn send_command_to_focused_terminal(
@@ -181,7 +233,7 @@ pub fn execute_ai_command(
 // 内置工具
 // ---------------------------------------------------------------------------
 
-/// 向聚焦终端发送并执行命令（受权限门禁控制）。
+/// 向聚焦终端发送并执行命令，并捕获执行结果与退出码（受权限门禁控制）。
 pub struct RunTerminalCommand;
 
 impl Tool for RunTerminalCommand {
@@ -189,14 +241,15 @@ impl Tool for RunTerminalCommand {
         "run_terminal_command"
     }
     fn description(&self) -> &str {
-        "Send a shell command to the currently focused terminal and execute it. \
+        "Send a shell command to the currently focused terminal, execute it, and return its output and exit code. \
          Read-only commands are always allowed; other commands are gated by the current permission level."
     }
     fn schema(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "command": { "type": "string", "description": "The shell command to execute." }
+                "command": { "type": "string", "description": "The shell command to execute." },
+                "timeout_seconds": { "type": "integer", "description": "Maximum seconds to wait for output (default 25)." }
             },
             "required": ["command"]
         })
@@ -212,17 +265,117 @@ impl Tool for RunTerminalCommand {
             }
             return Err(ToolError::PermissionDenied);
         }
-        send_command_to_focused_terminal(
+
+        let timeout_secs = args
+            .get("timeout_seconds")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(25);
+        let timeout = std::time::Duration::from_secs(timeout_secs);
+
+        match execute_and_capture_on_focused_terminal(
             &ctx.focus_manager,
             &ctx.workspace,
             &ctx.terminals,
             cmd,
+            timeout,
             cx,
-        );
-        if let Ok(mut mem) = ctx.memory.lock() {
-            mem.record_command(cmd);
+        ) {
+            Ok(block) => {
+                let status_str = match block.exit_code {
+                    Some(0) => "Command succeeded (exit code: 0)".to_string(),
+                    Some(code) => format!("Command failed (exit code: {})", code),
+                    None => "Command executed (exit code: unknown)".to_string(),
+                };
+                let dur_str = block
+                    .duration_ms
+                    .map(|d| format!(" in {}ms", d))
+                    .unwrap_or_default();
+                let output = if block.clean_output.trim().is_empty() {
+                    "(no output)".to_string()
+                } else {
+                    crate::context::mask_sensitive_data(&block.clean_output)
+                };
+
+                if let Ok(mut mem) = ctx.memory.lock() {
+                    mem.record_command(cmd);
+                    if let Some(code) = block.exit_code
+                        && code != 0
+                    {
+                        mem.record_error(&format!("command '{}' exited with code {}", cmd, code));
+                    }
+                }
+
+                Ok(format!("{status_str}{dur_str}:\n```\n{output}\n```"))
+            }
+            Err(e) => {
+                // Fallback: send directly and inform caller
+                send_command_to_focused_terminal(
+                    &ctx.focus_manager,
+                    &ctx.workspace,
+                    &ctx.terminals,
+                    cmd,
+                    cx,
+                );
+                if let Ok(mut mem) = ctx.memory.lock() {
+                    mem.record_command(cmd);
+                }
+                Ok(format!(
+                    "{}: {} (capture degraded: {})",
+                    i18n!(cx, "ai_assistant.executed"),
+                    cmd,
+                    e
+                ))
+            }
         }
-        Ok(format!("{}: {}", i18n!(cx, "ai_assistant.executed"), cmd))
+    }
+}
+
+/// 查询聚焦终端的历史执行块（Blocks）。
+pub struct GetTerminalBlocks;
+
+impl Tool for GetTerminalBlocks {
+    fn name(&self) -> &str {
+        "get_terminal_blocks"
+    }
+    fn description(&self) -> &str {
+        "List recent structured terminal command blocks with their commands, outputs, exit codes, and durations."
+    }
+    fn schema(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "limit": { "type": "integer", "description": "Maximum number of recent blocks to retrieve (default 5)." }
+            }
+        })
+    }
+    fn execute(&self, args: Value, ctx: &ToolCtx, cx: &App) -> Result<String, ToolError> {
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+        let terminal = get_focused_terminal(&ctx.focus_manager, &ctx.workspace, &ctx.terminals, cx)
+            .ok_or_else(|| ToolError::Execution("no focused terminal found".into()))?;
+        let blocks = terminal.blocks();
+        if blocks.is_empty() {
+            return Ok("No command blocks recorded yet.".to_string());
+        }
+        let take_count = blocks.len().min(limit);
+        let start_idx = blocks.len().saturating_sub(take_count);
+        let mut out = String::new();
+        for b in &blocks[start_idx..] {
+            let status = match b.exit_code {
+                Some(0) => "SUCCESS (0)".to_string(),
+                Some(code) => format!("FAILED ({})", code),
+                None => "UNKNOWN".to_string(),
+            };
+            let dur = b.duration_ms.map(|d| format!(" ({}ms)", d)).unwrap_or_default();
+            out.push_str(&format!(
+                "### Block #{}: `{}` [{}]{}\nOutput:\n```\n{}\n```\n\n",
+                b.id,
+                b.command,
+                status,
+                dur,
+                crate::context::mask_sensitive_data(&b.clean_output)
+            ));
+        }
+        Ok(out)
     }
 }
 
