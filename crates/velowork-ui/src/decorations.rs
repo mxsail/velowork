@@ -226,8 +226,13 @@ impl WindowDecorationConfig {
         }
     }
 
-    /// Detects the native window decoration config for the current operating system / desktop environment.
+    /// Detects the native window decoration config for the current operating system / desktop environment (cached via OnceLock).
     pub fn detect() -> Self {
+        static CACHED: std::sync::OnceLock<WindowDecorationConfig> = std::sync::OnceLock::new();
+        CACHED.get_or_init(Self::detect_uncached).clone()
+    }
+
+    fn detect_uncached() -> Self {
         #[cfg(target_os = "windows")]
         {
             Self {

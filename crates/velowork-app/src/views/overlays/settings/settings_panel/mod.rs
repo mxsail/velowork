@@ -1609,7 +1609,7 @@ impl SettingsPanel {
     }
 
     /// 将所有输入框当前的最新值立即同步到全局设置中（兜底保障，避免防抖尚未到期时关闭弹窗导致数据丢失）
-    pub(super) fn flush_inputs_to_settings(&mut self, cx: &mut Context<Self>) {
+    pub fn flush_inputs_to_settings(&mut self, cx: &mut Context<Self>) {
         let file_opener = self.file_opener_input.read(cx).text().to_string();
         let sftp_file_mode = self.sftp_file_mode_input.read(cx).text().to_string();
         let sftp_dir_mode = self.sftp_dir_mode_input.read(cx).text().to_string();
@@ -1625,11 +1625,13 @@ impl SettingsPanel {
             .collect();
         let webdav_url = self.sync_server_url_input.read(cx).text().to_string();
         let webdav_user = self.sync_username_input.read(cx).text().to_string();
+        let webdav_pw = self.sync_password_input.read(cx).text().to_string();
         let webdav_path = self.sync_remote_path_input.read(cx).text().to_string();
         let s3_endpoint = self.sync_s3_endpoint_input.read(cx).text().to_string();
         let s3_bucket = self.sync_s3_bucket_input.read(cx).text().to_string();
         let s3_region = self.sync_s3_region_input.read(cx).text().to_string();
         let s3_ak = self.sync_s3_access_key_input.read(cx).text().to_string();
+        let s3_secret = self.sync_s3_secret_key_input.read(cx).text().to_string();
         let s3_prefix = self.sync_s3_prefix_input.read(cx).text().to_string();
 
         let ai_ctx_text = self.ai_max_context_tokens_input.read(cx).text().to_string();
@@ -1660,6 +1662,21 @@ impl SettingsPanel {
                 state.set_ai_max_history_messages(hist, cx);
             }
         });
+
+        if !s3_secret.is_empty() {
+            let s3_sec = s3_secret.clone();
+            smol::spawn(smol::unblock(move || {
+                let _ = velowork_workspace::secure_storage::store_s3_secret_key(&s3_sec);
+            }))
+            .detach();
+        }
+        if !webdav_pw.is_empty() {
+            let pw = webdav_pw.clone();
+            smol::spawn(smol::unblock(move || {
+                let _ = velowork_workspace::secure_storage::store_webdav_password(&pw);
+            }))
+            .detach();
+        }
     }
 
     fn close(&mut self, cx: &mut Context<Self>) {
@@ -1736,6 +1753,17 @@ impl SettingsPanel {
             .flex()
             .flex_col()
             .gap(SPACE_MD)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this: &mut Self, _event: &MouseDownEvent, window, cx| {
+                    if let Some(focused) = window.focused(cx) {
+                        if focused != this.focus_handle {
+                            window.focus(&this.focus_handle, cx);
+                        }
+                    }
+                    this.flush_inputs_to_settings(cx);
+                }),
+            )
             .child(header)
             .child(div().w_full().child(body));
 
@@ -1807,6 +1835,7 @@ impl SettingsPanel {
 
     /// 导航点击：高亮 + 展开 + 切换当前活动分类并重置滚动位置到顶部。
     pub fn nav_to_category(&mut self, cat: SettingsCategory, cx: &mut Context<Self>) {
+        self.flush_inputs_to_settings(cx);
         self.active_category = cat.clone();
         self.expanded_categories.insert(cat);
         self.scroll_handle.set_offset(point(px(0.0), px(0.0)));
@@ -2475,10 +2504,22 @@ impl Render for SettingsPanel {
             })
             .relative()
             .track_focus(&focus_handle)
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this: &mut Self, _event: &MouseDownEvent, window, cx| {
+                    if let Some(focused) = window.focused(cx) {
+                        if focused != this.focus_handle {
+                            window.focus(&this.focus_handle, cx);
+                        }
+                    }
+                    this.flush_inputs_to_settings(cx);
+                }),
+            )
             .on_key_down(cx.listener(|this: &mut Self, event: &KeyDownEvent, window, cx| {
                 // Tab 键流转与视口自适应平滑滚动联动（40px 呼吸边距，对齐新建会话弹窗规范）
                 if event.keystroke.key == "\t" || event.keystroke.key == "tab" {
                     cx.stop_propagation();
+                    this.flush_inputs_to_settings(cx);
                     if this.has_open_dropdown() {
                         this.close_all_dropdowns();
                     }

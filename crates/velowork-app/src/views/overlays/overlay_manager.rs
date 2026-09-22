@@ -1000,8 +1000,10 @@ impl OverlayManager {
         let workspace = self.workspace.clone();
         let title = i18n!(cx, "settings.title");
         let initial_category = category;
-        let panel_slot = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let panel_slot: std::sync::Arc<parking_lot::Mutex<Option<gpui::Entity<SettingsPanel>>>> =
+            std::sync::Arc::new(parking_lot::Mutex::new(None));
         let panel_slot_capture = panel_slot.clone();
+        let panel_slot_close = panel_slot.clone();
 
         let handle = crate::app::open_detached_overlay::<SettingsPanel, SettingsPanelEvent>(
             title,
@@ -1014,18 +1016,24 @@ impl OverlayManager {
                     }
                     panel
                 });
-                *panel_slot_capture.borrow_mut() = Some(entity.clone());
+                *panel_slot_capture.lock() = Some(entity.clone());
                 entity
             },
             crate::app::DetachedOverlayOptions {
                 size: gpui::size(gpui::px(960.0), gpui::px(700.0)),
                 min_size: gpui::size(gpui::px(600.0), gpui::px(450.0)),
-                on_close: None,
+                on_close: Some(std::sync::Arc::new(move |_window, cx| {
+                    if let Some(panel) = panel_slot_close.lock().as_ref() {
+                        panel.update(cx, |this, cx| {
+                            this.flush_inputs_to_settings(cx);
+                        });
+                    }
+                })),
                 hide_titlebar: false,
             },
             cx,
         );
-        self.settings_panel_entity = panel_slot.borrow().clone();
+        self.settings_panel_entity = panel_slot.lock().clone();
         self.settings_window_handle = handle;
     }
 

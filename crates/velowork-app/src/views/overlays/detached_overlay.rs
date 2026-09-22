@@ -64,6 +64,7 @@ pub struct DetachedOverlayView<T: Render + 'static, E: 'static> {
     focus_handle: FocusHandle,
     should_close: bool,
     hide_titlebar: bool,
+    on_close: Option<Arc<dyn Fn(&mut Window, &mut gpui::App)>>,
     _phantom: PhantomData<E>,
 }
 
@@ -152,6 +153,7 @@ where
             focus_handle,
             should_close: false,
             hide_titlebar,
+            on_close,
             _phantom: PhantomData,
         }
     }
@@ -165,6 +167,9 @@ where
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Close the window when the content asked us to (via its CloseEvent).
         if self.should_close {
+            if let Some(ref handler) = self.on_close {
+                handler(window, cx);
+            }
             window.remove_window();
             return div().into_any_element();
         }
@@ -246,13 +251,21 @@ where
                 velowork_ui::tokens::SPACE_SM
             };
 
+            let on_close_cb = self.on_close.clone();
+            let custom_close: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>> = Some(Arc::new(move |window, cx| {
+                if let Some(ref handler) = on_close_cb {
+                    handler(window, cx);
+                }
+                window.remove_window();
+            }));
+
             let left_controls = if needs_controls && is_left_controls {
                 Some(velowork_ui::title_bar::render_window_controls(
                     "detached-overlay-ctrl-left",
                     window,
                     &decoration_config,
                     Some(titlebar_icon_sz),
-                    None,
+                    custom_close.clone(),
                     &t,
                     cx,
                 ))
@@ -266,7 +279,7 @@ where
                     window,
                     &decoration_config,
                     Some(titlebar_icon_sz),
-                    None,
+                    custom_close,
                     &t,
                     cx,
                 ))
