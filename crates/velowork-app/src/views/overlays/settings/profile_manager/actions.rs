@@ -16,7 +16,7 @@ impl ProfileManager {
     pub(super) fn create_profile(&mut self, cx: &mut Context<Self>) {
         let name = self.new_profile_input.read(cx).value().trim().to_string();
         if name.is_empty() {
-            self.error_message = Some(i18n!(cx, "profile_manager.empty_name"));
+            self.error_message = Some(i18n!(cx, "profile.manager.empty_name"));
             cx.notify();
             return;
         }
@@ -25,7 +25,7 @@ impl ProfileManager {
             p.display_name.trim().eq_ignore_ascii_case(&name)
                 || p.id.trim().eq_ignore_ascii_case(&name)
         }) {
-            self.error_message = Some(i18n!(cx, "profile_manager.duplicate_name"));
+            self.error_message = Some(i18n!(cx, "profile.manager.duplicate_name"));
             cx.notify();
             return;
         }
@@ -43,7 +43,7 @@ impl ProfileManager {
             }
             Err(e) => {
                 self.error_message = Some(
-                    i18n!(cx, "profile_manager.create_failed").replace("{error}", &e.to_string()),
+                    i18n!(cx, "profile.manager.create_failed").replace("{error}", &e.to_string()),
                 );
             }
         }

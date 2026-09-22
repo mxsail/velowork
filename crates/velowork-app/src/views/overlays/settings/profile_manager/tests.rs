@@ -47,14 +47,14 @@ fn create_test_manager(cx: &mut Context<ProfileManager>) -> ProfileManager {
 async fn test_profile_manager_i18n_keys(cx: &mut TestAppContext) {
     cx.update(|cx| {
         init_locale(Locale::Zh, cx);
-        assert_eq!(t(cx, "profile_manager.empty_name"), "配置文件名称不能为空");
-        assert_eq!(t(cx, "profile_manager.duplicate_name"), "已存在同名的配置文件");
-        assert!(t(cx, "profile_manager.create_failed").contains("{error}"));
+        assert_eq!(t(cx, "profile.manager.empty_name"), "配置文件名称不能为空");
+        assert_eq!(t(cx, "profile.manager.duplicate_name"), "已存在同名的配置文件");
+        assert!(t(cx, "profile.manager.create_failed").contains("{error}"));
 
         init_locale(Locale::En, cx);
-        assert_eq!(t(cx, "profile_manager.empty_name"), "Profile name cannot be empty");
-        assert_eq!(t(cx, "profile_manager.duplicate_name"), "A profile with this name already exists");
-        assert!(t(cx, "profile_manager.create_failed").contains("{error}"));
+        assert_eq!(t(cx, "profile.manager.empty_name"), "Profile name cannot be empty");
+        assert_eq!(t(cx, "profile.manager.duplicate_name"), "A profile with this name already exists");
+        assert!(t(cx, "profile.manager.create_failed").contains("{error}"));
     });
 }
 

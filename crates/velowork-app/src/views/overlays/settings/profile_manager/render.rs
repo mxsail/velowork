@@ -138,7 +138,7 @@ impl ProfileManager {
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(rgb(t.error))
                                     .child(
-                                        i18n!(cx, "profile_manager.delete_confirm")
+                                        i18n!(cx, "profile.manager.delete_confirm")
                                             .replace("{name}", &display_name),
                                     ),
                             )
@@ -146,7 +146,7 @@ impl ProfileManager {
                                 div()
                                     .text_size(ui_text_sm(cx))
                                     .text_color(rgb(t.text_muted))
-                                    .child(i18n!(cx, "profile_manager.delete_hint")),
+                                    .child(i18n!(cx, "profile.manager.delete_hint")),
                             ),
                     )
                     .child(
@@ -208,7 +208,7 @@ impl ProfileManager {
                                         .text_size(ui_text_ms(cx))
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(rgb(t.accent))
-                                        .child(i18n!(cx, "profile_manager.active")),
+                                        .child(i18n!(cx, "profile.manager.active")),
                                 )
                             }),
                     )
@@ -241,7 +241,7 @@ impl ProfileManager {
                     .child(
                         Button::new(format!("profile-dir-{id}"), &t)
                             .size(ControlSize::Default)
-                            .label(i18n!(cx, "profile_manager.open_dir"))
+                            .label(i18n!(cx, "profile.manager.open_dir"))
                             .on_click({
                                 let e = entity.clone();
                                 move |_, _window, cx| {
@@ -330,8 +330,8 @@ impl Render for ProfileManager {
                 cx.stop_propagation();
             })
                     .child(modal_header(
-                        i18n!(cx, "profile_manager.title"),
-                        Some(&i18n!(cx, "profile_manager.subtitle")),
+                        i18n!(cx, "profile.manager.title"),
+                        Some(&i18n!(cx, "profile.manager.subtitle")),
                         &t,
                         cx,
                         cx.listener(|this, _, _window, cx| this.close(cx)),
@@ -380,7 +380,7 @@ impl Render for ProfileManager {
                                                 div()
                                                     .text_size(ui_text_md(cx))
                                                     .text_color(rgb(t.text_muted))
-                                                    .child(i18n!(cx, "profile_manager.no_profiles")),
+                                                    .child(i18n!(cx, "profile.manager.no_profiles")),
                                             )
                                     })
                                     .when(!profiles.is_empty(), |d| {

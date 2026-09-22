@@ -55,7 +55,7 @@ impl ProfileManager {
         .map(|idx| idx.default_profile)
         .unwrap_or_else(|_| "default".to_string());
 
-        let name_ph = i18n!(cx, "profile_manager.name_placeholder");
+        let name_ph = i18n!(cx, "profile.manager.name_placeholder");
         let new_profile_input = cx.new(|cx| {
             SimpleInputState::new(cx).placeholder(name_ph)
         });

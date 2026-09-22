@@ -2,18 +2,20 @@
   "app": {
     "name": "Velowork"
   },
-  "profile_manager": {
-    "title": "Profiles",
-    "subtitle": "Switch, create, or delete profiles",
-    "name_placeholder": "New profile name...",
-    "delete_confirm": "Delete '{name}'?",
-    "delete_hint": "Claude credentials are preserved.",
-    "open_dir": "Directory",
-    "active": "Active",
-    "no_profiles": "No profiles found",
-    "empty_name": "Profile name cannot be empty",
-    "duplicate_name": "A profile with this name already exists",
-    "create_failed": "Failed to create profile: {error}"
+  "profile": {
+    "manager": {
+      "title": "Profiles",
+      "subtitle": "Switch, create, or delete profiles",
+      "name_placeholder": "New profile name...",
+      "delete_confirm": "Delete '{name}'?",
+      "delete_hint": "Claude credentials are preserved.",
+      "open_dir": "Directory",
+      "active": "Active",
+      "no_profiles": "No profiles found",
+      "empty_name": "Profile name cannot be empty",
+      "duplicate_name": "A profile with this name already exists",
+      "create_failed": "Failed to create profile: {error}"
+    }
   },
   "common": {
     "custom": "Custom",

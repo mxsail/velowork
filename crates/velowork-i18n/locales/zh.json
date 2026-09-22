@@ -2,18 +2,20 @@
   "app": {
     "name": "Velowork"
   },
-  "profile_manager": {
-    "title": "配置文件",
-    "subtitle": "切换、创建或删除配置文件",
-    "name_placeholder": "新建配置文件名称…",
-    "delete_confirm": "确定删除「{name}」吗？",
-    "delete_hint": "Claude 凭据将被保留。",
-    "open_dir": "目录",
-    "active": "当前",
-    "no_profiles": "未找到配置文件",
-    "empty_name": "配置文件名称不能为空",
-    "duplicate_name": "已存在同名的配置文件",
-    "create_failed": "创建配置文件失败：{error}"
+  "profile": {
+    "manager": {
+      "title": "配置文件",
+      "subtitle": "切换、创建或删除配置文件",
+      "name_placeholder": "新建配置文件名称…",
+      "delete_confirm": "确定删除「{name}」吗？",
+      "delete_hint": "Claude 凭据将被保留。",
+      "open_dir": "目录",
+      "active": "当前",
+      "no_profiles": "未找到配置文件",
+      "empty_name": "配置文件名称不能为空",
+      "duplicate_name": "已存在同名的配置文件",
+      "create_failed": "创建配置文件失败：{error}"
+    }
   },
   "common": {
     "custom": "自定义",
