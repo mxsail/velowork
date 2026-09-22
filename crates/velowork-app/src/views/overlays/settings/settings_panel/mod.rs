@@ -49,9 +49,8 @@ use velowork_ui::select::{
 };
 use velowork_ui::slider::SliderState;
 use velowork_ui::tokens::{
-    RADIUS_CARD, SPACE_CARD_GAP, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XL, ui_text_lg,
+    RADIUS_CARD, SPACE_CARD_GAP, SPACE_MD, SPACE_LG, SPACE_XL, ui_text_lg,
 };
-use velowork_ui::icon::AppIcon;
 use velowork_ui::{AnimatedModal, AnimatedModalEvent};
 
 // ============================================================================
@@ -199,10 +198,6 @@ pub struct SettingsPanel {
     pub(super) expanded_categories: HashSet<SettingsCategory>,
     /// 右侧卡片区滚动句柄，用于导航点击后滚动到目标卡片。
     pub(super) scroll_handle: ScrollHandle,
-    /// 导航点击/搜索触发后待滚动到的目标分类（下帧 prepaint 测量后定位并清除）。
-    pub(super) pending_scroll: Rc<RefCell<Option<SettingsCategory>>>,
-    /// 各分类卡片动态布局高度缓存（基于 canvas 测量，用于精准算距贴顶）
-    pub(super) card_heights: Rc<RefCell<HashMap<SettingsCategory, f32>>>,
     /// 左侧导航搜索框输入实体（定位器）。
     pub(super) nav_search_input: Entity<InputState>,
     /// 导航搜索当前文本（冗余缓存，便于无窗口上下文读取）。
@@ -783,8 +778,7 @@ impl SettingsPanel {
                                                 }
                                             }
                                             if let Some(target) = first_matched {
-                                                this.active_category = target.clone();
-                                                *this.pending_scroll.borrow_mut() = Some(target);
+                                                this.nav_to_category(target, cx);
                                             }
                                         }
                                         cx.notify();
@@ -1294,8 +1288,6 @@ impl SettingsPanel {
                 s
             },
             scroll_handle: ScrollHandle::new(),
-            pending_scroll: Rc::new(RefCell::new(None)),
-            card_heights: Rc::new(RefCell::new(HashMap::new())),
             nav_search: String::new(),
             nav_search_input,
             language_select,
@@ -1694,101 +1686,60 @@ impl SettingsPanel {
         false
     }
 
-    /// 根据当前右侧滚动偏移量计算当前视口顶部的分类卡片，并同步到左侧导航高亮选中项。
-    fn sync_active_category_from_scroll(&mut self, cx: &App) {
-        if self.pending_scroll.borrow().is_none() {
-            let scroll_y = -f32::from(self.scroll_handle.offset().y);
-            if scroll_y >= 0.0 {
-                let categories = self.ordered_categories(cx);
-                let gap = f32::from(SPACE_CARD_GAP);
-                let mut y_acc: f32 = 0.0;
-                let heights = self.card_heights.borrow();
-                let mut active_cat = None;
-
-                for cat in &categories {
-                    let is_expanded = self.expanded_categories.contains(cat);
-                    let card_h = heights
-                        .get(cat)
-                        .copied()
-                        .unwrap_or_else(|| {
-                            if is_expanded {
-                                self.default_expanded_height(cat, cx)
-                            } else {
-                                44.0
-                            }
-                        });
-                    if active_cat.is_none() {
-                        active_cat = Some(cat.clone());
-                    }
-                    if scroll_y + 30.0 >= y_acc {
-                        active_cat = Some(cat.clone());
-                    }
-                    y_acc += card_h + gap;
-                }
-
-                if let Some(cat) = active_cat {
-                    if self.active_category != cat {
-                        self.active_category = cat;
-                    }
-                }
-            }
-        }
-    }
-
-    /// 右侧单一滚动区：按 `ordered_categories` 顺序渲染全部分类折叠卡片。
-    /// 基于 canvas 动态真实 Layout 测量记录各卡片高度，在 track_scroll 之前精准设定目标 y 偏移量，
-    /// 解决 GPUI 渲染帧序机制下 prepaint 延迟滚动的问题，确保点击导航、向上/向下滚动以及展开卡片时全场景精准贴顶。
+    /// 右侧主内容区（Zed 模式：单分类按需独立渲染）。
+    /// 仅挂载当前选中的单个分类卡片与内容体，将 GPUI 遍历 DOM 树节点体量骤降 90%，
+    /// 彻底切断全量长列表对输入框打字造成的 Layout/Prepaint 级联帧积压。
     fn render_content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // 检查是否有 Tab 带来的待滚动焦点句柄（延迟滚动定位）
         if let Some(fh) = self.pending_scroll_focus_handle.take() {
             self.scroll_handle_into_view(&fh, cx);
         }
 
-        let categories = self.ordered_categories(cx);
+        let active_cat = self.active_category.clone();
+        let title = self.category_title(&active_cat, cx);
+        let t = theme(cx);
+        let palette = velowork_ui::SemanticPalette::from_context(cx);
 
-        // 检查是否有待滚动的导航目标
-        let pending_target = self.pending_scroll.borrow().clone();
-        if let Some(ref target) = pending_target {
-            let gap = f32::from(SPACE_CARD_GAP);
-            let mut y_acc: f32 = 0.0;
-            let mut target_y: Option<f32> = None;
-            let mut all_measured = true;
-            let heights = self.card_heights.borrow();
+        let header = div()
+            .id("settings-active-card-header")
+            .flex()
+            .items_center()
+            .gap(SPACE_MD)
+            .pb(SPACE_MD)
+            .border_b_1()
+            .border_color(palette.border_subtle)
+            .child(
+                active_cat
+                    .icon()
+                    .size(crate::ui::tokens::ui_icon_std_ts(cx))
+                    .text_color(palette.text_secondary),
+            )
+            .child(
+                div()
+                    .text_size(ui_text_lg(cx))
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rgb(t.text_primary))
+                    .child(title),
+            );
 
-            for cat in &categories {
-                if cat == target {
-                    target_y = Some(y_acc);
-                    break;
-                }
-                if !heights.contains_key(cat) {
-                    all_measured = false;
-                }
-                let is_expanded = self.expanded_categories.contains(cat);
-                let card_h = heights
-                    .get(cat)
-                    .copied()
-                    .unwrap_or_else(|| {
-                        if is_expanded {
-                            self.default_expanded_height(cat, cx)
-                        } else {
-                            44.0
-                        }
-                    });
-                y_acc += card_h + gap;
-            }
+        let body = self.render_category_body(&active_cat, window, cx);
 
-            if let Some(y) = target_y {
-                self.scroll_handle.set_offset(point(px(0.0), px(-y)));
-            }
+        let card = div()
+            .id("settings-active-card")
+            .w_full()
+            .bg(palette.surface_card)
+            .border_1()
+            .border_color(palette.border_subtle)
+            .rounded(RADIUS_CARD)
+            .px(SPACE_LG)
+            .py(SPACE_MD)
+            .flex()
+            .flex_col()
+            .gap(SPACE_MD)
+            .child(header)
+            .child(div().w_full().child(body));
 
-            if all_measured && !heights.is_empty() {
-                *self.pending_scroll.borrow_mut() = None;
-            }
-        }
-
-        let card_heights_rc = self.card_heights.clone();
-
-        let mut right = div()
+        let right = div()
             .id("settings-scroll")
             .relative()
             .flex()
@@ -1801,59 +1752,21 @@ impl SettingsPanel {
             .py(SPACE_MD)
             .track_scroll(&self.scroll_handle)
             .focus_scope_on_click(&self.focus_handle)
-            .flex_1();
-
-        for (i, cat) in categories.iter().enumerate() {
-            let cat_card = self.render_category_card(cat.clone(), i, window, cx);
-            let cat_key = cat.clone();
-            let height_setter = card_heights_rc.clone();
-            let pending_scroll_rc = self.pending_scroll.clone();
-            let notify_entity = cx.entity().downgrade();
-
-            let card_wrapper = div().relative().child(cat_card).child(
-                canvas(
-                    move |bounds, _, cx| {
-                        let h = f32::from(bounds.size.height);
-                        let prev_h = height_setter.borrow().get(&cat_key).copied();
-                        if prev_h != Some(h) {
-                            height_setter
-                                .borrow_mut()
-                                .insert(cat_key.clone(), h);
-                        }
-
-                        // 当存在待滚动导航且卡片真实高度刚完成初次测量或发生显著变化时，触发重绘以在下一帧以真实像素精准对齐
-                        if pending_scroll_rc.borrow().is_some()
-                            && (prev_h.is_none() || (prev_h.unwrap() - h).abs() > 1.0)
-                        {
-                            if let Some(entity) = notify_entity.upgrade() {
-                                entity.update(cx, |_, cx| cx.notify());
-                            }
-                        }
-                    },
-                    |_, _, _, _| {},
-                )
-                .absolute()
-                .inset_0(),
+            .flex_1()
+            .child(card)
+            .child(
+                div()
+                    .h(velowork_ui::tokens::SCROLL_BOTTOM_SPACER_H)
+                    .flex_shrink_0(),
             );
 
-            right = right.child(card_wrapper);
-        }
-
-        // 底部弹性安全间距：确保最后几个分类卡片点击导航时也能完整滚动置顶，避免触底提前截断导致高亮回跳
-        right = right.child(
-            div()
-                .h(velowork_ui::tokens::SCROLL_BOTTOM_SPACER_H)
-                .flex_shrink_0(),
-        );
-
-        let content_el = div()
+        div()
             .relative()
             .flex_1()
             .min_w(px(0.0))
             .min_h(px(0.0))
             .overflow_hidden()
-            .child(right.w_full().h_full());
-        content_el
+            .child(right.w_full().h_full())
             .child(
                 div()
                     .absolute()
@@ -1892,91 +1805,13 @@ impl SettingsPanel {
         }
     }
 
-    /// 导航点击：高亮 + 展开 + 滚动定位到目标分类。
+    /// 导航点击：高亮 + 展开 + 切换当前活动分类并重置滚动位置到顶部。
     pub fn nav_to_category(&mut self, cat: SettingsCategory, cx: &mut Context<Self>) {
         self.active_category = cat.clone();
-        self.expanded_categories.insert(cat.clone());
-        *self.pending_scroll.borrow_mut() = Some(cat);
+        self.expanded_categories.insert(cat);
+        self.scroll_handle.set_offset(point(px(0.0), px(0.0)));
         self.close_all_dropdowns();
         cx.notify();
-    }
-
-    /// 渲染单个分类折叠卡片：表头可点击展开/收起；展开时渲染该分类内容体。
-    /// 视觉语言对齐「新建会话」弹窗的 section-card（圆角卡片 + 表头 + chevron）。
-    fn render_category_card(
-        &mut self,
-        cat: SettingsCategory,
-        index: usize,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let t = theme(cx);
-        let palette = velowork_ui::SemanticPalette::from_context(cx);
-        let _active = self.active_category == cat;
-        let title = self.category_title(&cat, cx);
-        let is_expanded = self.expanded_categories.contains(&cat);
-
-        let cat_for_click = cat.clone();
-        let header = div()
-            .id(("settings-card-h", index))
-            .cursor_pointer()
-            .when(is_expanded, |d| d.pb(SPACE_SM))
-            .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _window, cx| {
-                if this.expanded_categories.contains(&cat_for_click) {
-                    this.expanded_categories.remove(&cat_for_click);
-                } else {
-                    this.expanded_categories.insert(cat_for_click.clone());
-                }
-                cx.notify();
-            }))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(SPACE_MD)
-                    .child(
-                        cat.icon()
-                            .size(crate::ui::tokens::ui_icon_std_ts(cx))
-                            .text_color(palette.text_secondary),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .text_size(ui_text_lg(cx))
-                            .font_weight(FontWeight::BOLD)
-                            .text_color(rgb(t.text_primary))
-                            .child(title),
-                    )
-                    .child(
-                        (if is_expanded {
-                            AppIcon::ChevronDown
-                        } else {
-                            AppIcon::ChevronRight
-                        })
-                        .size(crate::ui::tokens::ui_icon_sm(cx))
-                        .text_color(palette.text_muted),
-                    ),
-            );
-
-        let mut card = div()
-            .id(("settings-card", index))
-            .w_full()
-            .flex_shrink_0()
-            .bg(palette.surface_card)
-            .border_1()
-            .border_color(palette.border_subtle)
-            .rounded(RADIUS_CARD)
-            .px(SPACE_LG)
-            .py(SPACE_MD)
-            .child(header);
-
-        if is_expanded {
-            let content = self.render_category_body(&cat, window, cx);
-            card = card.child(div().w_full().child(content));
-        }
-
-        card.into_any_element()
     }
 
     /// 根据分类分发到对应的内容渲染函数（返回裸内容体，不含卡片头）。
@@ -2337,150 +2172,26 @@ impl SettingsPanel {
         handles
     }
 
-    /// 全量线性有序焦点句柄列表：搜索框 -> 左侧导航 -> 各分类配置项
+    /// 线性有序焦点句柄列表：搜索框 -> 左侧导航 -> 当前激活分类配置项
     pub fn all_focus_handles(&self, cx: &App) -> Vec<FocusHandle> {
         let mut handles = Vec::new();
         handles.push(self.nav_search_input.read(cx).focus_handle(cx));
         handles.push(self.nav_focus_handle.clone());
-        let categories = self.ordered_categories(cx);
-        for cat in &categories {
-            handles.extend(self.category_focus_handles(cat, cx));
-        }
+        handles.extend(self.category_focus_handles(&self.active_category, cx));
         handles
     }
 
-    /// 根据焦点句柄查找所属分类
+    /// 根据焦点句柄查找所属分类（在当前激活分类中查找）
     pub fn category_for_focus_handle(&self, handle: &FocusHandle, cx: &App) -> Option<SettingsCategory> {
-        let categories = self.ordered_categories(cx);
-        for cat in &categories {
-            let handles = self.category_focus_handles(cat, cx);
-            if handles.contains(handle) {
-                return Some(cat.clone());
-            }
+        let handles = self.category_focus_handles(&self.active_category, cx);
+        if handles.contains(handle) {
+            Some(self.active_category.clone())
+        } else {
+            None
         }
-        None
-    }
-
-    /// 获取当前获得键盘焦点且在可视视口内的 SettingsCategory 分组（如有）：
-    /// 用于「焦点驱动高亮」，当 Tab 或交互使某卡片内控件获焦时，
-    /// 左侧导航立即高亮该卡片，避免因无需滚动而被 Scroll Spy 反向覆写。
-    pub fn focused_category(&self, window: &Window, cx: &App) -> Option<SettingsCategory> {
-        // 快路径：优先检查当前 active_category（用户打字长按或交互期间 99% 命中）
-        let active = &self.active_category;
-        if self.expanded_categories.contains(active) {
-            let handles = self.category_focus_handles(active, cx);
-            for h in &handles {
-                if h.is_focused(window) {
-                    return Some(active.clone());
-                }
-            }
-        }
-
-        // 慢路径：仅检查其他已展开的分类，跳过未展开的折叠卡片
-        let categories = self.ordered_categories(cx);
-        for cat in &categories {
-            if cat == active || !self.expanded_categories.contains(cat) {
-                continue;
-            }
-            let handles = self.category_focus_handles(cat, cx);
-            for h in &handles {
-                if h.is_focused(window) {
-                    let (top, bottom) = self.handle_y_range_in_category(cat, h, cx);
-                    let cat_top = self.category_top_offset(cat, cx);
-                    let item_top = cat_top + top;
-                    let item_bottom = cat_top + bottom;
-                    let cur_scroll_y = -f32::from(self.scroll_handle.offset().y);
-                    let vp_h = f32::from(self.scroll_handle.bounds().size.height);
-                    if vp_h > 0.0 {
-                        // 若控件已被完全滚出视口顶部或底部，让位给 Scroll Spy
-                        if item_bottom < cur_scroll_y || item_top > cur_scroll_y + vp_h {
-                            return None;
-                        }
-                    }
-                    return Some(cat.clone());
-                }
-            }
-        }
-        None
-    }
-
-    /// 针对不同设置分类在展开状态下的基准预估高度（对齐 SessionDialog 预估高度机制，
-    /// 动态感知自定义标题栏、代理模式、数据同步等动态展开项，用于首次布局或无测量时的精准坐标对齐）
-    pub fn default_expanded_height(&self, cat: &SettingsCategory, cx: &App) -> f32 {
-        let guard = settings_entity(cx).read(cx);
-        let s = &guard.settings;
-        match cat {
-            SettingsCategory::General => {
-                let mut h = 380.0;
-                if s.proxy_mode == crate::workspace::settings::ProxyMode::Http {
-                    h += 96.0;
-                }
-                if s.notifications.enabled {
-                    h += 96.0;
-                }
-                h
-            }
-            SettingsCategory::Appearance => {
-                if s.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom {
-                    // 自定义标题栏开启时展开 7 个细分配置项（预设、位置、高度、间距、边距、圆角、图标大小）
-                    1060.0
-                } else {
-                    680.0
-                }
-            }
-            SettingsCategory::Font => 520.0,
-            SettingsCategory::Terminal => 1100.0,
-            SettingsCategory::FileManager => 420.0,
-            SettingsCategory::Security => {
-                if s.security.security_mode == "enhanced" {
-                    520.0
-                } else {
-                    320.0
-                }
-            }
-            SettingsCategory::Sync => {
-                if s.sync.enabled {
-                    540.0
-                } else {
-                    320.0
-                }
-            }
-            SettingsCategory::AiAssistant => 560.0,
-            SettingsCategory::SearchEngines => 480.0,
-            SettingsCategory::DataStorage => 460.0,
-            SettingsCategory::Extensions => 400.0,
-            SettingsCategory::Extension(_) => 350.0,
-        }
-    }
-
-    /// 计算指定分类卡片在右侧滚动容器内容空间的顶部 Y 偏移量
-    pub fn category_top_offset(&self, target: &SettingsCategory, cx: &App) -> f32 {
-        let categories = self.ordered_categories(cx);
-        let gap = f32::from(SPACE_CARD_GAP);
-        let heights = self.card_heights.borrow();
-        let mut y_acc = 0.0;
-        for cat in &categories {
-            if cat == target {
-                break;
-            }
-            let is_expanded = self.expanded_categories.contains(cat);
-            let card_h = heights
-                .get(cat)
-                .copied()
-                .unwrap_or_else(|| {
-                    if is_expanded {
-                        self.default_expanded_height(cat, cx)
-                    } else {
-                        44.0
-                    }
-                });
-            y_acc += card_h + gap;
-        }
-        y_acc
     }
 
     /// 计算指定分类中某一焦点控件在该卡片内部的相对垂直范围 [top, bottom]
-    /// 采用与新建会话弹窗一致的离散行高与分组偏移计算，彻底避免线性插值造成的坐标放大与滚动过多问题。
     pub fn handle_y_range_in_category(
         &self,
         cat: &SettingsCategory,
@@ -2490,7 +2201,7 @@ impl SettingsPanel {
         let handles = self.category_focus_handles(cat, cx);
         let row_idx = handles.iter().position(|h| h == handle).unwrap_or(0);
 
-        let header_offset = 44.0 + 36.0;
+        let header_offset = 48.0;
         let row_h = 48.0;
 
         let in_card_top = match cat {
@@ -2502,9 +2213,6 @@ impl SettingsPanel {
                     header_offset + 40.0 + row_idx as f32 * row_h
                 }
             }
-            SettingsCategory::General => {
-                header_offset + row_idx as f32 * row_h
-            }
             _ => header_offset + row_idx as f32 * row_h,
         };
 
@@ -2512,15 +2220,11 @@ impl SettingsPanel {
     }
 
     /// 视口自适应平滑滚动（Scroll Into View with 40px Safe Viewport Padding）：
-    /// 当 Tab 或交互导致某控件获焦时，确保其完整展示在视口内；若已在视口舒适区域内则绝不触发多余滚动，
-    /// 严格对齐 SessionDialog 视口微调算法，彻底修复开启自定义标题栏时选项展开导致的滚动过多问题。
+    /// 当 Tab 或交互导致某控件获焦时，确保其完整展示在视口内；若已在视口舒适区域内则绝不触发多余滚动。
     pub fn scroll_handle_into_view(&mut self, handle: &FocusHandle, cx: &App) {
         let Some(cat) = self.category_for_focus_handle(handle, cx) else {
             return;
         };
-
-        self.expanded_categories.insert(cat.clone());
-        self.active_category = cat.clone();
 
         let vp_bounds = self.scroll_handle.bounds();
         let viewport_h = f32::from(vp_bounds.size.height);
@@ -2534,10 +2238,8 @@ impl SettingsPanel {
         let max_offset_y = f32::from(self.scroll_handle.max_offset().y);
 
         let (in_card_top, in_card_bottom) = self.handle_y_range_in_category(&cat, handle, cx);
-        let cat_top = self.category_top_offset(&cat, cx);
-
-        let item_top = cat_top + in_card_top;
-        let item_bottom = cat_top + in_card_bottom;
+        let item_top = in_card_top;
+        let item_bottom = in_card_bottom;
 
         let vis_top = item_top - cur_scroll_y;
         let vis_bottom = item_bottom - cur_scroll_y;
@@ -2732,11 +2434,6 @@ impl EventEmitter<SettingsPanelEvent> for SettingsPanel {}
 
 impl Render for SettingsPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if let Some(focused_cat) = self.focused_category(window, cx) {
-            self.active_category = focused_cat;
-        } else {
-            self.sync_active_category_from_scroll(cx);
-        }
         let t = theme(cx);
         let focus_handle = self.focus_handle.clone();
 
