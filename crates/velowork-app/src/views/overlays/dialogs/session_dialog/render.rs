@@ -780,7 +780,7 @@ fn render_folder_select_field(
             .child(cancel)
             .into_any_element()
     } else {
-        let new_tip = i18n!(cx, "common.new_folder");
+        let new_tip = i18n!(cx, "workspace.folder.create");
         let panel_clone = panel.clone();
         let active_pid = active_project_id.clone();
         let new_btn = icon_button("parent-folder-new", AppIcon::NewFolder, t, cx)
@@ -799,7 +799,7 @@ fn render_folder_select_field(
                         } else {
                             String::new()
                         };
-                        let placeholder = i18n!(cx, "common.new_folder_placeholder");
+                        let placeholder = i18n!(cx, "workspace.folder.create_placeholder");
                         let inp = cx.new(|cx| {
                             InputState::new(cx)
                                 .placeholder(placeholder)

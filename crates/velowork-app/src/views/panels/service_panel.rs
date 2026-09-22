@@ -1448,7 +1448,7 @@ impl Panel for ServiceMonitorPanel {
     fn metadata(&self, cx: &App) -> PanelInfo {
         PanelInfo::new(
             "services",
-            i18n!(cx, "dock.panel.services"),
+            i18n!(cx, "service_monitor.title"),
             AppIcon::SquareActivity,
             PanelKind::Custom,
         )
@@ -1859,7 +1859,7 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
     registry.register(velowork_ui::dock::ToolbarPanelSpec {
         id: "services".to_string(),
         icon: AppIcon::SquareActivity,
-        title_key: "dock.panel.services".to_string(),
+        title_key: "service_monitor.title".to_string(),
         order: 40,
         is_visible: std::sync::Arc::new(|_cx| true),
         factory: std::sync::Arc::new(|ctx, _window, cx| {

@@ -71,7 +71,7 @@ pub fn open_quick_command_context_menu(
 
     let pid2 = parent_id.clone();
     let ev2 = on_event.clone();
-    let label_new_folder = i18n!(cx, "common.new_folder");
+    let label_new_folder = i18n!(cx, "workspace.folder.create");
     items.push(
         PopupMenuItem::item("qc-menu-new-folder", label_new_folder, move |_, cx| {
             ev2(QuickCommandContextMenuEvent::NewFolder { parent_id: pid2.clone() }, cx);

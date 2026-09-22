@@ -16,9 +16,6 @@
     "create_failed": "Failed to create profile: {error}"
   },
   "common": {
-    "search": "Search…",
-    "new_folder": "New Folder",
-    "new_folder_placeholder": "Enter folder path (e.g. A/B)",
     "custom": "Custom",
     "default": "Default",
     "requires_restart": "Requires restart",
@@ -26,12 +23,9 @@
     "select": "Select",
     "dont_ask_again": "Don't ask again",
     "just_now": "Just now",
-    "preview": "Preview",
     "filter": "filter",
     "search_placeholder": "Search...",
     "select_placeholder": "Please select...",
-    "compact": "Compact",
-    "details": "Details",
     "action": {
       "add": "Add",
       "create": "Create",
@@ -90,10 +84,6 @@
       "next": "Next",
       "expand": "Expand",
       "collapse": "Collapse"
-    },
-    "input": {
-      "search_placeholder": "Search...",
-      "select_placeholder": "Select..."
     }
   },
   "settings": {
@@ -750,7 +740,8 @@
     "confirm_title": "Confirm Command Execution",
     "confirm_msg": "Execute on service \"{name}\": {command}",
     "running_hint": "Running · {count} services",
-    "error_hint": "Errors · {count} services"
+    "error_hint": "Errors · {count} services",
+    "title": "Service Monitor"
   },
   "terminal": {
     "context_menu": {
@@ -1817,7 +1808,8 @@
     "edit_tooltip": "Edit command",
     "more_tooltip": "More actions",
     "no_match": "No matching commands found",
-    "empty_list": "No quick commands"
+    "empty_list": "No quick commands",
+    "title": "Quick Commands"
   },
   "skill": {
     "diagnose": "Diagnose",
@@ -1841,11 +1833,6 @@
       "attach": "Attach to Main Window",
       "show": "Show Panel",
       "hide": "Hide Panel",
-      "quick_commands": "Quick Commands",
-      "ai_assistant": "AI Assistant",
-      "tunnels": "SSH Tunnels",
-      "services": "Service Monitor",
-      "history": "Command History",
       "lock": "Lock Application"
     },
     "tab": {
@@ -1868,33 +1855,6 @@
       "exit_fullscreen": "Exit Fullscreen",
       "restore": "Restore",
       "fullscreen": "Fullscreen"
-    },
-    "explorer": "EXPLORER",
-    "clear_search": "Clear Search",
-    "no_matches": "No matches",
-    "projects": "PROJECTS",
-    "add_project": "Add Project",
-    "add_connection": "Add Connection",
-    "no_projects": "No projects yet",
-    "no_connections": "No connections",
-    "activity": "Activity",
-    "terminals": "Terminals",
-    "services": "Services",
-    "hooks": "Hooks",
-    "delete_folder_tooltip": "Delete folder (keeps projects)",
-    "show_attention_tooltip": "Show a \"needs attention\" section at the top",
-    "terminal_name_placeholder": "Terminal name...",
-    "project_name_placeholder": "Project name...",
-    "folder_name_placeholder": "Folder name...",
-    "duplicate_folder_error": "A folder with this name already exists in this location. Please choose another name.",
-    "search_placeholder": "Search connections...",
-    "sftp": "Files",
-    "commands": "Commands",
-    "show_project": "Show Project",
-    "hide_project": "Hide Project",
-    "tooltip": {
-      "delete_folder": "Delete folder (keeps projects)",
-      "show_attention": "Show a \"needs attention\" section at the top"
     }
   },
   "tunnels": {
@@ -1960,7 +1920,8 @@
       "reconnect_never": "Never",
       "auto_start": "Auto Start",
       "notes": "Notes"
-    }
+    },
+    "title": "SSH Tunnels"
   },
   "help": {
     "title": "Help",
@@ -2507,5 +2468,14 @@
   "ghost_text": {
     "tab_accept": "Tab to accept",
     "esc_dismiss": "Esc to dismiss"
+  },
+  "workspace": {
+    "explorer": "Session Manager",
+    "folder": {
+      "create": "New Folder",
+      "create_placeholder": "Enter folder name (supports nested like A/B)",
+      "name_placeholder": "Folder name...",
+      "duplicate_error": "A folder with this name already exists in this location"
+    }
   }
 }

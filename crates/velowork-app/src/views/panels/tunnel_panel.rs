@@ -687,7 +687,7 @@ impl TunnelsPanel {
             self.reload_nodes(cx);
         }
 
-        let placeholder = i18n!(cx, "common.new_folder");
+        let placeholder = i18n!(cx, "workspace.folder.create");
         self.inline_folder_sub = None;
         self.inline_folder = Some(InlineTunnelFolderState::Creating {
             parent_id,
@@ -1721,7 +1721,7 @@ impl Panel for TunnelsPanel {
     fn metadata(&self, cx: &App) -> PanelInfo {
         PanelInfo::new(
             "tunnels",
-            i18n!(cx, "dock.panel.tunnels"),
+            i18n!(cx, "tunnels.title"),
             AppIcon::Tunnel,
             PanelKind::Custom,
         )
@@ -1834,7 +1834,7 @@ impl Render for TunnelsPanel {
         let is_empty = roots.is_empty();
 
         let add_tip = i18n!(cx, "tunnels.add");
-        let folder_tip = i18n!(cx, "common.new_folder");
+        let folder_tip = i18n!(cx, "workspace.folder.create");
         let search_tip = i18n!(cx, "tunnels.search_tooltip");
 
         v_flex()
@@ -2226,7 +2226,7 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
     registry.register(velowork_ui::dock::ToolbarPanelSpec {
         id: "tunnels".to_string(),
         icon: velowork_ui::icon::AppIcon::Tunnel,
-        title_key: "dock.panel.tunnels".to_string(),
+        title_key: "tunnels.title".to_string(),
         order: 30,
         is_visible: std::sync::Arc::new(|_cx| true),
         factory: std::sync::Arc::new(|ctx, _window, cx| {

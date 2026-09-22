@@ -365,7 +365,7 @@ impl ManageProjectsDialog {
             .project(project_id)
             .map(|p| p.name.clone())
             .unwrap_or_default();
-        let placeholder = i18n!(cx, "dock.project_name_placeholder");
+        let placeholder = i18n!(cx, "project.editor.name_placeholder");
         let input = cx.new(|cx| {
             InputState::new(cx)
                 .placeholder(placeholder)

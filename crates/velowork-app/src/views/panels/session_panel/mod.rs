@@ -788,7 +788,7 @@ impl SessionPanel {
             match state {
                 InlineFolderState::Creating { input, .. } => {
                     if input.is_none() {
-                        let ph = i18n!(cx, "dock.folder_name_placeholder");
+                        let ph = i18n!(cx, "workspace.folder.name_placeholder");
                         let i = cx.new(|cx| InputState::new(cx).placeholder(ph));
                         *input = Some(i);
                     }
@@ -927,7 +927,7 @@ impl SessionPanel {
                             div()
                                 .text_size(ui_text(11.0, cx))
                                 .text_color(rgb(t.error))
-                                .child(i18n!(cx, "dock.duplicate_folder_error")),
+                                .child(i18n!(cx, "workspace.folder.duplicate_error")),
                         ),
                 )
             })
@@ -3280,7 +3280,7 @@ impl SessionPanel {
             items.push(
                 PopupMenuItem::submenu(
                     "tree-ctx-new-conn",
-                    i18n!(cx, "dock.add_connection"),
+                    i18n!(cx, "session.new_session"),
                     vec![
                         PopupMenuItem::item(
                             "new-conn-ssh",
@@ -3365,7 +3365,7 @@ impl SessionPanel {
             items.push(
                 PopupMenuItem::item(
                     "tree-ctx-new-folder",
-                    i18n!(cx, "common.new_folder"),
+                    i18n!(cx, "workspace.folder.create"),
                     move |window, cx| {
                         if let Some(this) = w2.upgrade() {
                             this.update(cx, |this, cx| this.inline_create_folder(None, window, cx));
@@ -3462,7 +3462,7 @@ impl SessionPanel {
                 items.push(
                     PopupMenuItem::submenu(
                         "tree-ctx-new-conn",
-                        i18n!(cx, "dock.add_connection"),
+                        i18n!(cx, "session.new_session"),
                         vec![
                             PopupMenuItem::item(
                                 "new-folder-session-ssh",
@@ -3549,7 +3549,7 @@ impl SessionPanel {
                 items.push(
                     PopupMenuItem::item(
                         "tree-ctx-new-folder",
-                        i18n!(cx, "common.new_folder"),
+                        i18n!(cx, "workspace.folder.create"),
                         move |window, cx| {
                             if let Some(this) = w_f2.upgrade() {
                                 let fid = fid2.clone();
@@ -7738,8 +7738,8 @@ impl SessionPanel {
         let is_session = !is_folder;
 
         let header_title = match dialog {
-            SessionPanelDialog::AddFolder { .. } => i18n!(cx, "dock.folder_name_placeholder"),
-            SessionPanelDialog::EditFolder { .. } => i18n!(cx, "dock.folder_name_placeholder"),
+            SessionPanelDialog::AddFolder { .. } => i18n!(cx, "workspace.folder.name_placeholder"),
+            SessionPanelDialog::EditFolder { .. } => i18n!(cx, "workspace.folder.name_placeholder"),
             SessionPanelDialog::AddSession { .. } => {
                 let proto = self
                     .ssh_dialog()
@@ -8062,7 +8062,7 @@ impl SessionPanel {
                     div()
                         .text_size(ui_text_sm(cx))
                         .text_color(rgb(t.text_secondary))
-                        .child(i18n!(cx, "dock.folder_name_placeholder")),
+                        .child(i18n!(cx, "workspace.folder.name_placeholder")),
                 )
                 .child(Self::input_field(&self.folder_name_input, cx)),
         )
@@ -8466,7 +8466,7 @@ impl Render for SessionPanel {
                     this.inline_create_folder(None, window, cx);
                 }))
                 .tooltip(move |_, cx| {
-                    let __tip = i18n!(cx, "common.new_folder");
+                    let __tip = i18n!(cx, "workspace.folder.create");
                     cx.new(|_| Tooltip::new(__tip)).into()
                 }),
             )
@@ -8995,7 +8995,7 @@ impl Render for SessionPanel {
 
 impl velowork_ui::dock::Panel for SessionPanel {
     fn metadata(&self, cx: &App) -> velowork_ui::dock::PanelInfo {
-        let title = i18n!(cx, "dock.explorer");
+        let title = i18n!(cx, "workspace.explorer");
         let title_str = if title.is_empty() {
             "Explorer".to_string()
         } else {

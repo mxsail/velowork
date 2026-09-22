@@ -691,8 +691,8 @@ impl Render for StatusBar {
             .read(cx)
             .focused_terminal_state()
             .is_some();
-        let sftp_label = i18n!(cx, "dock.sftp");
-        let commands_label = i18n!(cx, "dock.commands");
+        let sftp_label = i18n!(cx, "sftp.panel.title");
+        let commands_label = i18n!(cx, "quick_commands.title");
         // Only show the SFTP button when the focused connection actually
         // supports SFTP. For an SSH terminal this means `enable_sftp` is set;
         // for a local terminal (no SSH session) we keep it visible as before.

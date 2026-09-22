@@ -413,7 +413,7 @@ impl Panel for CommandHistoryPanel {
     fn metadata(&self, cx: &App) -> PanelInfo {
         PanelInfo::new(
             "command_history",
-            i18n!(cx, "dock.panel.history"),
+            i18n!(cx, "command_history.title"),
             AppIcon::MonitorClock,
             PanelKind::Custom,
         )
@@ -776,7 +776,7 @@ pub fn register_toolbar_panel(registry: &mut RightToolbarRegistry) {
     registry.register(ToolbarPanelSpec {
         id: "command_history".to_string(),
         icon: AppIcon::MonitorClock,
-        title_key: "dock.panel.history".to_string(),
+        title_key: "command_history.title".to_string(),
         order: 25,
         is_visible: std::sync::Arc::new(|_cx| true),
         factory: std::sync::Arc::new(|ctx, _window, cx| {

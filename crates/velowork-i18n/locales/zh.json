@@ -16,9 +16,6 @@
     "create_failed": "创建配置文件失败：{error}"
   },
   "common": {
-    "search": "搜索…",
-    "new_folder": "新建目录",
-    "new_folder_placeholder": "请输入目录名称（支持多级如 A/B）",
     "custom": "自定义",
     "default": "默认",
     "requires_restart": "需要重启",
@@ -26,12 +23,9 @@
     "select": "选择",
     "dont_ask_again": "下次不再确认",
     "just_now": "刚刚",
-    "preview": "预览",
     "filter": "筛选",
     "search_placeholder": "搜索…",
     "select_placeholder": "请选择…",
-    "compact": "紧凑",
-    "details": "详情",
     "action": {
       "add": "新建",
       "create": "创建",
@@ -90,10 +84,6 @@
       "next": "下一步",
       "expand": "展开",
       "collapse": "折叠"
-    },
-    "input": {
-      "search_placeholder": "搜索…",
-      "select_placeholder": "请选择…"
     }
   },
   "settings": {
@@ -750,7 +740,8 @@
     "confirm_title": "确认执行命令",
     "confirm_msg": "将在服务「{name}」上执行：{command}",
     "running_hint": "已运行 · 共 {count} 项",
-    "error_hint": "存在异常 · 共 {count} 项"
+    "error_hint": "存在异常 · 共 {count} 项",
+    "title": "服务监控"
   },
   "terminal": {
     "context_menu": {
@@ -1817,7 +1808,8 @@
     "edit_tooltip": "编辑指令",
     "more_tooltip": "更多操作",
     "no_match": "未找到匹配的指令",
-    "empty_list": "暂无快捷指令"
+    "empty_list": "暂无快捷指令",
+    "title": "快捷指令"
   },
   "skill": {
     "diagnose": "诊断",
@@ -1841,11 +1833,6 @@
       "attach": "附加回主窗口",
       "show": "显示面板",
       "hide": "隐藏面板",
-      "quick_commands": "快捷指令",
-      "ai_assistant": "AI 助手",
-      "tunnels": "SSH 隧道",
-      "services": "服务监控",
-      "history": "历史命令",
       "lock": "锁定应用"
     },
     "tab": {
@@ -1868,33 +1855,6 @@
       "exit_fullscreen": "退出全屏",
       "restore": "还原",
       "fullscreen": "全屏"
-    },
-    "explorer": "会话管理器",
-    "clear_search": "清除搜索",
-    "no_matches": "无匹配结果",
-    "projects": "项目",
-    "add_project": "添加项目",
-    "add_connection": "新建会话",
-    "no_projects": "暂无项目",
-    "no_connections": "暂无连接",
-    "activity": "活动",
-    "terminals": "终端",
-    "services": "服务",
-    "hooks": "钩子",
-    "delete_folder_tooltip": "删除文件夹（保留项目）",
-    "show_attention_tooltip": "在顶部显示「需要关注」区域",
-    "terminal_name_placeholder": "终端名称…",
-    "project_name_placeholder": "项目名称…",
-    "folder_name_placeholder": "文件夹名称…",
-    "duplicate_folder_error": "此位置已存在同名文件夹，请选择其他名字",
-    "search_placeholder": "搜索连接…",
-    "sftp": "文件",
-    "commands": "命令",
-    "show_project": "显示项目",
-    "hide_project": "隐藏项目",
-    "tooltip": {
-      "delete_folder": "删除文件夹（保留项目）",
-      "show_attention": "在顶部显示「需要关注」区域"
     }
   },
   "tunnels": {
@@ -1960,7 +1920,8 @@
       "reconnect_never": "从不重连",
       "auto_start": "随会话自启",
       "notes": "备注说明"
-    }
+    },
+    "title": "SSH 隧道"
   },
   "help": {
     "title": "帮助",
@@ -2507,5 +2468,14 @@
   "ghost_text": {
     "tab_accept": "Tab 接受",
     "esc_dismiss": "Esc 取消"
+  },
+  "workspace": {
+    "explorer": "会话管理器",
+    "folder": {
+      "create": "新建目录",
+      "create_placeholder": "请输入目录名称（支持多级如 A/B）",
+      "name_placeholder": "文件夹名称…",
+      "duplicate_error": "此位置已存在同名文件夹，请选择其他名字"
+    }
   }
 }

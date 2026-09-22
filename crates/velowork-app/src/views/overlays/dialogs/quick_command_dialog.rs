@@ -343,7 +343,7 @@ impl QuickCommandDialog {
     fn title(&self, cx: &App) -> String {
         match &self.mode {
             QuickCommandDialogMode::CreateCommand { .. } => i18n!(cx, "quick_commands.new_command"),
-            QuickCommandDialogMode::CreateFolder { .. } => i18n!(cx, "common.new_folder"),
+            QuickCommandDialogMode::CreateFolder { .. } => i18n!(cx, "workspace.folder.create"),
             QuickCommandDialogMode::EditCommand { .. }
             | QuickCommandDialogMode::EditFolder { .. } => i18n!(cx, "common.action.edit"),
         }
@@ -691,7 +691,7 @@ impl QuickCommandDialog {
                 .child(cancel)
                 .into_any_element()
         } else {
-            let new_tip = i18n!(cx, "common.new_folder");
+            let new_tip = i18n!(cx, "workspace.folder.create");
             let new_btn = icon_button("folder-new", AppIcon::NewFolder, &t, cx)
                 .tooltip(move |_, cx| cx.new(|_| Tooltip::new(new_tip.clone())).into())
                 .focus_action(&self.new_dir_focus, &t, cx.listener(move |this, _, window, cx| {
@@ -709,7 +709,7 @@ impl QuickCommandDialog {
                     } else {
                         String::new()
                     };
-                    let placeholder = i18n!(cx, "common.new_folder_placeholder");
+                    let placeholder = i18n!(cx, "workspace.folder.create_placeholder");
                     let inp = cx.new(|cx| {
                         InputState::new(cx)
                             .placeholder(placeholder)

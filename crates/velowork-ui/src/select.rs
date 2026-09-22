@@ -906,7 +906,7 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
             let opt_h = crate::menu::menu_item_height(cx);
 
             let popover_list = if filtered_groups.is_empty() {
-                let empty_tip = i18n!(cx, "dock.no_matches");
+                let empty_tip = i18n!(cx, "common.state.no_results");
                 div()
                     .id("select-popover-list")
                     .flex()

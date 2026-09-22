@@ -155,7 +155,7 @@ impl SettingsPanel {
     fn render_nav_search(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let search_text = self.nav_search_input.read(cx).value().to_string();
         let _has_text = !search_text.is_empty();
-        let _clear_tip = i18n!(cx, "dock.clear_search");
+        let _clear_tip = i18n!(cx, "common.action.clear");
         let _focus_handle = self.nav_search_input.read(cx).focus_handle(cx);
 
         div().p(SPACE_LG).child(

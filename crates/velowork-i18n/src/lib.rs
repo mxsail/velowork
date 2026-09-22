@@ -174,7 +174,7 @@ pub fn t_cx(cx: &mut gpui::App, key: &str) -> String {
 }
 
 /// Macro for translating keys in view render methods.
-/// Usage: `i18n!(cx, "dock.explorer")`
+/// Usage: `i18n!(cx, "workspace.explorer")`
 /// Note: `cx` must implement `Deref<Target = gpui::App>` (e.g., `&mut Context<Self>` or `&App`).
 #[macro_export]
 macro_rules! i18n {
@@ -217,7 +217,7 @@ mod tests {
     fn nested_json_is_flattened() {
         let store = TranslationStore::new();
         // Nested structure is flattened into dot-separated keys.
-        assert_eq!(store.translate(Locale::Zh, "dock.explorer"), "会话管理器");
+        assert_eq!(store.translate(Locale::Zh, "workspace.explorer"), "会话管理器");
         assert_eq!(store.translate(Locale::En, "common.action.cancel"), "Cancel");
         assert_eq!(
             store.translate(Locale::Zh, "search_dialogs.file_search.title"),

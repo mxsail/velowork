@@ -406,7 +406,7 @@ impl WindowView {
             dp.set_panel_providers(vec![
                 velowork_ui::dock::PanelProvider {
                     id: "explorer".to_string(),
-                    title: i18n!(cx, "dock.explorer"),
+                    title: i18n!(cx, "workspace.explorer"),
                     icon: AppIcon::Folder,
                 },
             ]);

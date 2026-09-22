@@ -681,7 +681,7 @@ impl QuickCommandsPanel {
             self.reload_from_settings(cx);
         }
 
-        let placeholder = i18n!(cx, "common.new_folder");
+        let placeholder = i18n!(cx, "workspace.folder.create");
 
         // 重置订阅，使新输入框在下次渲染时获得初始焦点。
         self.inline_folder_sub = None;
@@ -1272,7 +1272,7 @@ impl QuickCommandsPanel {
                             div()
                                 .text_size(ui_text(11.0, cx))
                                 .text_color(rgb(t.error))
-                                .child(i18n!(cx, "dock.duplicate_folder_error")),
+                                .child(i18n!(cx, "workspace.folder.duplicate_error")),
                         ),
                 )
             })
@@ -2040,7 +2040,7 @@ impl Render for QuickCommandsPanel {
                     .child(
                         velowork_ui::icon_button::icon_button("btn-add-qc-folder", AppIcon::NewFolder, &t, cx)
                             .tooltip(move |_, cx| {
-                                let __tip = i18n!(cx, "common.new_folder");
+                                let __tip = i18n!(cx, "workspace.folder.create");
                                 cx.new(|_| Tooltip::new(__tip)).into()
                             })
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -2282,7 +2282,7 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
     registry.register(velowork_ui::dock::ToolbarPanelSpec {
         id: "quick_commands".to_string(),
         icon: AppIcon::QuickCommand,
-        title_key: "dock.panel.quick_commands".to_string(),
+        title_key: "quick_commands.title".to_string(),
         order: 20,
         is_visible: std::sync::Arc::new(|_cx| true),
         factory: std::sync::Arc::new(|ctx, _window, cx| {

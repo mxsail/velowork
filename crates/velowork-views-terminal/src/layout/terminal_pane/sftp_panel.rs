@@ -3265,7 +3265,7 @@ impl BottomPanel {
         let t = theme(cx);
         let p = SemanticPalette::from_theme(&t);
         let title: SharedString = if dialog.is_dir {
-            i18n!(cx, "common.new_folder")
+            i18n!(cx, "workspace.folder.create")
         } else {
             i18n!(cx, "sftp.dialog.create_file")
         }
@@ -4612,7 +4612,7 @@ impl Render for BottomPanel {
                                     menu_item(
                                         "sftp-menu-new-dir",
                                         AppIcon::Folder,
-                                        i18n!(cx, "common.new_folder"),
+                                        i18n!(cx, "workspace.folder.create"),
                                         &t, cx,
                                     )
                                     .on_click(cx.listener(

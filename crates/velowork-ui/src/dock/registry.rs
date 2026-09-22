@@ -32,7 +32,7 @@ pub struct ToolbarPanelSpec {
     pub id: String,
     /// Icon displayed on the right toolbar.
     pub icon: AppIcon,
-    /// Translation key for i18n label/tooltip (e.g., "dock.panel.ai_assistant").
+    /// Translation key for i18n label/tooltip (e.g., "ai_assistant.title").
     pub title_key: String,
     /// Display order on the toolbar (lower numbers appear first).
     pub order: i32,
@@ -131,7 +131,7 @@ mod tests {
         registry.register(ToolbarPanelSpec {
             id: "quick_commands".to_string(),
             icon: AppIcon::QuickCommand,
-            title_key: "dock.panel.quick_commands".to_string(),
+            title_key: "quick_commands.title".to_string(),
             order: 20,
             is_visible: Arc::new(|_| true),
             factory: Arc::new(|_, _, _| panic!("not invoked")),
@@ -140,7 +140,7 @@ mod tests {
         registry.register(ToolbarPanelSpec {
             id: "ai_assistant".to_string(),
             icon: AppIcon::AiAssistant,
-            title_key: "dock.panel.ai_assistant".to_string(),
+            title_key: "ai_assistant.title".to_string(),
             order: 10,
             is_visible: Arc::new(move |_| ai_enabled_clone.load(Ordering::Relaxed)),
             factory: Arc::new(|_, _, _| panic!("not invoked")),

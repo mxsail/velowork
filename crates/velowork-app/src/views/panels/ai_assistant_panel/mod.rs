@@ -7626,7 +7626,7 @@ pub fn register_toolbar_panel(registry: &mut velowork_ui::dock::RightToolbarRegi
     registry.register(velowork_ui::dock::ToolbarPanelSpec {
         id: "ai_assistant".to_string(),
         icon: velowork_ui::icon::AppIcon::AiAssistant,
-        title_key: "dock.panel.ai_assistant".to_string(),
+        title_key: "ai_assistant.title".to_string(),
         order: 10,
         is_visible: std::sync::Arc::new(|cx| {
             crate::settings::settings_entity(cx).read(cx).settings.ai_enabled
