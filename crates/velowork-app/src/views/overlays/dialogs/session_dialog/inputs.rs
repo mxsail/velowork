@@ -157,7 +157,7 @@ impl SessionDialogInputs {
                 .placeholder(i18n!(cx, "ssh.auth.passphrase_placeholder"))
         });
         let agent_socket_path = cx.new(|cx| {
-            InputState::new(cx).placeholder(i18n!(cx, "session_dialog.agent_socket_placeholder"))
+            InputState::new(cx).placeholder(i18n!(cx, "session.dialog.agent_socket_placeholder"))
         });
         let totp_secret = cx.new(|cx| {
             InputState::new(cx)
@@ -165,16 +165,16 @@ impl SessionDialogInputs {
                 .placeholder(i18n!(cx, "ssh.auth.totp_placeholder"))
         });
         let local_cwd = cx.new(|cx| {
-            InputState::new(cx).placeholder(i18n!(cx, "session_dialog.local_cwd_placeholder"))
+            InputState::new(cx).placeholder(i18n!(cx, "session.dialog.local_cwd_placeholder"))
         });
         let font_size = cx.new(|cx| {
             InputState::new(cx)
-                .placeholder(i18n!(cx, "session_dialog.font_size_placeholder"))
+                .placeholder(i18n!(cx, "session.dialog.font_size_placeholder"))
                 .max_length(5)
         });
         let scrollback = cx.new(|cx| {
             InputState::new(cx)
-                .placeholder(i18n!(cx, "session_dialog.scrollback_placeholder"))
+                .placeholder(i18n!(cx, "session.dialog.scrollback_placeholder"))
                 .digits_only(true)
                 .max_length(7)
         });
@@ -240,7 +240,7 @@ impl SessionDialogInputs {
                 .placeholder(i18n!(cx, "ssh.notes.notes_placeholder"))
         });
         let nav_search = cx.new(|cx| {
-            InputState::new(cx).placeholder(i18n!(cx, "session_dialog.search_placeholder"))
+            InputState::new(cx).placeholder(i18n!(cx, "session.dialog.search_placeholder"))
         });
 
         Self {

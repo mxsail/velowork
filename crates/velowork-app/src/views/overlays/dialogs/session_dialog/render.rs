@@ -1429,7 +1429,7 @@ fn render_local_basic_fields(
     cx: &App,
 ) -> AnyElement {
     let inputs = &model.inputs;
-    let cwd_lbl = i18n!(cx, "session_dialog.local_cwd");
+    let cwd_lbl = i18n!(cx, "session.dialog.local_cwd");
     div()
         .flex()
         .flex_col()
@@ -2061,14 +2061,14 @@ fn render_terminal(
         .gap(px(10.0))
         .child(two_col(
             select_block(
-                i18n!(cx, "session_dialog.font_family"),
+                i18n!(cx, "session.dialog.font_family"),
                 &model.selects.font_family,
                 t,
                 cx,
             ),
             stepper_block(
                 "font_size",
-                i18n!(cx, "session_dialog.font_size"),
+                i18n!(cx, "session.dialog.font_size"),
                 &inputs.font_size,
                 6.0,
                 72.0,
@@ -2307,7 +2307,7 @@ fn render_network(
         })
         .child(switch_row(
             "enable_agent_forwarding",
-            &i18n!(cx, "session_dialog.enable_agent_forwarding"),
+            &i18n!(cx, "session.dialog.enable_agent_forwarding"),
             cfg.enable_agent_forwarding,
             &model.focus.net_agent_fwd_enable,
             {

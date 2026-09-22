@@ -3379,7 +3379,7 @@ impl SessionPanel {
             items.push(
                 PopupMenuItem::item(
                     "tree-ctx-import-sessions",
-                    i18n!(cx, "import_session.menu_item"),
+                    i18n!(cx, "session.import.menu_item"),
                     move |_, cx| {
                         if let Some(this) = w_imp.upgrade() {
                             this.update(cx, |this, cx| this.open_import_sessions_dialog(cx));
@@ -8481,7 +8481,7 @@ impl Render for SessionPanel {
                     this.open_import_sessions_dialog(cx);
                 }))
                 .tooltip(move |_, cx| {
-                    let __tip = i18n!(cx, "import_session.title");
+                    let __tip = i18n!(cx, "session.import.title");
                     cx.new(|_| Tooltip::new(__tip)).into()
                 }),
             )

@@ -61,11 +61,11 @@ impl ImportFormatOption {
 
     pub fn label(&self, cx: &App) -> String {
         match self {
-            Self::Auto => i18n!(cx, "import_session.format_auto"),
-            Self::Xshell => i18n!(cx, "import_session.format_xshell"),
-            Self::MobaXterm => i18n!(cx, "import_session.format_mobaxterm"),
-            Self::WindTerm => i18n!(cx, "import_session.format_windterm"),
-            Self::FinalShell => i18n!(cx, "import_session.format_finalshell"),
+            Self::Auto => i18n!(cx, "session.import.format_auto"),
+            Self::Xshell => i18n!(cx, "session.import.format_xshell"),
+            Self::MobaXterm => i18n!(cx, "session.import.format_mobaxterm"),
+            Self::WindTerm => i18n!(cx, "session.import.format_windterm"),
+            Self::FinalShell => i18n!(cx, "session.import.format_finalshell"),
         }
     }
 
@@ -115,10 +115,10 @@ impl ImportSessionsDialog {
         focus_manager: Entity<velowork_workspace::focus::FocusManager>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let path_ph = i18n!(cx, "import_session.path_placeholder");
+        let path_ph = i18n!(cx, "session.import.path_placeholder");
         let path_input = cx.new(|cx| SimpleInputState::new(cx).placeholder(path_ph));
 
-        let pwd_ph = i18n!(cx, "import_session.password_placeholder");
+        let pwd_ph = i18n!(cx, "session.import.password_placeholder");
         let password_input = cx.new(|cx| SimpleInputState::new(cx).placeholder(pwd_ph).password());
 
         let format_options: Vec<SelectOption<ImportFormatOption>> = ImportFormatOption::all()
@@ -149,9 +149,9 @@ impl ImportSessionsDialog {
             .iter()
             .map(|opt| {
                 let label = match opt {
-                    DuplicateStrategy::Overwrite => i18n!(cx, "import_session.duplicate_overwrite"),
-                    DuplicateStrategy::Rename => i18n!(cx, "import_session.duplicate_rename"),
-                    DuplicateStrategy::Skip => i18n!(cx, "import_session.duplicate_skip"),
+                    DuplicateStrategy::Overwrite => i18n!(cx, "session.import.duplicate_overwrite"),
+                    DuplicateStrategy::Rename => i18n!(cx, "session.import.duplicate_rename"),
+                    DuplicateStrategy::Skip => i18n!(cx, "session.import.duplicate_skip"),
                 };
                 let icon = match opt {
                     DuplicateStrategy::Overwrite => AppIcon::Refresh,
@@ -213,7 +213,7 @@ impl ImportSessionsDialog {
         }
 
         let is_dir_only = self.selected_format == ImportFormatOption::FinalShell;
-        let prompt_title = i18n!(cx, "import_session.browse_tooltip");
+        let prompt_title = i18n!(cx, "session.import.browse_tooltip");
         let prompt_opts = PathPromptOptions {
             files: !is_dir_only,
             directories: is_dir_only,
@@ -252,7 +252,7 @@ impl ImportSessionsDialog {
         let raw_path = self.path_input.read(cx).value().trim().to_string();
 
         if raw_path.is_empty() {
-            self.status_message = Some(i18n!(cx, "import_session.path_empty"));
+            self.status_message = Some(i18n!(cx, "session.import.path_empty"));
             self.is_error = true;
             cx.notify();
             return;
@@ -307,7 +307,7 @@ impl ImportSessionsDialog {
                                 )
                             });
 
-                            let summary_tmpl = i18n!(cx, "import_session.success_summary");
+                            let summary_tmpl = i18n!(cx, "session.import.success_summary");
                             let summary = summary_tmpl
                                 .replace("{imported}", &result.imported_sessions.to_string())
                                 .replace("{overwritten}", &result.overwritten_sessions.to_string())
@@ -325,7 +325,7 @@ impl ImportSessionsDialog {
                     }
                     Err(e) => {
                         let err_details = format!("{:#}", e);
-                        let msg = i18n!(cx, "import_session.failed");
+                        let msg = i18n!(cx, "session.import.failed");
                         this.status_message = Some(msg.replace("{error}", &err_details));
                         this.is_error = true;
                     }
@@ -390,7 +390,7 @@ impl Render for ImportSessionsDialog {
                             .text_size(ui_text_md(cx))
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(rgb(t.text_primary))
-                            .child(i18n!(cx, "import_session.title")),
+                            .child(i18n!(cx, "session.import.title")),
                     ),
             )
             .child(
@@ -434,7 +434,7 @@ impl Render for ImportSessionsDialog {
                                             .text_size(ui_text_md(cx))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(rgb(t.text_secondary))
-                                            .child(i18n!(cx, "import_session.format_label")),
+                                            .child(i18n!(cx, "session.import.format_label")),
                                     )
                                     .child(self.format_select.clone()),
                             )
@@ -449,7 +449,7 @@ impl Render for ImportSessionsDialog {
                                             .text_size(ui_text_md(cx))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(rgb(t.text_secondary))
-                                            .child(i18n!(cx, "import_session.path_label")),
+                                            .child(i18n!(cx, "session.import.path_label")),
                                     )
                                     .child(
                                         h_flex()
@@ -465,7 +465,7 @@ impl Render for ImportSessionsDialog {
                                                 Button::new("import-file-browse-btn", &t)
                                                     .size(ControlSize::Default)
                                                     .icon_left(AppIcon::Folder)
-                                                    .tooltip(i18n!(cx, "import_session.browse_tooltip"))
+                                                    .tooltip(i18n!(cx, "session.import.browse_tooltip"))
                                                     .disabled(self.is_importing)
                                                     .on_click(cx.listener(|this, _, window, cx| {
                                                         this.open_file_picker(window, cx);
@@ -485,7 +485,7 @@ impl Render for ImportSessionsDialog {
                                                 .text_size(ui_text_md(cx))
                                                 .font_weight(FontWeight::MEDIUM)
                                                 .text_color(rgb(t.text_secondary))
-                                                .child(i18n!(cx, "import_session.password_label")),
+                                                .child(i18n!(cx, "session.import.password_label")),
                                         )
                                         .child(SimpleInput::new(&self.password_input)),
                                 )
@@ -501,7 +501,7 @@ impl Render for ImportSessionsDialog {
                                             .text_size(ui_text_md(cx))
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(rgb(t.text_secondary))
-                                            .child(i18n!(cx, "import_session.duplicate_strategy_label")),
+                                            .child(i18n!(cx, "session.import.duplicate_strategy_label")),
                                     )
                                     .child(self.strategy_select.clone()),
                             )
@@ -588,9 +588,9 @@ impl Render for ImportSessionsDialog {
                                     .loading(self.is_importing)
                                     .disabled(self.is_importing)
                                     .label(if self.is_importing {
-                                        i18n!(cx, "import_session.btn_importing")
+                                        i18n!(cx, "session.import.btn_importing")
                                     } else {
-                                        i18n!(cx, "import_session.btn_import")
+                                        i18n!(cx, "session.import.btn_import")
                                     })
                                     .focus_handle(&self.confirm_focus)
                                     .on_click(cx.listener(|this, _, window, cx| {

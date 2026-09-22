@@ -609,7 +609,7 @@ pub fn render_welcome_dashboard(
                                         .text_size(ui_text_xs(cx))
                                         .text_color(p.text_muted)
                                         .hover(|s| s.text_color(p.surface_accent))
-                                        .child(i18n!(cx, "import_session.title"))
+                                        .child(i18n!(cx, "session.import.title"))
                                         .child(
                                             AppIcon::ExternalLink
                                                 .size(ICON_SM)

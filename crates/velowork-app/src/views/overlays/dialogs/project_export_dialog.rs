@@ -139,7 +139,7 @@ impl ProjectExportDialog {
         let prompt_future = cx.prompt_for_new_path(&default_path, None);
 
         self.is_exporting = true;
-        self.status_message = Some(i18n!(cx, "export_project.exporting"));
+        self.status_message = Some(i18n!(cx, "project.export.exporting"));
         self.is_error = false;
         cx.notify();
 
@@ -163,13 +163,13 @@ impl ProjectExportDialog {
                         this.is_exporting = false;
                         match export_res {
                             Ok(()) => {
-                                this.status_message = Some(i18n!(cx, "export_project.success"));
+                                this.status_message = Some(i18n!(cx, "project.export.success"));
                                 this.is_error = false;
                                 cx.notify();
                                 this.close(cx);
                             }
                             Err(e) => {
-                                this.status_message = Some(format!("{}: {}", i18n!(cx, "export_project.export_btn"), e));
+                                this.status_message = Some(format!("{}: {}", i18n!(cx, "project.export.export_btn"), e));
                                 this.is_error = true;
                                 cx.notify();
                             }
@@ -279,7 +279,7 @@ impl Render for ProjectExportDialog {
         let project_color = project.as_ref().map(|p| p.folder_color).unwrap_or(velowork_core::theme::FolderColor::Indigo);
 
         if self.password_input.is_none() {
-            let pwd_ph = i18n!(cx, "export_project.password_placeholder");
+            let pwd_ph = i18n!(cx, "project.export.password_placeholder");
             let input = cx.new(|cx| InputState::new(cx).placeholder(pwd_ph).masked(true));
             self.password_input = Some(input);
         }
@@ -349,11 +349,11 @@ impl Render for ProjectExportDialog {
                                             .text_size(ui_text_md(cx))
                                             .text_color(rgb(t.text_secondary))
                                             .font_weight(FontWeight::MEDIUM)
-                                            .child(i18n!(cx, "import_project.modules_to_import")),
+                                            .child(i18n!(cx, "project.import.modules_to_import")),
                                     )
                                     .child(self.render_checkbox_item(
                                         "export-mod-sessions",
-                                        i18n!(cx, "export_project.module_sessions"),
+                                        i18n!(cx, "project.export.module_sessions"),
                                         self.include_sessions,
                                         true, // mandatory
                                         AppIcon::Terminal,
@@ -363,7 +363,7 @@ impl Render for ProjectExportDialog {
                                     ))
                                     .child(self.render_checkbox_item(
                                         "export-mod-ai",
-                                        i18n!(cx, "export_project.module_ai_records"),
+                                        i18n!(cx, "project.export.module_ai_records"),
                                         self.include_ai_records,
                                         false,
                                         AppIcon::AiAssistant,
@@ -376,7 +376,7 @@ impl Render for ProjectExportDialog {
                                     ))
                                     .child(self.render_checkbox_item(
                                         "export-mod-tunnels",
-                                        i18n!(cx, "export_project.module_tunnels"),
+                                        i18n!(cx, "project.export.module_tunnels"),
                                         self.include_tunnels,
                                         false,
                                         AppIcon::Download,
@@ -389,7 +389,7 @@ impl Render for ProjectExportDialog {
                                     ))
                                     .child(self.render_checkbox_item(
                                         "export-mod-services",
-                                        i18n!(cx, "export_project.module_services"),
+                                        i18n!(cx, "project.export.module_services"),
                                         self.include_services,
                                         false,
                                         AppIcon::SquareActivity,
@@ -402,7 +402,7 @@ impl Render for ProjectExportDialog {
                                     ))
                                     .child(self.render_checkbox_item(
                                         "export-mod-snippets",
-                                        i18n!(cx, "export_project.module_snippets"),
+                                        i18n!(cx, "project.export.module_snippets"),
                                         self.include_snippets,
                                         false,
                                         AppIcon::QuickCommand,
@@ -415,7 +415,7 @@ impl Render for ProjectExportDialog {
                                     ))
                                     .child(self.render_checkbox_item(
                                         "export-mod-history",
-                                        i18n!(cx, "export_project.module_session_history"),
+                                        i18n!(cx, "project.export.module_session_history"),
                                         self.include_session_history,
                                         false,
                                         AppIcon::Refresh,
@@ -436,7 +436,7 @@ impl Render for ProjectExportDialog {
                                             .text_size(ui_text_md(cx))
                                             .text_color(rgb(t.text_secondary))
                                             .font_weight(FontWeight::MEDIUM)
-                                            .child(i18n!(cx, "export_project.password_label")),
+                                            .child(i18n!(cx, "project.export.password_label")),
                                     )
                                     .child(
                                         Input::new(password_input)
@@ -488,8 +488,8 @@ impl Render for ProjectExportDialog {
             .on_action(cx.listener(|this, _: &Cancel, _, cx| this.close(cx)))
             .focus_scope_on_click(&self.focus_handle)
             .child(modal_header(
-                i18n!(cx, "export_project.title"),
-                Some(i18n!(cx, "export_project.desc")),
+                i18n!(cx, "project.export.title"),
+                Some(i18n!(cx, "project.export.desc")),
                 &t,
                 cx,
                 cx.listener(|this: &mut Self, _, _, cx| this.close(cx)),
@@ -518,9 +518,9 @@ impl Render for ProjectExportDialog {
                             .primary()
                             .size(ControlSize::Default)
                             .label(if self.is_exporting {
-                                i18n!(cx, "export_project.exporting")
+                                i18n!(cx, "project.export.exporting")
                             } else {
-                                i18n!(cx, "export_project.export_btn")
+                                i18n!(cx, "project.export.export_btn")
                             })
                             .disabled(self.is_exporting)
                             .focus_handle(&self.confirm_focus)

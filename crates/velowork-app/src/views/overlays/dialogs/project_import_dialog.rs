@@ -120,7 +120,7 @@ impl ProjectImportDialog {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(i18n!(cx, "import_project.file_label").into()),
+            prompt: Some(i18n!(cx, "project.import.file_label").into()),
         };
 
         let paths_future = cx.prompt_for_paths(prompt_opts);
@@ -157,7 +157,7 @@ impl ProjectImportDialog {
             .map(|st| st.read(cx).value().trim().to_string())
             .unwrap_or_default();
         if path_str.is_empty() {
-            self.parse_error = Some(i18n!(cx, "import_project.error_file_empty"));
+            self.parse_error = Some(i18n!(cx, "project.import.error_file_empty"));
             cx.notify();
             return;
         }
@@ -204,9 +204,9 @@ impl ProjectImportDialog {
                     }
                     Err(code) => {
                         let msg = match code.as_str() {
-                            "PASSWORD_REQUIRED" => i18n!(cx, "import_project.error_password_required"),
-                            "PASSWORD_INCORRECT" => i18n!(cx, "import_project.error_password_incorrect"),
-                            other => format!("{}: {}", i18n!(cx, "import_project.error_invalid_file"), other),
+                            "PASSWORD_REQUIRED" => i18n!(cx, "project.import.error_password_required"),
+                            "PASSWORD_INCORRECT" => i18n!(cx, "project.import.error_password_incorrect"),
+                            other => format!("{}: {}", i18n!(cx, "project.import.error_invalid_file"), other),
                         };
                         this.parse_error = Some(msg);
                         this.parsed_summary = None;
@@ -228,7 +228,7 @@ impl ProjectImportDialog {
         };
 
         self.is_importing = true;
-        self.status_message = Some(i18n!(cx, "import_project.importing"));
+        self.status_message = Some(i18n!(cx, "project.import.importing"));
         self.is_status_error = false;
         cx.notify();
 
@@ -245,7 +245,7 @@ impl ProjectImportDialog {
             match self.duplicate_strategy {
                 ProjectDuplicateStrategy::Skip => {
                     self.is_importing = false;
-                    self.status_message = Some(format!("{}: {}", target_name, i18n!(cx, "import_project.strategy_skip")));
+                    self.status_message = Some(format!("{}: {}", target_name, i18n!(cx, "project.import.strategy_skip")));
                     self.is_status_error = true;
                     cx.notify();
                     return;
@@ -546,7 +546,7 @@ impl Render for ProjectImportDialog {
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
 
         if self.file_path_input.is_none() {
-            let file_ph = i18n!(cx, "import_project.file_placeholder");
+            let file_ph = i18n!(cx, "project.import.file_placeholder");
             let input = cx.new(|cx| InputState::new(cx).placeholder(file_ph));
             self.file_path_input = Some(input);
         }
@@ -558,7 +558,7 @@ impl Render for ProjectImportDialog {
         }
 
         if self.password_input.is_none() {
-            let pwd_ph = i18n!(cx, "import_project.password_placeholder");
+            let pwd_ph = i18n!(cx, "project.import.password_placeholder");
             let input = cx.new(|cx| InputState::new(cx).placeholder(pwd_ph).masked(true));
             self.password_input = Some(input);
         }
@@ -596,7 +596,7 @@ impl Render for ProjectImportDialog {
                                             .text_size(ui_text_md(cx))
                                             .text_color(rgb(t.text_secondary))
                                             .font_weight(FontWeight::MEDIUM)
-                                            .child(i18n!(cx, "import_project.file_label")),
+                                            .child(i18n!(cx, "project.import.file_label")),
                                     )
                                     .child(
                                         h_flex()
@@ -611,7 +611,7 @@ impl Render for ProjectImportDialog {
                                                 Button::new("browse-vproj-btn", &t)
                                                     .size(ControlSize::Default)
                                                     .icon_left(AppIcon::Folder)
-                                                    .tooltip(i18n!(cx, "import_project.browse_tooltip"))
+                                                    .tooltip(i18n!(cx, "project.import.browse_tooltip"))
                                                     .disabled(self.is_importing || self.is_parsing)
                                                     .on_click(cx.listener(|this, _, window, cx| {
                                                         this.browse_file(window, cx);
@@ -628,14 +628,14 @@ impl Render for ProjectImportDialog {
                                             .text_size(ui_text_md(cx))
                                             .text_color(rgb(t.text_secondary))
                                             .font_weight(FontWeight::MEDIUM)
-                                            .child(i18n!(cx, "import_project.password_label")),
+                                            .child(i18n!(cx, "project.import.password_label")),
                                     )
                                     .child(
                                         div()
                                             .text_size(ui_text_sm(cx))
                                             .text_color(rgb(t.text_muted))
                                             .pb(SPACE_XS)
-                                            .child(i18n!(cx, "import_project.password_hint")),
+                                            .child(i18n!(cx, "project.import.password_hint")),
                                     )
                                     .child(Input::new(password_input).cleanable(true)),
                             )
@@ -659,9 +659,9 @@ impl Render for ProjectImportDialog {
                                         Button::new("parse-vproj-btn", &t)
                                             .size(ControlSize::Default)
                                             .label(if self.is_parsing {
-                                                i18n!(cx, "import_project.parsing")
+                                                i18n!(cx, "project.import.parsing")
                                             } else {
-                                                i18n!(cx, "import_project.parse_btn")
+                                                i18n!(cx, "project.import.parse_btn")
                                             })
                                             .disabled(!has_path || self.is_parsing)
                                             .on_click(cx.listener(|this, _, window, cx| {
@@ -722,11 +722,11 @@ impl Render for ProjectImportDialog {
                                                         .text_size(ui_text_md(cx))
                                                         .text_color(rgb(t.text_secondary))
                                                         .font_weight(FontWeight::MEDIUM)
-                                                        .child(i18n!(cx, "import_project.modules_to_import")),
+                                                        .child(i18n!(cx, "project.import.modules_to_import")),
                                                 )
                                                 .child(self.render_checkbox_item(
                                                     "import-mod-sessions",
-                                                    i18n!(cx, "export_project.module_sessions"),
+                                                    i18n!(cx, "project.export.module_sessions"),
                                                     Some(format!("({} sessions)", summary.session_count)),
                                                     self.include_sessions,
                                                     true,
@@ -743,7 +743,7 @@ impl Render for ProjectImportDialog {
                                                     };
                                                     list.child(self.render_checkbox_item(
                                                         "import-mod-ai",
-                                                        i18n!(cx, "export_project.module_ai_records"),
+                                                        i18n!(cx, "project.export.module_ai_records"),
                                                         count_desc,
                                                         self.include_ai_records,
                                                         false,
@@ -759,7 +759,7 @@ impl Render for ProjectImportDialog {
                                                 .when(summary.tunnel_count > 0, |list| {
                                                     list.child(self.render_checkbox_item(
                                                         "import-mod-tunnels",
-                                                        i18n!(cx, "export_project.module_tunnels"),
+                                                        i18n!(cx, "project.export.module_tunnels"),
                                                         Some(format!("({} tunnels)", summary.tunnel_count)),
                                                         self.include_tunnels,
                                                         false,
@@ -775,7 +775,7 @@ impl Render for ProjectImportDialog {
                                                 .when(summary.service_count > 0, |list| {
                                                     list.child(self.render_checkbox_item(
                                                         "import-mod-services",
-                                                        i18n!(cx, "export_project.module_services"),
+                                                        i18n!(cx, "project.export.module_services"),
                                                         Some(format!("({} services)", summary.service_count)),
                                                         self.include_services,
                                                         false,
@@ -792,7 +792,7 @@ impl Render for ProjectImportDialog {
                                                     let count = summary.snippet_count + summary.quick_command_count;
                                                     list.child(self.render_checkbox_item(
                                                         "import-mod-snippets",
-                                                        i18n!(cx, "export_project.module_snippets"),
+                                                        i18n!(cx, "project.export.module_snippets"),
                                                         Some(format!("({} commands)", count)),
                                                         self.include_snippets,
                                                         false,
@@ -808,7 +808,7 @@ impl Render for ProjectImportDialog {
                                                 .when(summary.history_count > 0, |list| {
                                                     list.child(self.render_checkbox_item(
                                                         "import-mod-history",
-                                                        i18n!(cx, "export_project.module_session_history"),
+                                                        i18n!(cx, "project.export.module_session_history"),
                                                         Some(format!("({} records)", summary.history_count)),
                                                         self.include_session_history,
                                                         false,
@@ -831,28 +831,28 @@ impl Render for ProjectImportDialog {
                                                         .text_size(ui_text_md(cx))
                                                         .text_color(rgb(t.text_secondary))
                                                         .font_weight(FontWeight::MEDIUM)
-                                                        .child(i18n!(cx, "import_project.duplicate_strategy")),
+                                                        .child(i18n!(cx, "project.import.duplicate_strategy")),
                                                 )
                                                 .child(
                                                     h_flex()
                                                         .gap(SPACE_SM)
                                                         .child(self.render_strategy_button(
                                                             "strategy-rename".into(),
-                                                            i18n!(cx, "import_project.strategy_rename"),
+                                                            i18n!(cx, "project.import.strategy_rename"),
                                                             ProjectDuplicateStrategy::Rename,
                                                             &t,
                                                             cx,
                                                         ))
                                                         .child(self.render_strategy_button(
                                                             "strategy-overwrite".into(),
-                                                            i18n!(cx, "import_project.strategy_overwrite"),
+                                                            i18n!(cx, "project.import.strategy_overwrite"),
                                                             ProjectDuplicateStrategy::Overwrite,
                                                             &t,
                                                             cx,
                                                         ))
                                                         .child(self.render_strategy_button(
                                                             "strategy-skip".into(),
-                                                            i18n!(cx, "import_project.strategy_skip"),
+                                                            i18n!(cx, "project.import.strategy_skip"),
                                                             ProjectDuplicateStrategy::Skip,
                                                             &t,
                                                             cx,
@@ -904,8 +904,8 @@ impl Render for ProjectImportDialog {
             .on_action(cx.listener(|this, _: &Cancel, _, cx| this.close(cx)))
             .focus_scope_on_click(&self.focus_handle)
             .child(modal_header(
-                i18n!(cx, "import_project.title"),
-                Some(i18n!(cx, "import_project.desc")),
+                i18n!(cx, "project.import.title"),
+                Some(i18n!(cx, "project.import.desc")),
                 &t,
                 cx,
                 cx.listener(|this: &mut Self, _, _, cx| this.close(cx)),
@@ -934,9 +934,9 @@ impl Render for ProjectImportDialog {
                             .primary()
                             .size(ControlSize::Default)
                             .label(if self.is_importing {
-                                i18n!(cx, "import_project.importing")
+                                i18n!(cx, "project.import.importing")
                             } else {
-                                i18n!(cx, "import_project.import_btn")
+                                i18n!(cx, "project.import.import_btn")
                             })
                             .loading(self.is_importing)
                             .disabled(self.parsed_summary.is_none() || self.is_importing)

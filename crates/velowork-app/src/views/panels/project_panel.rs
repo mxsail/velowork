@@ -1267,7 +1267,7 @@ impl ProjectColumn {
                 div()
                     .text_size(ui_text_xl(cx))
                     .text_color(rgb(t.text_secondary))
-                    .child(i18n!(cx, "project.settingting_up_worktree")),
+                    .child(i18n!(cx, "project.setting_up_worktree")),
             )
             .child(
                 div()
@@ -1275,7 +1275,7 @@ impl ProjectColumn {
                     .text_color(rgb(t.text_muted))
                     .max_w(px(240.0))
                     .text_center()
-                    .child(i18n!(cx, "project.settingting_up_worktree_desc")),
+                    .child(i18n!(cx, "project.setting_up_worktree_desc")),
             )
     }
 

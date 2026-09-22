@@ -105,9 +105,9 @@ impl AddProjectDialog {
         window_id: WindowId,
         cx: &mut Context<Self>,
     ) -> Self {
-        let name_placeholder = i18n!(cx, "add_project.name_placeholder");
+        let name_placeholder = i18n!(cx, "project.editor.name_placeholder");
         let name_input = cx.new(|cx| InputState::new(cx).placeholder(name_placeholder));
-        let desc_placeholder = i18n!(cx, "add_project.desc_placeholder");
+        let desc_placeholder = i18n!(cx, "project.editor.desc_placeholder");
         let desc_input = cx.new(|cx| {
             TextareaState::new(cx)
                 .multiline()
@@ -146,13 +146,13 @@ impl AddProjectDialog {
             })
             .unwrap_or_default();
 
-        let name_placeholder = i18n!(cx, "add_project.name_placeholder");
+        let name_placeholder = i18n!(cx, "project.editor.name_placeholder");
         let name_input = cx.new(|cx| {
             InputState::new(cx)
                 .placeholder(name_placeholder)
                 .default_value(&name)
         });
-        let desc_placeholder = i18n!(cx, "add_project.desc_placeholder");
+        let desc_placeholder = i18n!(cx, "project.editor.desc_placeholder");
         let desc_input = cx.new(|cx| {
             TextareaState::new(cx)
                 .multiline()
@@ -549,12 +549,12 @@ impl Render for AddProjectDialog {
         let title_text = if is_edit {
             i18n!(cx, "project.manage.edit_project")
         } else {
-            i18n!(cx, "add_project.title")
+            i18n!(cx, "project.editor.title")
         };
         let confirm_label = if is_edit {
             i18n!(cx, "common.action.save")
         } else {
-            i18n!(cx, "add_project.add")
+            i18n!(cx, "project.editor.add")
         };
 
         let focus_group = FocusGroup::new();
@@ -643,7 +643,7 @@ impl Render for AddProjectDialog {
                                 v_flex()
                                     .gap(SPACE_XS)
                                     .child(
-                                        labeled_input(i18n!(cx, "add_project.name"), &t, cx).child(
+                                        labeled_input(i18n!(cx, "project.editor.name"), &t, cx).child(
                                             div().flex_1().child(
                                                 velowork_ui::Input::new(&self.name_input)
                                                     .cleanable(true)
@@ -665,17 +665,17 @@ impl Render for AddProjectDialog {
                             )
                             // 2. Icon (direction key picker)
                             .child(
-                                labeled_input(i18n!(cx, "add_project.icon"), &t, cx)
+                                labeled_input(i18n!(cx, "project.editor.icon"), &t, cx)
                                     .child(self.render_icon_picker(is_icon_focused, cx)),
                             )
                             // 3. Color (direction key swatches)
                             .child(
-                                labeled_input(i18n!(cx, "add_project.color"), &t, cx)
+                                labeled_input(i18n!(cx, "project.editor.color"), &t, cx)
                                     .child(self.render_color_picker(is_color_focused, cx)),
                             )
                             // 4. Description (multi-line textarea)
                             .child(
-                                labeled_input(i18n!(cx, "add_project.description"), &t, cx).child(
+                                labeled_input(i18n!(cx, "project.editor.description"), &t, cx).child(
                                     div().flex_1().child(
                                         velowork_ui::Input::new(&self.desc_input)
                                             .fill_height()
