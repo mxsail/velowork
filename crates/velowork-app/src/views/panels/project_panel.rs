@@ -605,7 +605,7 @@ impl ProjectColumn {
                         let project_id = project_id.clone();
                         let terminal_id = terminal_id.clone();
                         let layout_path = layout_path.clone();
-                        let close_tip = i18n!(cx, "button.close");
+                        let close_tip = i18n!(cx, "common.action.close");
                         div()
                             .id(ElementId::Name(format!("min-pill-close-{}", terminal_id).into()))
                             .w(px(16.0))

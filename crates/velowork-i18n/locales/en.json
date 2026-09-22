@@ -2,9 +2,6 @@
   "app": {
     "name": "Velowork"
   },
-  "button": {
-    "close": "Close"
-  },
   "profile_manager": {
     "title": "Profiles",
     "subtitle": "Switch, create, or delete profiles",

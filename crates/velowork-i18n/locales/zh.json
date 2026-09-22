@@ -2,9 +2,6 @@
   "app": {
     "name": "Velowork"
   },
-  "button": {
-    "close": "关闭"
-  },
   "profile_manager": {
     "title": "配置文件",
     "subtitle": "切换、创建或删除配置文件",
