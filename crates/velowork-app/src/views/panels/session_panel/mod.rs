@@ -6838,7 +6838,7 @@ impl SessionPanel {
                 cx.subscribe(
                     &ent,
                     move |this, _, event: &velowork_ui::input::InputEvent, cx| {
-                        if matches!(event, velowork_ui::input::InputEvent::Change) {
+                        if matches!(event, velowork_ui::input::InputEvent::Blur | velowork_ui::input::InputEvent::PressEnter) {
                             this.dialog_on_field_changed(fid, cx);
                         }
                     },
@@ -6902,13 +6902,11 @@ impl SessionPanel {
             Some(m) => m,
             None => return,
         };
-        model.sync_field_from_input(fid, cx);
         let old_validation = model.ui.validation.get(fid).cloned();
         model.validate_field(fid, cx);
         let new_validation = model.ui.validation.get(fid).cloned();
-        // 跳过逐键 recompute（40+ 字段全量 ChangeSet diff），延迟到渲染/保存时惰性重算。
-        // 仅当校验状态实际变化时才通知面板重绘，避免高频长按时的无效全量重绘。
-        if old_validation != new_validation {
+        let changed = old_validation != new_validation;
+        if changed {
             self.dialog_notify(cx);
         }
     }

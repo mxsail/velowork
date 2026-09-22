@@ -242,24 +242,22 @@ fn bind_debounced_input<T: 'static, F>(
     let last_committed_val = Rc::new(RefCell::new(None::<String>));
     let committed_clone = last_committed_val.clone();
 
-    cx.subscribe(input, move |this, entity, event: &InputEvent, cx| match event {
-        InputEvent::Change => {
-            // 对齐 Zed SettingsInputField 设计：打字期间纯本地内存编辑，
-            // 绝不启动异步 Task，绝不触发写盘，绝不调用外层面板重绘
-            if let Some(extra) = on_change_extra.as_ref() {
-                extra(this, cx);
+    cx.subscribe(input, move |this, entity, event: &InputEvent, cx| {
+        match event {
+            InputEvent::Blur | InputEvent::PressEnter => {
+                // 严格在失焦 (FocusOut / Blur) 或按回车 (PressEnter) 时持久化提交
+                let val = entity.read(cx).text().to_string();
+                let has_changed = committed_clone.borrow().as_deref() != Some(&val);
+                if has_changed {
+                    *committed_clone.borrow_mut() = Some(val.clone());
+                    if let Some(extra) = on_change_extra.as_ref() {
+                        extra(this, cx);
+                    }
+                    on_commit(&val, this, cx);
+                }
             }
+            _ => {}
         }
-        InputEvent::Blur | InputEvent::PressEnter => {
-            // 严格在失焦 (FocusOut / Blur) 或按回车 (PressEnter) 时持久化提交
-            let val = entity.read(cx).text().to_string();
-            let has_changed = committed_clone.borrow().as_deref() != Some(&val);
-            if has_changed {
-                *committed_clone.borrow_mut() = Some(val.clone());
-                on_commit(&val, this, cx);
-            }
-        }
-        _ => {}
     })
     .detach();
 }
@@ -2770,7 +2768,7 @@ impl Render for SettingsPanel {
             && window_corner_radius > 0.0;
         let radius = px(window_corner_radius);
 
-        let root = div()
+        div()
             .id("settings-panel-root")
             .size_full()
             .flex()
@@ -2871,9 +2869,7 @@ impl Render for SettingsPanel {
             )
             .when_some(self.active_color_scheme_dialog.clone(), |modal, dialog| {
                 modal.child(dialog)
-            });
-
-        root
+            })
     }
 }
 
