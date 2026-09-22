@@ -125,17 +125,18 @@ pub fn classify_selection_intent(
     }
 
     // 4. Check for JSON / Structured Data
-    if (trimmed.starts_with('{') && trimmed.ends_with('}'))
-        || (trimmed.starts_with('[') && trimmed.ends_with(']'))
+    let is_json_enclosed = (trimmed.starts_with('{') && trimmed.ends_with('}'))
+        || (trimmed.starts_with('[') && trimmed.ends_with(']'));
+    if is_json_enclosed
+        && (serde_json::from_str::<serde_json::Value>(trimmed).is_ok()
+            || trimmed.contains("\": \""))
     {
-        if serde_json::from_str::<serde_json::Value>(trimmed).is_ok() || trimmed.contains("\": \"") {
-            return SmartActionRecommendation {
-                kind: SmartActionKind::FormatData,
-                label_key: "terminal.ai_toolbar_smart_format",
-                icon_name: "file_text",
-                prompt_text: format!("格式化并解析以下结构化数据，分析其关键字段结构：\n```\n{}\n```", trimmed),
-            };
-        }
+        return SmartActionRecommendation {
+            kind: SmartActionKind::FormatData,
+            label_key: "terminal.ai_toolbar_smart_format",
+            icon_name: "file_text",
+            prompt_text: format!("格式化并解析以下结构化数据，分析其关键字段结构：\n```\n{}\n```", trimmed),
+        };
     }
 
     // 5. Default General Explain
