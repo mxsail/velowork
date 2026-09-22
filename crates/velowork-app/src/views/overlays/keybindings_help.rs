@@ -2,7 +2,7 @@ use crate::keybindings::{
     format_keystroke, get_action_descriptions, get_config,
     is_entry_customized, is_entry_matching_platform,
     keystroke_to_config_string, reset_to_defaults, update_config,
-    translate_action_desc, translate_action_name, translate_category,
+    translate_action_desc_for_id, translate_action_name, translate_category,
     Cancel, ConflictKind, KeybindingConfig, KeybindingEntry, ShowKeybindings,
 };
 use crate::theme::{surface_bg_t, theme};
@@ -361,11 +361,12 @@ impl KeybindingsHelp {
             let raw_category = desc.category;
             let category = normalize_category(raw_category);
 
+            let action_id = desc.id;
             let raw_name = desc.name;
             let raw_desc = desc.description;
 
             let action_name = translate_action_name(raw_name, action, cx);
-            let action_description = translate_action_desc(raw_desc, cx);
+            let action_description = translate_action_desc_for_id(action_id, raw_desc, cx);
 
             for (entry_idx, entry) in entries.iter().enumerate() {
                 let is_customized = is_entry_customized(action, entry_idx, entry, &defaults);

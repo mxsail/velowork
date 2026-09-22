@@ -2111,192 +2111,305 @@
     "quick_connect_tip": "Press Enter to connect"
   },
   "commands": {
-    "Quit": "Quit",
-    "Quit Velowork": "Quit Velowork",
-    "Lock Application": "Lock Application",
-    "Lock the application (requires master password to unlock)": "Lock the application (requires master password to unlock)",
-    "Cancel": "Cancel",
-    "Close overlay, cancel rename, or dismiss": "Close overlay, cancel rename, or dismiss",
-    "Send Escape": "Send Escape",
-    "Send escape key to terminal": "Send escape key to terminal",
-    "Toggle Left Dock": "Toggle Left Dock",
-    "Show or hide the left dock panel": "Show or hide the left dock panel",
-    "Toggle Right Dock": "Toggle Right Dock",
-    "Show or hide the right dock panel": "Show or hide the right dock panel",
-    "Toggle Right Toolbar": "Toggle Right Toolbar",
-    "Show or hide the right vertical toolbar strip": "Show or hide the right vertical toolbar strip",
-    "Toggle Auto-Hide": "Toggle Auto-Hide",
-    "Enable or disable left dock auto-hide mode": "Enable or disable left dock auto-hide mode",
-    "Clear Focus": "Clear Focus",
-    "Clear focus and show all projects": "Clear focus and show all projects",
-    "Focus Active Project": "Focus Active Project",
-    "Focus the project containing the active terminal": "Focus the project containing the active terminal",
-    "Toggle Fullscreen": "Toggle Fullscreen",
-    "Toggle fullscreen mode for focused terminal": "Toggle fullscreen mode for focused terminal",
-    "Split Vertical": "Split Vertical",
-    "Split the terminal vertically": "Split the terminal vertically",
-    "Split Horizontal": "Split Horizontal",
-    "Split the terminal horizontally": "Split the terminal horizontally",
-    "Add Tab": "Add Tab",
-    "Add a new tab (creates tab group if needed)": "Add a new tab (creates tab group if needed)",
-    "Close Terminal": "Close Terminal",
-    "Close the current terminal": "Close the current terminal",
-    "Minimize Terminal": "Minimize Terminal",
-    "Minimize/detach the terminal": "Minimize/detach the terminal",
-    "Copy": "Copy",
-    "Copy selected text": "Copy selected text",
-    "Paste": "Paste",
-    "Paste from clipboard": "Paste from clipboard",
-    "Scroll Up": "Scroll Up",
-    "Scroll terminal output up": "Scroll terminal output up",
-    "Scroll Down": "Scroll Down",
-    "Scroll terminal output down": "Scroll terminal output down",
-    "Search": "Search",
-    "Open search in terminal": "Open search in terminal",
-    "Search Next": "Search Next",
-    "Find next search match": "Find next search match",
-    "Search Previous": "Search Previous",
-    "Find previous search match": "Find previous search match",
-    "Close Search": "Close Search",
-    "Close search panel": "Close search panel",
-    "Jump to Previous Prompt": "Jump to Previous Prompt",
-    "Scroll to the previous shell prompt (OSC 133)": "Scroll to the previous shell prompt (OSC 133)",
-    "Jump to Next Prompt": "Jump to Next Prompt",
-    "Scroll forward to the next shell prompt (OSC 133)": "Scroll forward to the next shell prompt (OSC 133)",
-    "Zoom In": "Zoom In",
-    "Increase terminal font size": "Increase terminal font size",
-    "Zoom Out": "Zoom Out",
-    "Decrease terminal font size": "Decrease terminal font size",
-    "Reset Zoom": "Reset Zoom",
-    "Reset terminal font size to default": "Reset terminal font size to default",
-    "Focus Left": "Focus Left",
-    "Move focus to the left terminal": "Move focus to the left terminal",
-    "Focus Right": "Focus Right",
-    "Move focus to the right terminal": "Move focus to the right terminal",
-    "Focus Up": "Focus Up",
-    "Move focus to the terminal above": "Move focus to the terminal above",
-    "Focus Down": "Focus Down",
-    "Move focus to the terminal below": "Move focus to the terminal below",
-    "Focus Next Terminal": "Focus Next Terminal",
-    "Move focus to the next terminal": "Move focus to the next terminal",
-    "Focus Previous Terminal": "Focus Previous Terminal",
-    "Move focus to the previous terminal": "Move focus to the previous terminal",
-    "New Project": "New Project",
-    "Create a new project": "Create a new project",
-    "Show Keybindings": "Show Keybindings",
-    "Display keybinding help": "Display keybinding help",
-    "Session Manager": "Session Manager",
-    "Open session manager to save/load workspaces": "Open session manager to save/load workspaces",
-    "Profile Manager": "Profile Manager",
-    "Open profile manager to switch, create, or delete profiles": "Open profile manager to switch, create, or delete profiles",
-    "Theme Selector": "Theme Selector",
-    "Open theme selector to change appearance": "Open theme selector to change appearance",
-    "Command Palette": "Command Palette",
-    "Open command palette for quick access to all commands": "Open command palette for quick access to all commands",
-    "Toggle Commands Panel": "Toggle Commands Panel",
-    "Show or hide the commands panel (falls back to command palette when no terminal is open)": "Show or hide the commands panel (falls back to command palette when no terminal is open)",
-    "Toggle SFTP Panel": "Toggle SFTP Panel",
-    "Show or hide the SFTP file panel for the active session": "Show or hide the SFTP file panel for the active session",
-    "Settings": "Settings",
-    "Open settings panel": "Open settings panel",
-    "AI Settings": "AI Settings",
-    "Open settings panel to AI configuration": "Open settings panel to AI configuration",
-    "Update": "Update",
-    "Open the update dialog": "Open the update dialog",
-    "Help": "Help",
-    "Open the help dialog": "Open the help dialog",
-    "Open Settings File": "Open Settings File",
-    "Open settings JSON file in default editor": "Open settings JSON file in default editor",
-    "Switch Project": "Switch Project",
-    "Quick project navigation (Enter=focus, Space=toggle visibility)": "Quick project navigation (Enter=focus, Space=toggle visibility)",
-    "Focus Sidebar": "Focus Sidebar",
-    "Move keyboard focus to the sidebar for navigation": "Move keyboard focus to the sidebar for navigation",
-    "Display Panes": "Display Panes",
-    "Show numbered overlays on panes, press a digit to focus": "Show numbered overlays on panes, press a digit to focus",
-    "Start All Services": "Start All Services",
-    "Start all services for the focused project": "Start all services for the focused project",
-    "Stop All Services": "Stop All Services",
-    "Stop all services for the focused project": "Stop all services for the focused project",
-    "Log Console": "Log Console",
-    "Live log viewer with runtime filter": "Live log viewer with runtime filter",
-    "Check for Updates": "Check for Updates",
-    "Check for a new version of Velowork": "Check for a new version of Velowork",
-    "Install Update": "Install Update",
-    "Install a downloaded update": "Install a downloaded update",
-    "Equalize Layout": "Equalize Split Panes",
-    "Equalize split pane sizes in the active terminal session": "Equalize split pane sizes in the active terminal session",
-    "Toggle Tunnels Panel": "Toggle Tunnels Panel",
-    "Show or hide the SSH tunnels panel in the right dock": "Show or hide the SSH tunnels panel in the right dock",
-    "Toggle Services Panel": "Toggle Services Panel",
-    "Show or hide the background services panel in the right dock": "Show or hide the background services panel in the right dock",
-    "Toggle Quick Commands Panel": "Toggle Quick Commands Panel",
-    "Show or hide the quick commands panel in the right dock": "Show or hide the quick commands panel in the right dock",
-    "Toggle History Panel": "Toggle History Panel",
-    "Show or hide the command history panel in the right dock": "Show or hide the command history panel in the right dock",
-    "Project Manager": "Project Manager",
-    "Open project manager to organize projects": "Open project manager to organize projects",
-    "Manage Sessions": "Manage Sessions",
-    "Open session manager to organize sessions and projects": "Open session manager to organize sessions and projects",
-    "Import Sessions": "Import Sessions",
-    "Import sessions from SSH Config, Xshell, MobaXterm, or FinalShell": "Import sessions from SSH Config, Xshell, MobaXterm, or FinalShell",
-    "Show AI Assistant": "Show AI Assistant",
-    "Show or hide the AI Assistant panel in the right dock": "Show or hide the AI Assistant panel in the right dock",
-    "Terminal Inline AI": "Terminal Inline AI",
-    "Open inline AI assistant popover in the focused terminal": "Open inline AI assistant popover in the focused terminal",
-    "New Session": "New Session",
-    "Create a new SSH session": "Create a new SSH session",
-    "New Window": "New Window",
-    "Open an additional window onto the workspace": "Open an additional window onto the workspace",
-    "Duplicate Session": "Duplicate Session",
-    "Duplicate the current terminal session in a new tab": "Duplicate the current terminal session in a new tab",
-    "Duplicate Channel": "Duplicate Channel",
-    "Duplicate SSH channel sharing connection in a new tab": "Duplicate SSH channel sharing connection in a new tab",
-    "Reconnect Terminal": "Reconnect Terminal",
-    "Reconnect the active terminal session": "Reconnect the active terminal session",
-    "Rename Node": "Rename Node",
-    "Rename the currently focused node (session/tunnel/service/quick command/sftp item)": "Rename the currently focused node (session/tunnel/service/quick command/sftp item)",
-    "Cycle Panel Next": "Cycle Panel Next",
-    "Switch to next dock panel": "Switch to next dock panel",
-    "Cycle Panel Previous": "Cycle Panel Previous",
-    "Switch to previous dock panel": "Switch to previous dock panel",
-    "Focus Left Dock": "Focus Left Dock",
-    "Focus on the left dock": "Focus on the left dock",
-    "Focus Center Dock": "Focus Center Dock",
-    "Focus on the center dock": "Focus on the center dock",
-    "Focus Right Dock": "Focus Right Dock",
-    "Focus on the right dock": "Focus on the right dock",
-    "Focus Bottom Dock": "Focus Bottom Dock",
-    "Focus on the bottom dock": "Focus on the bottom dock",
-    "Next Tab": "Next Tab",
-    "Switch to next tab": "Switch to next tab",
-    "Previous Tab": "Previous Tab",
-    "Switch to previous tab": "Switch to previous tab",
-    "Close Tab": "Close Tab",
-    "Close active tab": "Close active tab",
-    "Reopen Closed Tab": "Reopen Closed Tab",
-    "Reopen recently closed tab": "Reopen recently closed tab",
-    "Toggle Sidebar Auto-Hide": "Toggle Auto-Hide",
-    "File Search": "File Search",
-    "Search files by name in the active project": "Search files by name in the active project",
-    "Content Search": "Content Search",
-    "Search text across all files in the active project": "Search text across all files in the active project",
-    "About Velowork": "About Velowork",
-    "Open the about dialog": "Open the about dialog",
-    "cat": {
-      "Global": "Global",
-      "Terminal": "Terminal",
-      "Fullscreen": "Fullscreen",
-      "Search": "Search",
-      "Navigation": "Navigation",
-      "Project": "Project",
-      "Session": "Session",
-      "Services": "Services",
-      "Layout": "Layout",
-      "Window": "Window",
-      "View": "View",
-      "Panel": "Panel",
-      "Git": "Git",
-      "Other": "Other"
+    "category": {
+      "global": "Global",
+      "terminal": "Terminal",
+      "fullscreen": "Fullscreen",
+      "search": "Search",
+      "navigation": "Navigation",
+      "project": "Project",
+      "session": "Session",
+      "services": "Services",
+      "layout": "Layout",
+      "window": "Window",
+      "view": "View",
+      "panel": "Panel",
+      "git": "Git",
+      "other": "Other"
+    },
+    "quit": {
+      "label": "Quit",
+      "description": "Quit Velowork"
+    },
+    "lock_app": {
+      "label": "Lock Application",
+      "description": "Lock the application (requires master password to unlock)"
+    },
+    "cancel": {
+      "label": "Cancel",
+      "description": "Close overlay, cancel rename, or dismiss"
+    },
+    "send_escape": {
+      "label": "Send Escape",
+      "description": "Send escape key to terminal"
+    },
+    "toggle_left_dock": {
+      "label": "Toggle Left Dock",
+      "description": "Show or hide the left dock panel"
+    },
+    "toggle_right_dock": {
+      "label": "Toggle Right Dock",
+      "description": "Show or hide the right dock panel"
+    },
+    "toggle_right_toolbar": {
+      "label": "Toggle Right Toolbar",
+      "description": "Show or hide the right vertical toolbar strip"
+    },
+    "toggle_left_dock_auto_hide": {
+      "label": "Toggle Auto-Hide",
+      "description": "Enable or disable left dock auto-hide mode"
+    },
+    "toggle_commands_panel": {
+      "label": "Toggle Commands Panel",
+      "description": "Show or hide the commands panel (falls back to command palette when no terminal is open)"
+    },
+    "toggle_sftp_panel": {
+      "label": "Toggle SFTP Panel",
+      "description": "Show or hide the SFTP file panel for the active session"
+    },
+    "show_tunnels_panel": {
+      "label": "Toggle Tunnels Panel",
+      "description": "Show or hide the SSH tunnels panel in the right dock"
+    },
+    "show_services_panel": {
+      "label": "Toggle Services Panel",
+      "description": "Show or hide the background services panel in the right dock"
+    },
+    "show_quick_commands_panel": {
+      "label": "Toggle Quick Commands Panel",
+      "description": "Show or hide the quick commands panel in the right dock"
+    },
+    "show_history_panel": {
+      "label": "Toggle History Panel",
+      "description": "Show or hide the command history panel in the right dock"
+    },
+    "show_ai_assistant": {
+      "label": "Show AI Assistant",
+      "description": "Show or hide the AI Assistant panel in the right dock"
+    },
+    "terminal_inline_ai": {
+      "label": "Terminal Inline AI",
+      "description": "Open inline AI assistant popover in the focused terminal"
+    },
+    "toggle_fullscreen": {
+      "label": "Toggle Fullscreen",
+      "description": "Toggle fullscreen mode for focused terminal"
+    },
+    "split_vertical": {
+      "label": "Split Vertical",
+      "description": "Split the terminal vertically"
+    },
+    "split_horizontal": {
+      "label": "Split Horizontal",
+      "description": "Split the terminal horizontally"
+    },
+    "add_tab": {
+      "label": "Add Tab",
+      "description": "Add a new tab (creates tab group if needed)"
+    },
+    "duplicate_session": {
+      "label": "Duplicate Session",
+      "description": "Duplicate the current terminal session in a new tab"
+    },
+    "duplicate_channel": {
+      "label": "Duplicate Channel",
+      "description": "Duplicate SSH channel sharing connection in a new tab"
+    },
+    "reconnect_terminal": {
+      "label": "Reconnect Terminal",
+      "description": "Reconnect the active terminal session"
+    },
+    "close_terminal": {
+      "label": "Close Terminal",
+      "description": "Close the current terminal"
+    },
+    "minimize_terminal": {
+      "label": "Minimize Terminal",
+      "description": "Minimize/detach the terminal"
+    },
+    "copy": {
+      "label": "Copy",
+      "description": "Copy selected text"
+    },
+    "paste": {
+      "label": "Paste",
+      "description": "Paste from clipboard"
+    },
+    "scroll_up": {
+      "label": "Scroll Up",
+      "description": "Scroll terminal output up"
+    },
+    "scroll_down": {
+      "label": "Scroll Down",
+      "description": "Scroll terminal output down"
+    },
+    "jump_to_previous_prompt": {
+      "label": "Jump to Previous Prompt",
+      "description": "Scroll to the previous shell prompt (OSC 133)"
+    },
+    "jump_to_next_prompt": {
+      "label": "Jump to Next Prompt",
+      "description": "Scroll forward to the next shell prompt (OSC 133)"
+    },
+    "zoom_in": {
+      "label": "Zoom In",
+      "description": "Increase terminal font size"
+    },
+    "zoom_out": {
+      "label": "Zoom Out",
+      "description": "Decrease terminal font size"
+    },
+    "reset_zoom": {
+      "label": "Reset Zoom",
+      "description": "Reset terminal font size to default"
+    },
+    "search": {
+      "label": "Search",
+      "description": "Open search in terminal"
+    },
+    "search_next": {
+      "label": "Search Next",
+      "description": "Find next search match"
+    },
+    "search_prev": {
+      "label": "Search Previous",
+      "description": "Find previous search match"
+    },
+    "close_search": {
+      "label": "Close Search",
+      "description": "Close search panel"
+    },
+    "focus_left": {
+      "label": "Focus Left",
+      "description": "Move focus to the left terminal"
+    },
+    "focus_right": {
+      "label": "Focus Right",
+      "description": "Move focus to the right terminal"
+    },
+    "focus_up": {
+      "label": "Focus Up",
+      "description": "Move focus to the terminal above"
+    },
+    "focus_down": {
+      "label": "Focus Down",
+      "description": "Move focus to the terminal below"
+    },
+    "focus_next_terminal": {
+      "label": "Focus Next Terminal",
+      "description": "Move focus to the next terminal"
+    },
+    "focus_prev_terminal": {
+      "label": "Focus Previous Terminal",
+      "description": "Move focus to the previous terminal"
+    },
+    "toggle_pane_switcher": {
+      "label": "Display Panes",
+      "description": "Show numbered overlays on panes, press a digit to focus"
+    },
+    "new_project": {
+      "label": "New Project",
+      "description": "Create a new project"
+    },
+    "new_session": {
+      "label": "New Session",
+      "description": "Create a new SSH session"
+    },
+    "show_project_manage_dialog": {
+      "label": "Project Manager",
+      "description": "Open project manager to organize projects"
+    },
+    "show_import_session_dialog": {
+      "label": "Import Sessions",
+      "description": "Import sessions from SSH Config, Xshell, MobaXterm, or FinalShell"
+    },
+    "show_keybindings": {
+      "label": "Show Keybindings",
+      "description": "Display keybinding help"
+    },
+    "show_profile_manager": {
+      "label": "Profile Manager",
+      "description": "Open profile manager to switch, create, or delete profiles"
+    },
+    "show_theme_selector": {
+      "label": "Theme Selector",
+      "description": "Open theme selector to change appearance"
+    },
+    "show_command_palette": {
+      "label": "Command Palette",
+      "description": "Open command palette for quick access to all commands"
+    },
+    "show_settings": {
+      "label": "Settings",
+      "description": "Open settings panel"
+    },
+    "show_ai_settings": {
+      "label": "AI Settings",
+      "description": "Open settings panel to AI configuration"
+    },
+    "show_update_dialog": {
+      "label": "Update",
+      "description": "Open the update dialog"
+    },
+    "show_help": {
+      "label": "Help",
+      "description": "Open the help dialog"
+    },
+    "show_about_dialog": {
+      "label": "About Velowork",
+      "description": "Open the about dialog"
+    },
+    "open_settings_file": {
+      "label": "Open Settings File",
+      "description": "Open settings JSON file in default editor"
+    },
+    "show_log_console": {
+      "label": "Log Console",
+      "description": "Live log viewer with runtime filter"
+    },
+    "check_for_updates": {
+      "label": "Check for Updates",
+      "description": "Check for a new version of Velowork"
+    },
+    "install_update": {
+      "label": "Install Update",
+      "description": "Install a downloaded update"
+    },
+    "equalize_layout": {
+      "label": "Equalize Split Panes",
+      "description": "Equalize split pane sizes in the active terminal session"
+    },
+    "new_window": {
+      "label": "New Window",
+      "description": "Open an additional window onto the workspace"
+    },
+    "rename_active_node": {
+      "label": "Rename Node",
+      "description": "Rename the currently focused node (session/tunnel/service/quick command/sftp item)"
+    },
+    "cycle_panel_next": {
+      "label": "Cycle Panel Next",
+      "description": "Switch to next dock panel"
+    },
+    "cycle_panel_prev": {
+      "label": "Cycle Panel Previous",
+      "description": "Switch to previous dock panel"
+    },
+    "focus_left_dock": {
+      "label": "Focus Left Dock",
+      "description": "Focus on the left dock"
+    },
+    "focus_center_dock": {
+      "label": "Focus Center Dock",
+      "description": "Focus on the center dock"
+    },
+    "focus_right_dock": {
+      "label": "Focus Right Dock",
+      "description": "Focus on the right dock"
+    },
+    "focus_bottom_dock": {
+      "label": "Focus Bottom Dock",
+      "description": "Focus on the bottom dock"
     }
   },
   "toast": {

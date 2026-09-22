@@ -2111,192 +2111,305 @@
     "quick_connect_tip": "回车立即连接"
   },
   "commands": {
-    "Quit": "退出",
-    "Quit Velowork": "退出 Velowork",
-    "Lock Application": "锁定应用",
-    "Lock the application (requires master password to unlock)": "锁定应用（需主密码解锁）",
-    "Cancel": "取消",
-    "Close overlay, cancel rename, or dismiss": "关闭浮层、取消重命名或忽略",
-    "Send Escape": "发送 Escape",
-    "Send escape key to terminal": "向终端发送 Escape 键",
-    "Toggle Left Dock": "切换左侧 Dock",
-    "Show or hide the left dock panel": "显示或隐藏左侧 Dock 面板",
-    "Toggle Right Dock": "切换右侧 Dock",
-    "Show or hide the right dock panel": "显示或隐藏右侧 Dock 面板",
-    "Toggle Right Toolbar": "切换右侧工具栏",
-    "Show or hide the right vertical toolbar strip": "显示或隐藏右侧垂直工具栏",
-    "Toggle Auto-Hide": "切换自动隐藏",
-    "Enable or disable left dock auto-hide mode": "启用或禁用左侧 Dock 自动隐藏",
-    "Clear Focus": "清除焦点",
-    "Clear focus and show all projects": "清除焦点并显示所有项目",
-    "Focus Active Project": "聚焦当前项目",
-    "Focus the project containing the active terminal": "聚焦包含当前终端的项目",
-    "Toggle Fullscreen": "切换全屏",
-    "Toggle fullscreen mode for focused terminal": "切换当前终端的全屏模式",
-    "Split Vertical": "垂直分屏",
-    "Split the terminal vertically": "垂直分割终端",
-    "Split Horizontal": "水平分屏",
-    "Split the terminal horizontally": "水平分割终端",
-    "Add Tab": "新增标签页",
-    "Add a new tab (creates tab group if needed)": "新增标签页（必要时创建标签组）",
-    "Duplicate Session": "复制当前会话",
-    "Duplicate the current terminal session in a new tab": "在新建标签页中复制当前终端会话",
-    "Duplicate Channel": "复制通道 (复用连接)",
-    "Duplicate SSH channel sharing connection in a new tab": "在新建标签页中复用现有 SSH 连接打开新通道",
-    "Reconnect Terminal": "重新连接终端",
-    "Reconnect the active terminal session": "重新连接当前终端会话",
-    "Close Terminal": "关闭终端",
-    "Close the current terminal": "关闭当前终端",
-    "Minimize Terminal": "最小化终端",
-    "Minimize/detach the terminal": "最小化/分离终端",
-    "Copy": "复制",
-    "Copy selected text": "复制选中文本",
-    "Paste": "粘贴",
-    "Paste from clipboard": "从剪贴板粘贴",
-    "Scroll Up": "向上滚动",
-    "Scroll terminal output up": "向上滚动终端输出",
-    "Scroll Down": "向下滚动",
-    "Scroll terminal output down": "向下滚动终端输出",
-    "Search": "搜索",
-    "Open search in terminal": "在终端中打开搜索",
-    "Search Next": "搜索下一个",
-    "Find next search match": "查找下一个匹配项",
-    "Search Previous": "搜索上一个",
-    "Find previous search match": "查找上一个匹配项",
-    "Close Search": "关闭搜索",
-    "Close search panel": "关闭搜索面板",
-    "Jump to Previous Prompt": "跳到上一个提示符",
-    "Scroll to the previous shell prompt (OSC 133)": "滚动到上一个 shell 提示符（OSC 133）",
-    "Jump to Next Prompt": "跳到下一个提示符",
-    "Scroll forward to the next shell prompt (OSC 133)": "向前滚动到下一个 shell 提示符（OSC 133）",
-    "Zoom In": "放大",
-    "Increase terminal font size": "增大终端字体",
-    "Zoom Out": "缩小",
-    "Decrease terminal font size": "减小终端字体",
-    "Reset Zoom": "重置缩放",
-    "Reset terminal font size to default": "将终端字体恢复默认",
-    "Focus Left": "焦点左移",
-    "Move focus to the left terminal": "将焦点移到左侧终端",
-    "Focus Right": "焦点右移",
-    "Move focus to the right terminal": "将焦点移到右侧终端",
-    "Focus Up": "焦点上移",
-    "Move focus to the terminal above": "将焦点移到上方终端",
-    "Focus Down": "焦点下移",
-    "Move focus to the terminal below": "将焦点移到下方终端",
-    "Focus Next Terminal": "聚焦下一个终端",
-    "Move focus to the next terminal": "将焦点移到下一个终端",
-    "Focus Previous Terminal": "聚焦上一个终端",
-    "Move focus to the previous terminal": "将焦点移到上一个终端",
-    "New Project": "新建项目",
-    "Create a new project": "创建新项目",
-    "New Session": "新建会话",
-    "Create a new SSH session": "创建新的 SSH 远程会话",
-    "New Window": "新建窗口",
-    "Open an additional window onto the workspace": "打开新的工作区窗口",
-    "Show Keybindings": "显示快捷键",
-    "Display keybinding help": "显示快捷键帮助",
-    "Session Manager": "会话管理器",
-    "Open session manager to save/load workspaces": "打开会话管理器",
-    "Profile Manager": "配置文件管理器",
-    "Open profile manager to switch, create, or delete profiles": "打开配置文件管理器",
-    "Theme Selector": "主题选择器",
-    "Open theme selector to change appearance": "打开主题选择器以更改外观",
-    "Command Palette": "命令面板",
-    "Open command palette for quick access to all commands": "打开快速命令面板",
-    "Toggle Commands Panel": "切换命令面板",
-    "Show or hide the commands panel (falls back to command palette when no terminal is open)": "显示或隐藏命令面板",
-    "Toggle SFTP Panel": "切换 SFTP 面板",
-    "Show or hide the SFTP file panel for the active session": "显示或隐藏当前会话的 SFTP 面板",
-    "Show AI Assistant": "显示 AI 助手",
-    "Show or hide the AI Assistant panel in the right dock": "显示或隐藏 AI 助手面板",
-    "Terminal Inline AI": "终端内联 AI",
-    "Open inline AI assistant popover in the focused terminal": "在当前终端中打开内联 AI 助手",
-    "Settings": "设置",
-    "Open settings panel": "打开设置面板",
-    "AI Settings": "AI 设置",
-    "Open settings panel to AI configuration": "打开设置面板并跳转到 AI 配置",
-    "Update": "更新",
-    "Open the update dialog": "打开更新对话框",
-    "Help": "帮助",
-    "Open the help dialog": "打开帮助对话框",
-    "Open Settings File": "打开设置文件",
-    "Open settings JSON file in default editor": "在编辑器中打开设置文件",
-    "Switch Project": "切换项目",
-    "Quick project navigation (Enter=focus, Space=toggle visibility)": "快速项目导航（Enter 聚焦，Space 切换可见性）",
-    "Focus Sidebar": "聚焦侧边栏",
-    "Move keyboard focus to the sidebar for navigation": "将键盘焦点移至侧边栏",
-    "Display Panes": "显示窗格",
-    "Show numbered overlays on panes, press a digit to focus": "在窗格上显示编号浮层，按数字键聚焦",
-    "Start All Services": "启动所有服务",
-    "Start all services for the focused project": "启动当前项目的所有服务",
-    "Stop All Services": "停止所有服务",
-    "Stop all services for the focused project": "停止当前项目的所有服务",
-    "Log Console": "日志控制台",
-    "Live log viewer with runtime filter": "实时日志查看器",
-    "Check for Updates": "检查更新",
-    "Check for a new version of Velowork": "检查 Velowork 的新版本",
-    "Install Update": "安装更新",
-    "Install a downloaded update": "安装已下载的更新",
-    "Equalize Layout": "均分终端分屏",
-    "Equalize split pane sizes in the active terminal session": "均等重置所有分屏窗格大小",
-    "Toggle Tunnels Panel": "切换 SSH 隧道面板",
-    "Show or hide the SSH tunnels panel in the right dock": "显示或隐藏 SSH 隧道面板",
-    "Toggle Services Panel": "切换服务面板",
-    "Show or hide the background services panel in the right dock": "显示或隐藏后台服务面板",
-    "Toggle Quick Commands Panel": "切换快捷指令面板",
-    "Show or hide the quick commands panel in the right dock": "显示或隐藏快捷指令面板",
-    "Toggle History Panel": "切换命令历史面板",
-    "Show or hide the command history panel in the right dock": "显示或隐藏命令历史面板",
-    "Project Manager": "项目管理器",
-    "Open project manager to organize projects": "打开项目管理器以管理项目",
-    "Manage Sessions": "管理会话与项目",
-    "Open session manager to organize sessions and projects": "打开会话管理器",
-    "Import Sessions": "导入会话",
-    "Import sessions from SSH Config, Xshell, MobaXterm, or FinalShell": "从 SSH Config/Xshell/FinalShell 导入",
-    "Rename Node": "重命名节点",
-    "Rename the currently focused node (session/tunnel/service/quick command/sftp item)": "重命名当前选中的节点",
-    "Cycle Panel Next": "切换到下一面板",
-    "Switch to next dock panel": "切换到下一个侧边栏/底栏面板",
-    "Cycle Panel Previous": "切换到上一面板",
-    "Switch to previous dock panel": "切换到上一个侧边栏/底栏面板",
-    "Focus Left Dock": "聚焦左侧栏",
-    "Focus on the left dock": "将焦点移到左侧栏",
-    "Focus Center Dock": "聚焦中间区域",
-    "Focus on the center dock": "将焦点移到中间工作区",
-    "Focus Right Dock": "聚焦右侧栏",
-    "Focus on the right dock": "将焦点移到右侧栏",
-    "Focus Bottom Dock": "聚焦底栏",
-    "Focus on the bottom dock": "将焦点移到底栏面板",
-    "Next Tab": "下一个标签页",
-    "Switch to next tab": "切换到下一个标签页",
-    "Previous Tab": "上一个标签页",
-    "Switch to previous tab": "切换到上一个标签页",
-    "Close Tab": "关闭标签页",
-    "Close active tab": "关闭当前活动的标签页",
-    "Reopen Closed Tab": "重新打开已关闭标签页",
-    "Reopen recently closed tab": "重新打开最近关闭的标签页",
-    "Toggle Sidebar Auto-Hide": "切换侧边栏自动隐藏",
-    "File Search": "搜索文件",
-    "Search files by name in the active project": "在当前项目中按文件名搜索文件",
-    "Content Search": "搜索内容",
-    "Search text across all files in the active project": "在当前项目中跨文件搜索文本内容",
-    "About Velowork": "关于 Velowork",
-    "Open the about dialog": "打开关于对话框",
-    "cat": {
-      "Global": "全局",
-      "Terminal": "终端",
-      "Fullscreen": "全屏",
-      "Search": "搜索",
-      "Navigation": "导航",
-      "Project": "项目",
-      "Session": "会话",
-      "Services": "服务",
-      "Layout": "布局",
-      "Window": "窗口",
-      "View": "视图",
-      "Panel": "面板",
-      "Git": "Git",
-      "Other": "其他"
+    "category": {
+      "global": "全局",
+      "terminal": "终端",
+      "fullscreen": "全屏",
+      "search": "搜索",
+      "navigation": "导航",
+      "project": "项目",
+      "session": "会话",
+      "services": "服务",
+      "layout": "布局",
+      "window": "窗口",
+      "view": "视图",
+      "panel": "面板",
+      "git": "Git",
+      "other": "其他"
+    },
+    "quit": {
+      "label": "退出",
+      "description": "退出 Velowork"
+    },
+    "lock_app": {
+      "label": "锁定应用",
+      "description": "锁定应用（需主密码解锁）"
+    },
+    "cancel": {
+      "label": "取消",
+      "description": "关闭浮层、取消重命名或忽略"
+    },
+    "send_escape": {
+      "label": "发送 Escape",
+      "description": "向终端发送 Escape 键"
+    },
+    "toggle_left_dock": {
+      "label": "切换左侧 Dock",
+      "description": "显示或隐藏左侧 Dock 面板"
+    },
+    "toggle_right_dock": {
+      "label": "切换右侧 Dock",
+      "description": "显示或隐藏右侧 Dock 面板"
+    },
+    "toggle_right_toolbar": {
+      "label": "切换右侧工具栏",
+      "description": "显示或隐藏右侧垂直工具栏"
+    },
+    "toggle_left_dock_auto_hide": {
+      "label": "切换自动隐藏",
+      "description": "启用或禁用左侧 Dock 自动隐藏"
+    },
+    "toggle_commands_panel": {
+      "label": "切换命令面板",
+      "description": "显示或隐藏命令面板"
+    },
+    "toggle_sftp_panel": {
+      "label": "切换 SFTP 面板",
+      "description": "显示或隐藏当前会话的 SFTP 面板"
+    },
+    "show_tunnels_panel": {
+      "label": "切换 SSH 隧道面板",
+      "description": "显示或隐藏 SSH 隧道面板"
+    },
+    "show_services_panel": {
+      "label": "切换服务面板",
+      "description": "显示或隐藏后台服务面板"
+    },
+    "show_quick_commands_panel": {
+      "label": "切换快捷指令面板",
+      "description": "显示或隐藏快捷指令面板"
+    },
+    "show_history_panel": {
+      "label": "切换命令历史面板",
+      "description": "显示或隐藏命令历史面板"
+    },
+    "show_ai_assistant": {
+      "label": "显示 AI 助手",
+      "description": "显示或隐藏 AI 助手面板"
+    },
+    "terminal_inline_ai": {
+      "label": "终端内联 AI",
+      "description": "在当前终端中打开内联 AI 助手"
+    },
+    "toggle_fullscreen": {
+      "label": "切换全屏",
+      "description": "切换当前终端的全屏模式"
+    },
+    "split_vertical": {
+      "label": "垂直分屏",
+      "description": "垂直分割终端"
+    },
+    "split_horizontal": {
+      "label": "水平分屏",
+      "description": "水平分割终端"
+    },
+    "add_tab": {
+      "label": "新增标签页",
+      "description": "新增标签页（必要时创建标签组）"
+    },
+    "duplicate_session": {
+      "label": "复制当前会话",
+      "description": "在新建标签页中复制当前终端会话"
+    },
+    "duplicate_channel": {
+      "label": "复制通道 (复用连接)",
+      "description": "在新建标签页中复用现有 SSH 连接打开新通道"
+    },
+    "reconnect_terminal": {
+      "label": "重新连接终端",
+      "description": "重新连接当前终端会话"
+    },
+    "close_terminal": {
+      "label": "关闭终端",
+      "description": "关闭当前终端"
+    },
+    "minimize_terminal": {
+      "label": "最小化终端",
+      "description": "最小化/分离终端"
+    },
+    "copy": {
+      "label": "复制",
+      "description": "复制选中文本"
+    },
+    "paste": {
+      "label": "粘贴",
+      "description": "从剪贴板粘贴"
+    },
+    "scroll_up": {
+      "label": "向上滚动",
+      "description": "向上滚动终端输出"
+    },
+    "scroll_down": {
+      "label": "向下滚动",
+      "description": "向下滚动终端输出"
+    },
+    "jump_to_previous_prompt": {
+      "label": "跳到上一个提示符",
+      "description": "滚动到上一个 shell 提示符（OSC 133）"
+    },
+    "jump_to_next_prompt": {
+      "label": "跳到下一个提示符",
+      "description": "向前滚动到下一个 shell 提示符（OSC 133）"
+    },
+    "zoom_in": {
+      "label": "放大",
+      "description": "增大终端字体"
+    },
+    "zoom_out": {
+      "label": "缩小",
+      "description": "减小终端字体"
+    },
+    "reset_zoom": {
+      "label": "重置缩放",
+      "description": "将终端字体恢复默认"
+    },
+    "search": {
+      "label": "搜索",
+      "description": "在终端中打开搜索"
+    },
+    "search_next": {
+      "label": "搜索下一个",
+      "description": "查找下一个匹配项"
+    },
+    "search_prev": {
+      "label": "搜索上一个",
+      "description": "查找上一个匹配项"
+    },
+    "close_search": {
+      "label": "关闭搜索",
+      "description": "关闭搜索面板"
+    },
+    "focus_left": {
+      "label": "焦点左移",
+      "description": "将焦点移到左侧终端"
+    },
+    "focus_right": {
+      "label": "焦点右移",
+      "description": "将焦点移到右侧终端"
+    },
+    "focus_up": {
+      "label": "焦点上移",
+      "description": "将焦点移到上方终端"
+    },
+    "focus_down": {
+      "label": "焦点下移",
+      "description": "将焦点移到下方终端"
+    },
+    "focus_next_terminal": {
+      "label": "聚焦下一个终端",
+      "description": "将焦点移到下一个终端"
+    },
+    "focus_prev_terminal": {
+      "label": "聚焦上一个终端",
+      "description": "将焦点移到上一个终端"
+    },
+    "toggle_pane_switcher": {
+      "label": "显示窗格",
+      "description": "在窗格上显示编号浮层，按数字键聚焦"
+    },
+    "new_project": {
+      "label": "新建项目",
+      "description": "创建新项目"
+    },
+    "new_session": {
+      "label": "新建会话",
+      "description": "创建新的 SSH 远程会话"
+    },
+    "show_project_manage_dialog": {
+      "label": "项目管理器",
+      "description": "打开项目管理器以管理项目"
+    },
+    "show_import_session_dialog": {
+      "label": "导入会话",
+      "description": "从 SSH Config/Xshell/FinalShell 导入"
+    },
+    "show_keybindings": {
+      "label": "显示快捷键",
+      "description": "显示快捷键帮助"
+    },
+    "show_profile_manager": {
+      "label": "配置文件管理器",
+      "description": "打开配置文件管理器"
+    },
+    "show_theme_selector": {
+      "label": "主题选择器",
+      "description": "打开主题选择器以更改外观"
+    },
+    "show_command_palette": {
+      "label": "命令面板",
+      "description": "打开快速命令面板"
+    },
+    "show_settings": {
+      "label": "设置",
+      "description": "打开设置面板"
+    },
+    "show_ai_settings": {
+      "label": "AI 设置",
+      "description": "打开设置面板并跳转到 AI 配置"
+    },
+    "show_update_dialog": {
+      "label": "更新",
+      "description": "打开更新对话框"
+    },
+    "show_help": {
+      "label": "帮助",
+      "description": "打开帮助对话框"
+    },
+    "show_about_dialog": {
+      "label": "关于 Velowork",
+      "description": "打开关于对话框"
+    },
+    "open_settings_file": {
+      "label": "打开设置文件",
+      "description": "在编辑器中打开设置文件"
+    },
+    "show_log_console": {
+      "label": "日志控制台",
+      "description": "实时日志查看器"
+    },
+    "check_for_updates": {
+      "label": "检查更新",
+      "description": "检查 Velowork 的新版本"
+    },
+    "install_update": {
+      "label": "安装更新",
+      "description": "安装已下载的更新"
+    },
+    "equalize_layout": {
+      "label": "均分终端分屏",
+      "description": "均等重置所有分屏窗格大小"
+    },
+    "new_window": {
+      "label": "新建窗口",
+      "description": "打开新的工作区窗口"
+    },
+    "rename_active_node": {
+      "label": "重命名节点",
+      "description": "重命名当前选中的节点"
+    },
+    "cycle_panel_next": {
+      "label": "切换到下一面板",
+      "description": "切换到下一个侧边栏/底栏面板"
+    },
+    "cycle_panel_prev": {
+      "label": "切换到上一面板",
+      "description": "切换到上一个侧边栏/底栏面板"
+    },
+    "focus_left_dock": {
+      "label": "聚焦左侧栏",
+      "description": "将焦点移到左侧栏"
+    },
+    "focus_center_dock": {
+      "label": "聚焦中间区域",
+      "description": "将焦点移到中间工作区"
+    },
+    "focus_right_dock": {
+      "label": "聚焦右侧栏",
+      "description": "将焦点移到右侧栏"
+    },
+    "focus_bottom_dock": {
+      "label": "聚焦底栏",
+      "description": "将焦点移到底栏面板"
     }
   },
   "toast": {

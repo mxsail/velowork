@@ -491,4 +491,44 @@ mod tests {
         assert_eq!(store.translate(Locale::Zh, "cancel"), "取消");
         assert_eq!(store.translate(Locale::En, "cancel"), "Cancel");
     }
+
+    #[test]
+    fn test_commands_structure_and_categories() {
+        let store = TranslationStore::new();
+        let zh_map = load_translations(ZH_JSON);
+        let en_map = load_translations(EN_JSON);
+
+        // Verify categories exist
+        let categories = [
+            "global", "terminal", "fullscreen", "search", "navigation",
+            "project", "session", "services", "layout", "window",
+            "view", "panel", "git", "other",
+        ];
+        for cat in categories {
+            let key = format!("commands.category.{}", cat);
+            assert!(zh_map.contains_key(&key), "Missing zh category: {}", key);
+            assert!(en_map.contains_key(&key), "Missing en category: {}", key);
+        }
+
+        // Verify command items have label and description
+        assert_eq!(store.translate(Locale::Zh, "commands.quit.label"), "退出");
+        assert_eq!(store.translate(Locale::En, "commands.quit.label"), "Quit");
+        assert_eq!(store.translate(Locale::Zh, "commands.quit.description"), "退出 Velowork");
+        assert_eq!(store.translate(Locale::En, "commands.quit.description"), "Quit Velowork");
+
+        assert_eq!(store.translate(Locale::Zh, "commands.split_vertical.label"), "垂直分屏");
+        assert_eq!(store.translate(Locale::En, "commands.split_vertical.label"), "Split Vertical");
+
+        assert_eq!(store.translate(Locale::Zh, "commands.category.global"), "全局");
+        assert_eq!(store.translate(Locale::En, "commands.category.global"), "Global");
+
+        // Verify every commands.<id>.label has commands.<id>.description
+        for k in zh_map.keys() {
+            if let Some(id) = k.strip_prefix("commands.").and_then(|s| s.strip_suffix(".label")) {
+                let desc_key = format!("commands.{}.description", id);
+                assert!(zh_map.contains_key(&desc_key), "Missing zh desc for: {}", id);
+                assert!(en_map.contains_key(&desc_key), "Missing en desc for: {}", id);
+            }
+        }
+    }
 }

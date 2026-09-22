@@ -1,5 +1,5 @@
 use crate::keybindings::{
-    get_action_descriptions, shortcut_for_action, translate_action_desc,
+    get_action_descriptions, shortcut_for_action, translate_action_desc_for_id,
     translate_action_name, translate_category, Cancel,
 };
 use crate::theme::{surface_bg_t, theme};
@@ -31,6 +31,8 @@ impl Global for CommandPaletteMemory {}
 /// Command entry for the palette
 #[derive(Clone)]
 struct CommandEntry {
+    /// Semantic action ID (e.g. "quit", "toggle_left_dock")
+    id: &'static str,
     /// Stable action identifier (HashMap key from `get_action_descriptions`)
     action_key: &'static str,
     /// Display name
@@ -75,6 +77,7 @@ impl CommandPalette {
                 let keybinding = shortcut_for_action(action);
 
                 CommandEntry {
+                    id: desc.id,
                     action_key: action,
                     name: desc.name.to_string(),
                     description: desc.description.to_string(),
@@ -219,7 +222,7 @@ impl CommandPalette {
             ];
             if !cmd.description.is_empty() {
                 haystack.push(cmd.description.clone());
-                haystack.push(translate_action_desc(&cmd.description, cx));
+                haystack.push(translate_action_desc_for_id(cmd.id, &cmd.description, cx));
             }
             if let Some(ref kb) = cmd.keybinding {
                 haystack.push(kb.clone());
@@ -245,7 +248,7 @@ impl CommandPalette {
         let description = if command.description.is_empty() {
             String::new()
         } else {
-            translate_action_desc(&command.description, cx)
+            translate_action_desc_for_id(command.id, &command.description, cx)
         };
         let keybinding = command.keybinding.clone();
 

@@ -355,18 +355,71 @@ pub fn is_entry_matching_platform(
     true
 }
 
+/// Helper to convert CamelCase or identifier to snake_case id (e.g. "ToggleLeftDock" -> "toggle_left_dock")
+pub fn action_to_id(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    let mut chars = name.chars().peekable();
+    let mut prev_is_upper = false;
+    let mut prev_is_underscore = false;
+
+    while let Some(c) = chars.next() {
+        if c == '/' || c == '-' || c == ' ' {
+            if !prev_is_underscore && !out.is_empty() {
+                out.push('_');
+                prev_is_underscore = true;
+            }
+            prev_is_upper = false;
+            continue;
+        }
+        if c.is_uppercase() {
+            let next_is_lower = chars.peek().map_or(false, |n| n.is_lowercase());
+            if !out.is_empty() && !prev_is_underscore && (!prev_is_upper || next_is_lower) {
+                out.push('_');
+            }
+            out.extend(c.to_lowercase());
+            prev_is_upper = true;
+            prev_is_underscore = false;
+        } else {
+            out.push(c);
+            prev_is_upper = false;
+            prev_is_underscore = c == '_';
+        }
+    }
+    out
+}
+
 /// Safely translate action name without leaking raw i18n keys
 pub fn translate_action_name(raw_name: &str, action_key: &str, cx: &App) -> String {
-    let key1 = format!("commands.{}", raw_name);
+    // 1. Try commands.<id>.label where id is derived from action_key or raw_name
+    let id_from_key = action_to_id(action_key);
+    let key1 = format!("commands.{}.label", id_from_key);
     let trans1 = i18n!(cx, key1.as_str());
     if trans1 != key1 && !trans1.is_empty() {
         return trans1;
     }
-    let key2 = format!("commands.{}", action_key);
-    let trans2 = i18n!(cx, key2.as_str());
-    if trans2 != key2 && !trans2.is_empty() {
-        return trans2;
+
+    let id_from_name = action_to_id(raw_name);
+    if id_from_name != id_from_key {
+        let key2 = format!("commands.{}.label", id_from_name);
+        let trans2 = i18n!(cx, key2.as_str());
+        if trans2 != key2 && !trans2.is_empty() {
+            return trans2;
+        }
     }
+
+    // 2. Backward compatibility fallback: commands.<raw_name> or commands.<action_key>
+    let legacy_key1 = format!("commands.{}", raw_name);
+    let trans_legacy1 = i18n!(cx, legacy_key1.as_str());
+    if trans_legacy1 != legacy_key1 && !trans_legacy1.is_empty() {
+        return trans_legacy1;
+    }
+
+    let legacy_key2 = format!("commands.{}", action_key);
+    let trans_legacy2 = i18n!(cx, legacy_key2.as_str());
+    if trans_legacy2 != legacy_key2 && !trans_legacy2.is_empty() {
+        return trans_legacy2;
+    }
+
     raw_name.to_string()
 }
 
@@ -375,34 +428,61 @@ pub fn translate_action_desc(raw_desc: &str, cx: &App) -> String {
     if raw_desc.is_empty() {
         return String::new();
     }
-    let key = format!("commands.{}", raw_desc);
+    // If passed a snake_case id
+    let key = format!("commands.{}.description", raw_desc);
     let trans = i18n!(cx, key.as_str());
     if trans != key && !trans.is_empty() {
-        trans
+        return trans;
+    }
+
+    // Backward compatibility fallback: commands.<raw_desc>
+    let legacy_key = format!("commands.{}", raw_desc);
+    let trans_legacy = i18n!(cx, legacy_key.as_str());
+    if trans_legacy != legacy_key && !trans_legacy.is_empty() {
+        trans_legacy
     } else {
         raw_desc.to_string()
     }
 }
 
+/// Safely translate action description when command id is known
+pub fn translate_action_desc_for_id(action_id: &str, raw_desc: &str, cx: &App) -> String {
+    if !action_id.is_empty() {
+        let key = format!("commands.{}.description", action_id);
+        let trans = i18n!(cx, key.as_str());
+        if trans != key && !trans.is_empty() {
+            return trans;
+        }
+    }
+    translate_action_desc(raw_desc, cx)
+}
+
 /// Helper to get i18n display name for categories.
 pub fn translate_category(category: &str, cx: &App) -> String {
-    match category {
-        "All" => i18n!(cx, "keybindings.tab_all"),
-        "Global" => i18n!(cx, "keybindings.tab_global"),
-        "Terminal" => i18n!(cx, "keybindings.tab_terminal"),
-        "Navigation" => i18n!(cx, "keybindings.tab_navigation"),
-        "View" => i18n!(cx, "keybindings.tab_view"),
-        "Search" => i18n!(cx, "keybindings.tab_search"),
-        "Fullscreen" => i18n!(cx, "keybindings.tab_fullscreen"),
-        "Project" => i18n!(cx, "keybindings.tab_project"),
-        "Other" => i18n!(cx, "keybindings.tab_other"),
-        other => {
-            let cat_key = format!("commands.cat.{}", other);
+    let cat_id = category.to_lowercase();
+    let cat_key = format!("commands.category.{}", cat_id);
+    let trans = i18n!(cx, cat_key.as_str());
+    if trans != cat_key && !trans.is_empty() {
+        return trans;
+    }
+
+    match cat_id.as_str() {
+        "all" => i18n!(cx, "keybindings.tab_all"),
+        "global" => i18n!(cx, "keybindings.tab_global"),
+        "terminal" => i18n!(cx, "keybindings.tab_terminal"),
+        "navigation" => i18n!(cx, "keybindings.tab_navigation"),
+        "view" => i18n!(cx, "keybindings.tab_view"),
+        "search" => i18n!(cx, "keybindings.tab_search"),
+        "fullscreen" => i18n!(cx, "keybindings.tab_fullscreen"),
+        "project" => i18n!(cx, "keybindings.tab_project"),
+        "other" => i18n!(cx, "keybindings.tab_other"),
+        _ => {
+            let cat_key = format!("commands.cat.{}", category);
             let trans = i18n!(cx, cat_key.as_str());
             if trans != cat_key && !trans.is_empty() {
                 trans
             } else {
-                other.to_string()
+                category.to_string()
             }
         }
     }

@@ -122,6 +122,8 @@ pub enum ConflictKind {
 /// Human-readable description of an action
 #[derive(Clone)]
 pub struct ActionDescription {
+    /// 稳定命令 ID，用于 i18n 解析（如 "quit", "toggle_left_dock"）与配置映射。
+    pub id: &'static str,
     pub name: &'static str,
     pub description: &'static str,
     pub category: &'static str,
