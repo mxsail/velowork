@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.9] - 2026-09-22
+
+### Improved / 优化
+- **会话弹窗低开销按需渲染与长按输入流畅度极致提升**：
+  - **活跃分组按需渲染机制**：将会话弹窗由全量 8 组卡片冗余挂载改为仅渲染当前激活 Section 卡片，从根源上将单帧渲染 DOM 节点量降低 80% 以上，彻底杜绝打字高频更新时的级联排版开销。
+  - **串口参数轻量化重构与分段控件替换**：将串口核心端口与波特率精简收拢，高级串口参数（数据位/停止位/校验位/流控）迁移至 Advanced 高级设置，并全面替换为低开销 Segmented Control 分段控制按钮，大幅提升长按输入性能。
+  - **串口设备选择器虚拟滚动与按需探测**：针对可用串口设备列表接入轻量虚拟滚动与过滤，大幅缩减设备扫描与列表布局消耗。  
+  *(Session dialog low-overhead active-section rendering, serial segmented control adoption, and virtualized port picker).*
+- **SSH 核心建联体验重构（主机与端口合并入基础信息）**：
+  - 将 SSH 核心两要素（主机地址 `Host` 与端口号 `Port`）由「连接」分类提升合并入「基础信息 (Basic)」，全协议（SSH / Telnet / Serial / Local）统一保持 `Name` -> `Folder` -> `Host + Port` -> `Startup Command` 规范流，新建 SSH 会话无需切换 Tab 即可一气呵成完成核心建联配置。
+  - 采用自适应比例布局（Host `flex_1` 宽裕展示域名与 IPv6，Port 固定紧凑宽 `110px`），Basic 卡片高度保持在 ~350px 完美适配 560px 视口高度，首屏零垂直滚动条；高级网络连接参数（超时、SFTP、监控、代理与跳板机）纯粹留存在「连接」分类。
+  - 全链路校验定位、未保存脏数据标记 (Dirty) 与 Tab 键焦点环严格顺位对齐。  
+  *(Consolidate SSH Host and Port into Basic section with proportional layout, zero vertical scrollbar on first screen, and aligned validation/tab ring).*
+
+### Fixed / 修复
+- **会话备注（Notes）多行文本框排版与换行修复**：
+  - 为备注文本域启用多行模式 (`.multiline()`)，彻底解决多行外观下文字垂直居中排版及无法换行的缺陷，实现自然由顶部向下流式排布。  
+  *(Enable multiline mode and top-aligned text flow for session dialog notes textarea).*
+
 ## [0.1.0-beta.8] - 2026-09-20
 
 ### Improved / 优化
