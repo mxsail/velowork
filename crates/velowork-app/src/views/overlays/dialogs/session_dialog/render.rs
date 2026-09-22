@@ -2789,7 +2789,12 @@ fn render_notes(
             form_item("notes".to_string())
                 .label(i18n!(cx, "ssh.field.notes"))
                 .focus(&fh_notes)
-                .child(Input::new(&inputs.notes).fill_height().h(px(80.0)))
+                .child(
+                    div()
+                        .w_full()
+                        .h(px(120.0))
+                        .child(Input::new(&inputs.notes).fill_height().h(px(120.0))),
+                )
                 .render(t, cx),
         );
     content.into_any_element()

@@ -235,7 +235,9 @@ impl SessionDialogInputs {
         });
         let tags = cx.new(|cx| InputState::new(cx).placeholder(i18n!(cx, "ssh.notes.tags_placeholder")));
         let notes = cx.new(|cx| {
-            InputState::new(cx).placeholder(i18n!(cx, "ssh.notes.notes_placeholder"))
+            InputState::new(cx)
+                .multiline()
+                .placeholder(i18n!(cx, "ssh.notes.notes_placeholder"))
         });
         let nav_search = cx.new(|cx| {
             InputState::new(cx).placeholder(i18n!(cx, "session_dialog.search_placeholder"))
