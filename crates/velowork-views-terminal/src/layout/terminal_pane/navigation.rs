@@ -229,6 +229,186 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         cx.notify();
     }
 
+    pub(super) fn update_ghost_text(&mut self, cx: &mut Context<Self>) {
+        let tvs = crate::terminal_view_settings(cx);
+        if !tvs.terminal_ai_ghost_text_enabled || !tvs.ai_enabled {
+            self.ghost_text = None;
+            return;
+        }
+
+        let Some(ref terminal) = self.terminal else {
+            self.ghost_text = None;
+            return;
+        };
+
+        // 1. IME composition guard: if user is composing IME text, never show ghost text
+        if terminal.marked_text().is_some() {
+            self.ghost_text = None;
+            return;
+        }
+
+        // 2. Alt-screen guard: inside vim/nano/htop/less, ghost text must be completely silent
+        if terminal.is_alt_screen() {
+            self.ghost_text = None;
+            return;
+        }
+
+        // 3. Child process running guard
+        if terminal.has_running_child() {
+            self.ghost_text = None;
+            return;
+        }
+
+        // 4. Mouse mode guard
+        if terminal.is_mouse_mode() {
+            self.ghost_text = None;
+            return;
+        }
+
+        // 5. If history popup dropdown is open, dropdown takes visual priority
+        if self.history_popup_open {
+            self.ghost_text = None;
+            return;
+        }
+
+        let input_raw = self.input_line_buffer.clone();
+        let trimmed = input_raw.trim();
+        if trimmed.is_empty() {
+            self.ghost_text = None;
+            return;
+        }
+
+        let is_natural_language = trimmed.starts_with('#') || trimmed.starts_with("//") || trimmed.starts_with("ai:");
+
+        // Epoch increment to invalidate pending async requests
+        self.ghost_epoch = self.ghost_epoch.wrapping_add(1);
+        let current_epoch = self.ghost_epoch;
+
+        // Fast Path (0ms): If not natural language, check local command history first
+        if !is_natural_language && trimmed.len() >= 2 {
+            let recent_cmds: Vec<String> = super::history_cache::HistoryCache::match_suggestions(
+                &self.project_id,
+                trimmed,
+                10,
+            )
+            .into_iter()
+            .map(|e| e.command)
+            .collect();
+
+            if let Some(matched) = velowork_ai::completion::fast_local_history_match(trimmed, &recent_cmds) {
+                self.ghost_text = Some(super::ghost_text::GhostTextState {
+                    prompt: input_raw,
+                    suggestion: matched,
+                    is_natural_language: false,
+                });
+                cx.notify();
+                return;
+            }
+        }
+
+        // Slow Path: Natural language trigger or smart completion via LLM
+        let should_trigger_ai = if is_natural_language {
+            let prompt_content = trimmed
+                .trim_start_matches('#')
+                .trim_start_matches("//")
+                .trim_start_matches("ai:")
+                .trim();
+            prompt_content.len() >= 2
+        } else {
+            trimmed.len() >= 3
+        };
+
+        if !should_trigger_ai {
+            self.ghost_text = None;
+            return;
+        }
+
+        // Resolve active LLM config
+        let s = velowork_app_core::settings::settings(cx);
+        let Some(active_model) = s
+            .ai_models
+            .iter()
+            .find(|m| s.ai_default_model_id.as_ref() == Some(&m.id))
+            .or_else(|| s.ai_models.iter().find(|m| m.enabled))
+        else {
+            return;
+        };
+
+        if active_model.base_url.trim().is_empty() || active_model.model_id.trim().is_empty() {
+            return;
+        }
+
+        let mut api_key = active_model.api_key.clone();
+        if api_key.is_empty() {
+            if let Some(k) = velowork_workspace::secure_storage::load_ai_api_key(&active_model.id) {
+                api_key = k;
+            }
+        }
+
+        let llm_config = velowork_ai::LlmConfig {
+            base_url: active_model.base_url.clone(),
+            api_key,
+            model_id: active_model.model_id.clone(),
+        };
+
+        // Capture snapshot
+        let terminal_id = self.terminal_id.clone().unwrap_or_default();
+        let snapshot = velowork_ai::capture_terminal_snapshot(
+            &terminal_id,
+            Some(&self.project_id),
+            &self.workspace,
+            &self.terminals,
+            cx,
+        );
+
+        let target_input = input_raw.clone();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            // 250ms debounce
+            cx.background_executor().timer(std::time::Duration::from_millis(250)).await;
+
+            let is_valid = cx.update(|app| {
+                if let Some(pane) = this.upgrade() {
+                    let p = pane.read(app);
+                    p.ghost_epoch == current_epoch && p.input_line_buffer == target_input
+                } else {
+                    false
+                }
+            });
+
+            if !is_valid {
+                return;
+            }
+
+            let req_input = target_input.clone();
+            let result = cx.background_executor().spawn(async move {
+                velowork_ai::completion::generate_ghost_command(
+                    &req_input,
+                    is_natural_language,
+                    &snapshot,
+                    &llm_config,
+                )
+            }).await;
+
+            if let Ok(suggestion) = result {
+                let _ = cx.update(|app| {
+                    if let Some(pane) = this.upgrade() {
+                        pane.update(app, |this, cx| {
+                            if this.ghost_epoch == current_epoch && this.input_line_buffer == target_input {
+                                this.ghost_text = Some(super::ghost_text::GhostTextState {
+                                    prompt: target_input,
+                                    suggestion,
+                                    is_natural_language,
+                                });
+                                cx.notify();
+                            }
+                        });
+                    }
+                });
+            }
+        }).detach();
+    }
+
     pub(super) fn record_terminal_history(&mut self, cmd: &str, cx: &App) {
         let s = crate::terminal_view_settings(cx);
         if !velowork_core::security::SecretRedactor::should_record_to_history(
@@ -436,6 +616,8 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                 terminal.send_bytes(selected_cmd.as_bytes());
             }
             self.input_line_buffer = selected_cmd;
+            self.ghost_text = None;
+            self.ghost_epoch = self.ghost_epoch.wrapping_add(1);
             self.history_popup_open = false;
             self.history_popup_items.clear();
             self.history_popup_selected = None;
@@ -551,6 +733,32 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         if let Some(terminal) = self.terminal.clone() {
             terminal.claim_resize_local();
 
+            // Ghost text keyboard interaction: Tab accepts, Escape dismisses
+            if self.ghost_text.is_some()
+                && !event.keystroke.modifiers.control
+                && !event.keystroke.modifiers.alt
+                && !event.keystroke.modifiers.platform
+            {
+                if event.keystroke.key == "escape" {
+                    self.ghost_text = None;
+                    cx.notify();
+                    return;
+                }
+
+                if event.keystroke.key == "tab" {
+                    if let Some(ghost) = self.ghost_text.take() {
+                        // Guard: if IME marked text is active, do not intercept Tab
+                        if terminal.marked_text().is_none() {
+                            terminal.send_bytes(b"\x15");
+                            terminal.send_bytes(ghost.suggestion.as_bytes());
+                            self.input_line_buffer = ghost.suggestion;
+                            cx.notify();
+                            return;
+                        }
+                    }
+                }
+            }
+
             // Backspace with selection: delete selected text (only in plain shell)
             if event.keystroke.key == "backspace"
                 && !event.keystroke.modifiers.control
@@ -585,6 +793,9 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
             // 维护输入缓冲与触发历史命令记录
             if event.keystroke.key == "enter" {
+                self.ghost_text = None;
+                self.ghost_epoch = self.ghost_epoch.wrapping_add(1);
+
                 let is_auth = self.is_cursor_at_auth_prompt();
                 if is_auth {
                     self.input_line_buffer.clear();
@@ -628,11 +839,14 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             } else if event.keystroke.key == "backspace" {
                 self.input_line_buffer.pop();
                 self.update_history_popup(cx);
+                self.update_ghost_text(cx);
             } else if (event.keystroke.key == "c" || event.keystroke.key == "u")
                 && event.keystroke.modifiers.control
             {
                 self.input_line_buffer.clear();
                 self.command_accumulator.clear();
+                self.ghost_text = None;
+                self.ghost_epoch = self.ghost_epoch.wrapping_add(1);
                 self.history_popup_open = false;
                 self.history_popup_items.clear();
                 self.history_popup_selected = None;
@@ -644,12 +858,15 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                     if !ch.chars().any(|c| c.is_control()) {
                         self.input_line_buffer.push_str(ch);
                         self.update_history_popup(cx);
+                        self.update_ghost_text(cx);
                     }
                 } else if event.keystroke.key.chars().count() == 1 {
-                    let c = event.keystroke.key.chars().next().unwrap();
-                    if !c.is_control() {
-                        self.input_line_buffer.push(c);
-                        self.update_history_popup(cx);
+                    if let Some(c) = event.keystroke.key.chars().next() {
+                        if !c.is_control() {
+                            self.input_line_buffer.push(c);
+                            self.update_history_popup(cx);
+                            self.update_ghost_text(cx);
+                        }
                     }
                 }
             }

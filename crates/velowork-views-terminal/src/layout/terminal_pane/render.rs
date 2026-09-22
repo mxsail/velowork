@@ -417,6 +417,26 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                             cx,
                         ))
                     })
+                    .when(!self.history_popup_open && self.ghost_text.is_some(), |el| {
+                        let cursor_pos = self.content.read(cx).relative_cursor_position(cx);
+                        if let (Some(ghost), Some(pos)) = (self.ghost_text.as_ref(), cursor_pos) {
+                            let tvs = crate::terminal_view_settings(cx);
+                            let (_, cell_h) = self.terminal.as_ref().map(|t| t.cell_dimensions()).unwrap_or((0.0, 0.0));
+                            let fallback_h = (tvs.font_size * tvs.line_height).max(12.0);
+                            let actual_cell_h = px(if cell_h > 0.0 { cell_h } else { fallback_h });
+                            el.child(super::ghost_text::render_ghost_text_overlay(
+                                ghost,
+                                pos,
+                                actual_cell_h,
+                                px(tvs.font_size),
+                                &tvs.font_family,
+                                &t,
+                                cx,
+                            ))
+                        } else {
+                            el
+                        }
+                    })
                     .when(is_conn_lost, |el| {
                         let is_reconnecting = self.is_reconnecting;
                         let conn_lost_text = if is_reconnecting {

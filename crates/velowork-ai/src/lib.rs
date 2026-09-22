@@ -13,12 +13,15 @@
 //! 仅 `context` / `tool` 需要读取运行时实体（依赖 gpui / workspace / terminal）。
 
 pub mod agent;
+pub mod completion;
 pub mod context;
 pub mod prompt;
 pub mod provider;
 pub mod runtime;
 pub mod skill;
 pub mod tool;
+
+pub use completion::{clean_ghost_command, fast_local_history_match, generate_ghost_command};
 
 pub use context::{
     capture_live_context, compress_chat_history, estimate_messages_tokens, estimate_tokens,

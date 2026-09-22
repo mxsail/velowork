@@ -2461,5 +2461,9 @@
     "clear_tooltip": "Clear chat history",
     "token_usage_hint": "Estimated token usage for the current session. Context is automatically compressed when approaching the limit.",
     "context_used": "context used"
+  },
+  "ghost_text": {
+    "tab_accept": "Tab to accept",
+    "esc_dismiss": "Esc to dismiss"
   }
 }

@@ -2461,5 +2461,9 @@
     "clear_tooltip": "清空聊天记录",
     "token_usage_hint": "当前会话估算 Token 使用量。接近限制时自动压缩历史上下文。",
     "context_used": "上下文已使用"
+  },
+  "ghost_text": {
+    "tab_accept": "Tab 接受",
+    "esc_dismiss": "Esc 取消"
   }
 }

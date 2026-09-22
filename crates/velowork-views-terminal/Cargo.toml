@@ -13,6 +13,7 @@ velowork-workspace = { path = "../velowork-workspace" }
 velowork-app-core = { path = "../velowork-app-core" }
 velowork-ui = { path = "../velowork-ui" }
 velowork-i18n = { path = "../velowork-i18n" }
+velowork-ai = { path = "../velowork-ai" }
 
 gpui = { git = "https://github.com/zed-industries/zed", package = "gpui" }
 

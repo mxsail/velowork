@@ -13,6 +13,8 @@ pub enum PromptScene {
     LogExplain,
     ConfigGen,
     Troubleshoot,
+    GhostTextCompletion,
+    CommandCompletion,
     General,
 }
 
@@ -97,6 +99,16 @@ fn scene_instruction(scene: PromptScene) -> &'static str {
         PromptScene::Troubleshoot => {
             "Goal: walk through troubleshooting steps for the reported issue, using available \
              tools and context. Proceed step by step."
+        }
+        PromptScene::GhostTextCompletion => {
+            "Goal: Translate the user's natural language request into a single, precise, executable shell command. \
+             CRITICAL CONSTRAINTS: Output ONLY the single raw command line. Do NOT output markdown code blocks (no ```). \
+             Do NOT output explanations, greetings, quotes, or multiple lines. Exactly one executable shell command."
+        }
+        PromptScene::CommandCompletion => {
+            "Goal: Complete the user's unfinished shell command prefix. \
+             CRITICAL CONSTRAINTS: Output ONLY the completed command line. Do NOT output markdown code blocks (no ```). \
+             Do NOT output explanations, greetings, quotes, or multiple lines. Exactly one executable shell command."
         }
         PromptScene::General => {
             "Goal: help the user with their terminal / session / configuration question, using \

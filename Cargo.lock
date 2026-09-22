@@ -9186,6 +9186,7 @@ dependencies = [
  "ssh-key",
  "tokio",
  "uuid",
+ "velowork-ai",
  "velowork-app-core",
  "velowork-core",
  "velowork-extensions",
