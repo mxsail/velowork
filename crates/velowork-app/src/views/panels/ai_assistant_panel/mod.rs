@@ -2109,6 +2109,7 @@ impl AiAssistantPanel {
 
             let _ = this.update(cx, |this, cx| {
                 if let Ok(data_url) = write_res {
+                    cx.remove_asset::<gpui::ImgResourceLoader>(&gpui::Resource::Path(path_clone.clone().into()));
                     if let Some(att) = this.attachments.iter_mut().find(|a| a.path == path_clone) {
                         att.image_data_url = Some(data_url);
                         att.is_ready = true;
@@ -3446,10 +3447,9 @@ impl AiAssistantPanel {
             .into_any_element()
     }
 
-    /// 输入框上方、附件预览行：以缩略图（图片）或文件图标（文本）展示已添加附件。
-    /// 点击卡片主体打开内置弹窗预览；明确点击右上角删除按钮才移除附件。
+    /// 输入框上方、附件标签行：以紧凑的 Tab 标签/Chip 样式展示已添加附件。
+    /// 点击主体打开内置弹窗预览；明确点击右侧删除按钮才移除附件。
     fn render_attachment_preview(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = theme(cx);
         let p = SemanticPalette::from_context(cx);
         let this = cx.entity();
         let attachments = self.attachments.clone();
@@ -3459,103 +3459,113 @@ impl AiAssistantPanel {
             .flex_wrap()
             .px(SPACE_XS)
             .pb(SPACE_XS)
-            .gap(ui_space_sm(cx))
+            .gap(SPACE_XS)
             .children(attachments.into_iter().enumerate().map(|(i, att)| {
                 let this = this.clone();
                 let att_path = att.path.clone();
                 let is_image = att.is_image;
+                let is_ready = att.is_ready;
                 let name = att.name.clone();
                 let remove_tip = i18n!(cx, "ai.attachment_remove");
                 let preview_tip = format!("{}: {}", i18n!(cx, "ai.attachment_preview"), name);
                 let att_for_preview = att.clone();
+                let rm_group_id = SharedString::from(format!("ai-att-rm-{}", i));
 
-                div()
-                    .id(ElementId::Name(format!("ai-att-{}", i).into()))
-                    .relative()
-                    .w(px(56.0))
-                    .h(px(56.0))
+                h_flex()
+                    .id(ElementId::Name(format!("ai-att-tab-{}", i).into()))
+                    .items_center()
+                    .h(px(24.0))
+                    .px(px(6.0))
+                    .gap(px(5.0))
                     .rounded(RADIUS_STD)
+                    .bg(p.surface_card)
                     .border_1()
-                    .border_color(rgb(t.border))
-                    .bg(rgb(t.bg_hover))
+                    .border_color(p.border_subtle)
                     .cursor_pointer()
                     .stateful_behavior(HoverBehavior {
+                        hover_bg: p.surface_hover,
                         hover_border: Some(p.border_active),
                         ..Default::default()
                     })
-                    .overflow_hidden()
+                    // 左侧微型标识（16x16 / 12x12）
                     .child(if is_image {
-                        div()
-                            .relative()
-                            .w_full()
-                            .h_full()
-                            .child(
-                                img(att_path.clone())
-                                    .w_full()
-                                    .h_full()
-                                    .object_fit(ObjectFit::Cover),
-                            )
-                            .children((!att.is_ready).then(|| {
-                                div()
-                                    .absolute()
-                                    .inset_0()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .bg(rgb(t.bg_primary).opacity(0.6))
-                                    .child(
-                                        ProgressRing::new(0.5)
-                                            .size(px(16.0))
-                                            .stroke_width(px(2.0)),
-                                    )
-                            }))
-                            .into_any_element()
+                        if is_ready {
+                            div()
+                                .w(px(16.0))
+                                .h(px(16.0))
+                                .rounded(px(2.0))
+                                .overflow_hidden()
+                                .child(
+                                    img(att_path)
+                                        .w_full()
+                                        .h_full()
+                                        .object_fit(ObjectFit::Cover),
+                                )
+                                .into_any_element()
+                        } else {
+                            div()
+                                .w(px(16.0))
+                                .h(px(16.0))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(
+                                    ProgressRing::new(0.5)
+                                        .size(px(12.0))
+                                        .stroke_width(px(1.5)),
+                                )
+                                .into_any_element()
+                        }
                     } else {
-                        div()
-                            .w_full()
-                            .h_full()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(rgb(t.text_muted))
-                            .child(AppIcon::File.size(px(22.0)).text_color(rgb(t.text_muted)))
+                        AppIcon::File
+                            .size(px(12.0))
+                            .text_color(p.text_muted)
                             .into_any_element()
                     })
-                    .tooltip(move |_, cx| {
-                        let __tip = preview_tip.clone();
-                        cx.new(|_| Tooltip::new(__tip)).into()
-                    })
+                    // 中间文件名
+                    .child(
+                        div()
+                            .text_size(ui_text_xs(cx))
+                            .text_color(p.text_secondary)
+                            .max_w(px(160.0))
+                            .overflow_hidden()
+                            .text_ellipsis()
+                            .whitespace_nowrap()
+                            .child(name),
+                    )
+                    // 点击整个 Tab 预览
                     .on_click({
                         let _this = this.clone();
                         cx.listener(move |this, _, _window, cx| {
                             this.open_attachment_preview(att_for_preview.clone(), cx);
                         })
                     })
-                    // 右上角移除按钮（覆盖在缩略图之上，带独立阻断与告警反馈）。
+                    .tooltip(move |_, cx| {
+                        let __tip = preview_tip.clone();
+                        cx.new(|_| Tooltip::new(__tip)).into()
+                    })
+                    // 右侧关闭按钮（修复颜色看不见问题）
                     .child(
                         div()
-                            .id(ElementId::Name(format!("ai-att-remove-{}", i).into()))
-                            .absolute()
-                            .top(px(2.0))
-                            .right(px(2.0))
-                            .w(px(20.0))
-                            .h(px(20.0))
+                            .id(ElementId::Name(rm_group_id.clone()))
+                            .group(rm_group_id.clone())
+                            .w(px(16.0))
+                            .h(px(16.0))
                             .flex()
                             .items_center()
                             .justify_center()
                             .rounded(RADIUS_SM)
-                            .bg(p.surface_card)
-                            .border_1()
-                            .border_color(p.border_subtle)
                             .cursor_pointer()
-                            .text_color(p.text_muted)
                             .stateful_behavior(HoverBehavior {
-                                hover_bg: p.status_error.opacity(0.15),
-                                hover_fg: Some(p.status_error),
-                                hover_border: Some(p.status_error.opacity(0.5)),
+                                hover_bg: p.status_error.opacity(0.18),
                                 ..Default::default()
                             })
-                            .child(AppIcon::Close.size(ICON_SM))
+                            .child(
+                                AppIcon::Close
+                                    .size(px(10.0))
+                                    .text_color(p.text_muted)
+                                    .group_hover(rm_group_id, |s| s.text_color(p.status_error)),
+                            )
                             .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                 cx.stop_propagation();
                             })

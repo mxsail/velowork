@@ -1,14 +1,17 @@
+use std::io::Read;
+use std::sync::Arc;
+use std::time::Duration;
+
 use crate::keybindings::Cancel;
 use crate::theme::theme;
 use crate::views::components::{modal_content, modal_header};
 use crate::views::panels::ai_assistant_panel::ChatAttachment;
-use gpui::prelude::FluentBuilder;
 use gpui::*;
 use velowork_i18n::i18n;
 use velowork_ui::button::Button;
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::icon::AppIcon;
-use velowork_ui::scrollable::ScrollableElement;
+use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::tokens::*;
 use velowork_ui::{h_flex, v_flex, ProgressRing};
 
@@ -19,19 +22,91 @@ pub enum AttachmentPreviewDialogEvent {
 pub struct AttachmentPreviewDialog {
     attachment: ChatAttachment,
     focus_handle: FocusHandle,
+    scroll_handle: UniformListScrollHandle,
+    lines: Arc<Vec<SharedString>>,
+    gutter_width: Pixels,
+    is_truncated: bool,
+    is_binary: bool,
     copied: bool,
     _copy_timer: Option<Task<()>>,
+    _watch_task: Option<Task<()>>,
 }
 
 impl EventEmitter<AttachmentPreviewDialogEvent> for AttachmentPreviewDialog {}
 
 impl AttachmentPreviewDialog {
-    pub fn new(attachment: ChatAttachment, cx: &mut Context<Self>) -> Self {
+    pub fn new(mut attachment: ChatAttachment, cx: &mut Context<Self>) -> Self {
+        const MAX_READ_BYTES: u64 = 2 * 1024 * 1024; // 2MB
+        let is_image = attachment.is_image;
+        let file_exists = attachment.path.exists();
+        let mut is_truncated = false;
+        let mut is_binary = false;
+        let mut lines: Vec<SharedString> = Vec::new();
+
+        if !is_image {
+            if let Some(ref text) = attachment.text_content {
+                lines = text.lines().map(SharedString::from).collect();
+            } else if file_exists
+                && let Ok(file) = std::fs::File::open(&attachment.path)
+            {
+                    let metadata = file.metadata().ok();
+                    let file_len = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                    if file_len > MAX_READ_BYTES {
+                        is_truncated = true;
+                    }
+                    let mut buf = Vec::new();
+                    if file.take(MAX_READ_BYTES).read_to_end(&mut buf).is_ok() {
+                        let check_len = buf.len().min(1024);
+                        if buf[..check_len].contains(&0) {
+                            is_binary = true;
+                        } else {
+                            let text = String::from_utf8_lossy(&buf);
+                            lines = text.lines().map(SharedString::from).collect();
+                            attachment.text_content = Some(text.into_owned());
+                        }
+                    }
+                }
+        }
+
+        let line_count = lines.len();
+        let gutter_width = if line_count < 1000 {
+            px(36.0)
+        } else if line_count < 10000 {
+            px(46.0)
+        } else {
+            px(56.0)
+        };
+
+        let mut watch_task = None;
+        if is_image && !attachment.is_ready {
+            let path = attachment.path.clone();
+            watch_task = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                for _ in 0..60 {
+                    cx.background_executor()
+                        .timer(Duration::from_millis(50))
+                        .await;
+                    if path.exists() {
+                        let _ = this.update(cx, |this, cx| {
+                            this.attachment.is_ready = true;
+                            cx.notify();
+                        });
+                        break;
+                    }
+                }
+            }));
+        }
+
         Self {
             attachment,
             focus_handle: cx.focus_handle(),
+            scroll_handle: UniformListScrollHandle::new(),
+            lines: Arc::new(lines),
+            gutter_width,
+            is_truncated,
+            is_binary,
             copied: false,
             _copy_timer: None,
+            _watch_task: watch_task,
         }
     }
 
@@ -46,7 +121,7 @@ impl AttachmentPreviewDialog {
 
         self._copy_timer = Some(cx.spawn(async move |this: WeakEntity<Self>, cx| {
             cx.background_executor()
-                .timer(std::time::Duration::from_millis(1500))
+                .timer(Duration::from_millis(1500))
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.copied = false;
@@ -91,10 +166,10 @@ impl Render for AttachmentPreviewDialog {
             } else {
                 None
             }
+        } else if self.is_binary {
+            Some(i18n!(cx, "ai.file_binary_not_supported"))
         } else {
-            att.text_content
-                .as_ref()
-                .map(|c| format!("{} 字符", c.chars().count()))
+            Some(format!("{} 行", self.lines.len()))
         };
 
         modal_content("attachment-preview-dialog-modal", cx)
@@ -123,10 +198,10 @@ impl Render for AttachmentPreviewDialog {
                     .overflow_hidden()
                     .p(SPACE_LG)
                     .child(if is_image {
-                        if !att.is_ready && !file_exists {
+                        if !att.is_ready {
                             v_flex()
                                 .size_full()
-                                .min_h(px(200.0))
+                                .min_h(px(240.0))
                                 .items_center()
                                 .justify_center()
                                 .gap(SPACE_MD)
@@ -135,12 +210,13 @@ impl Render for AttachmentPreviewDialog {
                                     div()
                                         .text_size(ui_text_sm(cx))
                                         .text_color(p.text_muted)
-                                        .child("正在准备图片预览…"),
+                                        .child(i18n!(cx, "ai.preparing_preview")),
                                 )
                                 .into_any_element()
                         } else {
                             v_flex()
                                 .w_full()
+                                .h(px(460.0))
                                 .items_center()
                                 .justify_center()
                                 .rounded(RADIUS_STD)
@@ -150,61 +226,154 @@ impl Render for AttachmentPreviewDialog {
                                 .overflow_hidden()
                                 .child(
                                     img(att.path.clone())
-                                        .max_w_full()
-                                        .max_h(px(460.0))
+                                        .size_full()
                                         .object_fit(ObjectFit::Contain),
                                 )
                                 .into_any_element()
                         }
-                    } else {
-                        // 文本 / 代码预览
-                        let raw_content = att.text_content.clone().unwrap_or_default();
-                        let char_count = raw_content.chars().count();
-                        const MAX_PREVIEW_CHARS: usize = 10_000;
-                        let is_truncated = char_count > MAX_PREVIEW_CHARS;
-                        let display_content = if is_truncated {
-                            raw_content.chars().take(MAX_PREVIEW_CHARS).collect::<String>()
-                        } else {
-                            raw_content
-                        };
-
+                    } else if self.is_binary {
                         v_flex()
                             .w_full()
-                            .max_h(px(460.0))
-                            .min_h_0()
+                            .h(px(260.0))
+                            .items_center()
+                            .justify_center()
+                            .gap(SPACE_MD)
                             .rounded(RADIUS_STD)
                             .bg(p.surface_card)
                             .border_1()
                             .border_color(p.border_subtle)
-                            .overflow_hidden()
+                            .child(AppIcon::File.size(px(32.0)).text_color(p.text_muted))
                             .child(
-                                v_flex()
-                                    .flex_1()
-                                    .min_h_0()
-                                    .overflow_y_scrollbar()
-                                    .p(SPACE_MD)
+                                div()
+                                    .text_size(ui_text_sm(cx))
+                                    .text_color(p.text_muted)
+                                    .child(i18n!(cx, "ai.file_binary_not_supported")),
+                            )
+                            .into_any_element()
+                    } else if self.lines.is_empty() {
+                        v_flex()
+                            .w_full()
+                            .h(px(200.0))
+                            .items_center()
+                            .justify_center()
+                            .rounded(RADIUS_STD)
+                            .bg(p.surface_card)
+                            .border_1()
+                            .border_color(p.border_subtle)
+                            .child(
+                                div()
+                                    .text_size(ui_text_sm(cx))
+                                    .text_color(p.text_muted)
+                                    .child(i18n!(cx, "ai.file_empty")),
+                            )
+                            .into_any_element()
+                    } else {
+                        let lines = self.lines.clone();
+                        let gutter_w = self.gutter_width;
+                        let list = uniform_list(
+                            "att-preview-code-list",
+                            lines.len(),
+                            move |range, _window, cx| {
+                                let p = SemanticPalette::from_context(cx);
+                                let mono_font = mono_font_family(cx);
+                                let font_size = ui_text_xs(cx);
+                                range
+                                    .map(|i| {
+                                        let line_num = (i + 1).to_string();
+                                        let line_str = lines.get(i).cloned().unwrap_or_default();
+                                        h_flex()
+                                            .w_full()
+                                            .h(px(22.0))
+                                            .items_center()
+                                            .text_size(font_size)
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .w(gutter_w)
+                                                    .h_full()
+                                                    .flex()
+                                                    .items_center()
+                                                    .justify_end()
+                                                    .pr(SPACE_SM)
+                                                    .text_color(p.text_muted.opacity(0.6))
+                                                    .child(line_num),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .w(px(1.0))
+                                                    .h_full()
+                                                    .bg(p.border_subtle),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .h_full()
+                                                    .flex()
+                                                    .items_center()
+                                                    .pl(SPACE_SM)
+                                                    .font_family(mono_font.clone())
+                                                    .text_color(p.text_primary)
+                                                    .whitespace_nowrap()
+                                                    .overflow_hidden()
+                                                    .child(line_str),
+                                            )
+                                            .into_any_element()
+                                    })
+                                    .collect::<Vec<_>>()
+                            },
+                        )
+                        .track_scroll(&self.scroll_handle)
+                        .size_full();
+
+                        v_flex()
+                            .w_full()
+                            .children(self.is_truncated.then(|| {
+                                h_flex()
+                                    .w_full()
+                                    .px(SPACE_MD)
+                                    .py(SPACE_XS)
+                                    .mb(SPACE_SM)
+                                    .rounded(RADIUS_STD)
+                                    .bg(p.status_warning.opacity(0.12))
+                                    .border_1()
+                                    .border_color(p.status_warning.opacity(0.3))
+                                    .items_center()
+                                    .gap(SPACE_SM)
+                                    .child(AppIcon::Info.size(px(14.0)).text_color(p.status_warning))
                                     .child(
                                         div()
-                                            .font_family(mono_font_family(cx))
                                             .text_size(ui_text_xs(cx))
                                             .text_color(p.text_primary)
-                                            .line_height(relative(1.5))
-                                            .child(display_content),
+                                            .child(i18n!(cx, "ai.file_size_exceeded_tip")),
+                                    )
+                            }))
+                            .child(
+                                div()
+                                    .relative()
+                                    .w_full()
+                                    .h(px(460.0))
+                                    .rounded(RADIUS_STD)
+                                    .bg(p.surface_card)
+                                    .border_1()
+                                    .border_color(p.border_subtle)
+                                    .overflow_hidden()
+                                    .child(list)
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .right_0()
+                                            .bottom_0()
+                                            .w(px(8.0))
+                                            .child(
+                                                Scrollbar::vertical(&self.scroll_handle)
+                                                    .id("att-preview-scrollbar")
+                                                    .scrollbar_show(ScrollbarShow::Hover),
+                                            ),
                                     ),
                             )
-                            .when(is_truncated, |d| {
-                                d.child(
-                                    div()
-                                        .px(SPACE_MD)
-                                        .py(SPACE_XS)
-                                        .bg(p.surface_hover)
-                                        .border_t_1()
-                                        .border_color(p.border_subtle)
-                                        .text_size(ui_text_xs(cx))
-                                        .text_color(p.text_muted)
-                                        .child(format!("文本较长，当前仅预览前 {} 字符", MAX_PREVIEW_CHARS)),
-                                )
-                            })
                             .into_any_element()
                     }),
             )
@@ -233,7 +402,7 @@ impl Render for AttachmentPreviewDialog {
                             } else {
                                 None
                             })
-                            .children(if !is_image || !file_exists {
+                            .children(if (!is_image || !file_exists) && !self.is_binary {
                                 let content_to_copy = att.text_content.clone().unwrap_or_default();
                                 if !content_to_copy.is_empty() {
                                     let is_copied = self.copied;
