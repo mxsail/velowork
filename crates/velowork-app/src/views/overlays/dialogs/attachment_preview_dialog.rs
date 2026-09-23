@@ -440,14 +440,14 @@ impl Render for AttachmentPreviewDialog {
                                             .child(
                                                 div()
                                                     .text_size(ui_text_md(cx))
-                                                    .text_color(p.text_muted)
+                                                    .text_color(p.text_secondary)
                                                     .group_hover(btn_group.clone(), |s| s.text_color(p.text_primary))
                                                     .child(i18n!(cx, "ai.open_in_system")),
                                             )
                                             .child(
                                                 AppIcon::ExternalLink
                                                     .size(px(13.0))
-                                                    .text_color(p.text_muted)
+                                                    .text_color(p.text_secondary)
                                                     .group_hover(btn_group, |s| s.text_color(p.text_primary)),
                                             )
                                             .on_click(cx.listener(|this, _, _, _| {
