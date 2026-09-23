@@ -817,6 +817,7 @@
     "workflow_health_check": "服务健康自检",
     "workflow_git_audit": "Git 提交前审计",
     "workflow_diagnostics": "系统快速诊断",
+    "inline_ai_initial_placeholder": "向终端 AI 提问或输入指令 (Enter 发送)…",
     "inline_ai_follow_up_placeholder": "提问 (Enter 发送, Ctrl+Enter 换行)…",
     "inline_ai_thinking": "思考过程",
     "inline_ai_send": "发送",

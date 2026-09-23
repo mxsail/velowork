@@ -817,6 +817,7 @@
     "workflow_health_check": "Service Health Check",
     "workflow_git_audit": "Git Safe Pre-commit",
     "workflow_diagnostics": "System Diagnostics",
+    "inline_ai_initial_placeholder": "Ask terminal AI or type instruction (Enter to send)...",
     "inline_ai_follow_up_placeholder": "Ask (Enter to send, Ctrl+Enter for newline)...",
     "inline_ai_thinking": "Thinking",
     "inline_ai_send": "Send",

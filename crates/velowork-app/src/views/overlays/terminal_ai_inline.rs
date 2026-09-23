@@ -40,11 +40,14 @@ use crate::views::ai::commands::extract_commands;
 use crate::views::ai::message_view::{render_chat_message, ChatMessageCallbacks};
 use crate::views::ai::types::ChatMessage;
 
-/// Minimum dimensions for the resizable inline AI popover.
-const MIN_POPOVER_WIDTH: f32 = 360.0;
-const MIN_POPOVER_HEIGHT: f32 = 260.0;
-const DEFAULT_INPUT_HEIGHT: f32 = 96.0;
-const MIN_INPUT_HEIGHT: f32 = 72.0;
+/// Minimum and default dimensions for the resizable inline AI popover and initial bar.
+const MIN_POPOVER_WIDTH: f32 = 480.0;
+const MIN_POPOVER_HEIGHT: f32 = 280.0;
+const DEFAULT_POPOVER_WIDTH: f32 = 580.0;
+const DEFAULT_POPOVER_HEIGHT: f32 = 400.0;
+const INITIAL_BAR_HEIGHT: f32 = 48.0;
+const DEFAULT_INPUT_HEIGHT: f32 = 68.0;
+const MIN_INPUT_HEIGHT: f32 = 56.0;
 const MIN_CHAT_HEIGHT: f32 = 140.0;
 
 /// Edges and corners of the inline AI popover available for resizing.
@@ -202,7 +205,7 @@ impl TerminalAiInline {
                 .submit_on_enter(true)
         });
 
-        let fu_ph = i18n!(cx, "terminal.inline_ai_follow_up_placeholder");
+        let fu_ph = i18n!(cx, "terminal.inline_ai_initial_placeholder");
         let followup_input = cx.new(|cx| {
             SimpleInputState::new(cx)
                 .placeholder(fu_ph)
@@ -253,7 +256,7 @@ impl TerminalAiInline {
             _stream_task: None,
             enter_start: Instant::now(),
             has_no_model,
-            popover_size: size(px(480.0), px(380.0)),
+            popover_size: size(px(DEFAULT_POPOVER_WIDTH), px(DEFAULT_POPOVER_HEIGHT)),
             resize_drag: None,
             input_height: px(DEFAULT_INPUT_HEIGHT),
             input_resize_drag: None,
@@ -463,7 +466,7 @@ impl TerminalAiInline {
                 .options(options)
                 .selected(selected)
                 .placeholder(i18n!(cx, "ai.model"))
-                .placement(SelectPlacement::Above)
+                .placement(SelectPlacement::Auto)
                 .ghost(true)
                 .size(ControlSize::Compact)
                 .text_size(ui_text_md(cx));
@@ -485,11 +488,15 @@ impl TerminalAiInline {
 
     /// Start a streaming prompt request to the AI model as part of a multi-turn conversation.
     pub fn start_turn(&mut self, user_text: String, quote: Option<String>, cx: &mut Context<Self>) {
-        if self.mode != InlineAiMode::Popover {
+        let was_empty = self.messages.is_empty();
+        if self.mode != InlineAiMode::Popover || was_empty {
             self.mode = InlineAiMode::Popover;
             self.enter_start = Instant::now();
             self.start_enter_animation(cx);
         }
+
+        let fu_ph = i18n!(cx, "terminal.inline_ai_follow_up_placeholder");
+        self.followup_input.update(cx, |i, _cx| i.set_placeholder(fu_ph));
 
         self.error_message = None;
 
@@ -769,7 +776,13 @@ impl Render for TerminalAiInline {
 
         let content = match self.mode {
             InlineAiMode::Toolbar => self.render_toolbar(window, cx, &p).into_any_element(),
-            InlineAiMode::Popover => self.render_popover(window, cx, &p).into_any_element(),
+            InlineAiMode::Popover => {
+                if self.messages.is_empty() {
+                    self.render_initial_bar(window, cx, &p).into_any_element()
+                } else {
+                    self.render_popover(window, cx, &p).into_any_element()
+                }
+            }
         };
 
         let pos = match self.mode {
@@ -1107,6 +1120,119 @@ impl TerminalAiInline {
         }
     }
 
+    fn render_initial_bar(
+        &mut self,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+        p: &SemanticPalette,
+    ) -> impl IntoElement {
+        let t = theme(cx);
+        let elapsed = self.enter_start.elapsed();
+        let t_norm = (elapsed.as_secs_f32() / DURATION_PANEL.as_secs_f32()).clamp(0.0, 1.0);
+        let motion_progress = ease_out_cubic(t_norm);
+
+        let send_tip: &'static str =
+            Box::leak(i18n!(cx, "terminal.inline_ai_send").into_boxed_str());
+        let close_tip: &'static str =
+            Box::leak(i18n!(cx, "terminal.inline_ai_close").into_boxed_str());
+
+        div()
+            .id("terminal-ai-initial-bar")
+            .occlude()
+            .relative()
+            .w(self.popover_size.width)
+            .h(px(INITIAL_BAR_HEIGHT))
+            .bg(p.surface_overlay)
+            .border_1()
+            .border_color(p.border_subtle)
+            .rounded(RADIUS_MD)
+            .shadow(elevation_menu_shadow())
+            .flex()
+            .items_center()
+            .px(SPACE_SM)
+            .gap(SPACE_XS)
+            .opacity(motion_progress)
+            .key_context("TerminalAiInline")
+            .track_focus(&self.focus_handle)
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                this.focus_handle.focus(window, cx);
+                cx.stop_propagation();
+            }))
+            .on_mouse_down(MouseButton::Right, cx.listener(|_, _, _, cx| {
+                cx.stop_propagation();
+            }))
+            .on_key_down(cx.listener(|_, event: &KeyDownEvent, _window, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.emit(TerminalAiInlineEvent::Close);
+                    cx.stop_propagation();
+                }
+            }))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .w(px(24.0))
+                    .h(px(24.0))
+                    .flex_shrink_0()
+                    .child(AppIcon::AiAssistant.size(px(16.0)).text_color(p.surface_accent)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .h(px(32.0))
+                    .min_w(px(0.0))
+                    .flex()
+                    .items_center()
+                    .child(
+                        SimpleInput::new(&self.followup_input)
+                            .borderless(true)
+                            .fill_height()
+                            .text_size(ui_text_md(cx)),
+                    ),
+            )
+            .child(
+                if self.has_no_model {
+                    div()
+                        .id("btn-initial-open-settings")
+                        .cursor_pointer()
+                        .flex_shrink_0()
+                        .px(SPACE_XS)
+                        .py(px(2.0))
+                        .rounded(RADIUS_MD)
+                        .bg(p.surface_accent)
+                        .text_size(ui_text_md(cx))
+                        .text_color(p.text_on_accent)
+                        .on_click(cx.listener(|_, _, _, cx| {
+                            cx.emit(TerminalAiInlineEvent::OpenSettings);
+                            cx.emit(TerminalAiInlineEvent::Close);
+                        }))
+                        .child(i18n!(cx, "terminal.inline_ai_open_settings"))
+                        .into_any_element()
+                } else {
+                    div()
+                        .w(px(130.0))
+                        .flex_shrink_0()
+                        .child(Select::new(&self.model_select))
+                        .into_any_element()
+                },
+            )
+            .child(
+                icon_button_sized("btn-initial-bar-send", AppIcon::Send, 24.0, 14.0, &t)
+                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(send_tip)).into())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.submit_followup(cx);
+                    })),
+            )
+            .child(
+                icon_button_sized("btn-initial-bar-close", AppIcon::Close, 24.0, 13.0, &t)
+                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(close_tip)).into())
+                    .on_click(cx.listener(|_, _, _, cx| {
+                        cx.emit(TerminalAiInlineEvent::Close);
+                    })),
+            )
+    }
+
     fn render_popover(
         &mut self,
         _window: &mut Window,
@@ -1117,6 +1243,9 @@ impl TerminalAiInline {
         let elapsed = self.enter_start.elapsed();
         let t_norm = (elapsed.as_secs_f32() / DURATION_PANEL.as_secs_f32()).clamp(0.0, 1.0);
         let motion_progress = ease_out_cubic(t_norm);
+
+        let target_h = f32::from(self.popover_size.height);
+        let current_h = INITIAL_BAR_HEIGHT + (target_h - INITIAL_BAR_HEIGHT) * motion_progress;
 
         let to_panel_tip: &'static str =
             Box::leak(i18n!(cx, "terminal.inline_ai_continue_in_side_panel").into_boxed_str());
@@ -1145,7 +1274,7 @@ impl TerminalAiInline {
             .occlude()
             .relative()
             .w(self.popover_size.width)
-            .h(self.popover_size.height)
+            .h(px(current_h))
             .bg(p.surface_overlay)
             .border_1()
             .border_color(p.border_subtle)
@@ -1159,25 +1288,25 @@ impl TerminalAiInline {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
                 let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
-                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
-                    if let Some(text) = this.get_active_selection_text() {
-                        if !text.is_empty() {
-                            cx.write_to_clipboard(ClipboardItem::new_string(text));
-                            if let Some(ref sel) = this.active_selection {
-                                this.copied_msg_index = Some(sel.msg_index);
-                                cx.spawn(async move |this: WeakEntity<Self>, cx| {
-                                    smol::Timer::after(Duration::from_millis(2000)).await;
-                                    let _ = this.update(cx, |this, cx| {
-                                        this.copied_msg_index = None;
-                                        cx.notify();
-                                    });
-                                }).detach();
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
-                            return;
-                        }
+                if cmd_or_ctrl
+                    && event.keystroke.key.eq_ignore_ascii_case("c")
+                    && let Some(text) = this.get_active_selection_text()
+                    && !text.is_empty()
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    if let Some(ref sel) = this.active_selection {
+                        this.copied_msg_index = Some(sel.msg_index);
+                        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                            smol::Timer::after(Duration::from_millis(2000)).await;
+                            let _ = this.update(cx, |this, cx| {
+                                this.copied_msg_index = None;
+                                cx.notify();
+                            });
+                        }).detach();
                     }
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
                 }
                 if event.keystroke.key.as_str() == "escape" {
                     cx.emit(TerminalAiInlineEvent::Close);
@@ -1190,23 +1319,23 @@ impl TerminalAiInline {
             }))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, _, window, cx| {
                 this.focus_handle.focus(window, cx);
-                if let Some(text) = this.get_active_selection_text() {
-                    if !text.is_empty() {
-                        cx.write_to_clipboard(ClipboardItem::new_string(text));
-                        if let Some(ref sel) = this.active_selection {
-                            this.copied_msg_index = Some(sel.msg_index);
-                            cx.spawn(async move |this: WeakEntity<Self>, cx| {
-                                smol::Timer::after(Duration::from_millis(2000)).await;
-                                let _ = this.update(cx, |this, cx| {
-                                    this.copied_msg_index = None;
-                                    cx.notify();
-                                });
-                            }).detach();
-                        }
-                        cx.notify();
-                        cx.stop_propagation();
-                        return;
+                if let Some(text) = this.get_active_selection_text()
+                    && !text.is_empty()
+                {
+                    cx.write_to_clipboard(ClipboardItem::new_string(text));
+                    if let Some(ref sel) = this.active_selection {
+                        this.copied_msg_index = Some(sel.msg_index);
+                        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                            smol::Timer::after(Duration::from_millis(2000)).await;
+                            let _ = this.update(cx, |this, cx| {
+                                this.copied_msg_index = None;
+                                cx.notify();
+                            });
+                        }).detach();
                     }
+                    cx.notify();
+                    cx.stop_propagation();
+                    return;
                 }
                 cx.stop_propagation();
             }))
@@ -1502,25 +1631,24 @@ impl TerminalAiInline {
                                             return;
                                         }
                                         let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
-                                        if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("c") {
-                                            if let Some(text) = this.get_active_selection_text() {
-                                                if !text.is_empty() {
-                                                    cx.write_to_clipboard(ClipboardItem::new_string(text));
-                                                    if let Some(ref sel) = this.active_selection {
-                                                        this.copied_msg_index = Some(sel.msg_index);
-                                                        cx.spawn(async move |this: WeakEntity<Self>, cx| {
-                                                            smol::Timer::after(Duration::from_millis(2000)).await;
-                                                            let _ = this.update(cx, |this, cx| {
-                                                                this.copied_msg_index = None;
-                                                                cx.notify();
-                                                            });
-                                                        }).detach();
-                                                    }
-                                                    cx.notify();
-                                                    cx.stop_propagation();
-                                                    return;
-                                                }
+                                        if cmd_or_ctrl
+                                            && event.keystroke.key.eq_ignore_ascii_case("c")
+                                            && let Some(text) = this.get_active_selection_text()
+                                            && !text.is_empty()
+                                        {
+                                            cx.write_to_clipboard(ClipboardItem::new_string(text));
+                                            if let Some(ref sel) = this.active_selection {
+                                                this.copied_msg_index = Some(sel.msg_index);
+                                                cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                                                    smol::Timer::after(Duration::from_millis(2000)).await;
+                                                    let _ = this.update(cx, |this, cx| {
+                                                        this.copied_msg_index = None;
+                                                        cx.notify();
+                                                    });
+                                                }).detach();
                                             }
+                                            cx.notify();
+                                            cx.stop_propagation();
                                         }
                                     }))
                                     .child(

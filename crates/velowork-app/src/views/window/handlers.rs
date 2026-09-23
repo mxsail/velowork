@@ -82,9 +82,10 @@ impl WindowView {
         );
 
         let vp = window.viewport_size();
+        let width = px(580.0);
         let pos = point(
-            (vp.width - px(460.0)).max(px(20.0)) / 2.0,
-            (vp.height - px(360.0)).max(px(40.0)) / 3.0,
+            (vp.width - width).max(px(20.0)) / 2.0,
+            (vp.height / 3.0).max(px(60.0)),
         );
 
         self.overlay_manager.update(cx, |om, cx| {
