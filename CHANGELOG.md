@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.10] - 2026-09-24
+
+### Added / 新增
+- **AI 剪贴板图片粘贴与多模态视觉能力 (Multimodal Vision & Clipboard Paste)**：
+  - **支持剪贴板图片直接粘贴**：在 AI 侧边栏及浮窗输入框中支持通过 `Ctrl+V` / `⌘V` 直接粘贴系统截图或剪贴板图片，自动生成轻量附件卡片。
+  - **多模态协议与零阻塞转码**：引入 Vision 多模态模型通信协议，支持后台异步 Base64 编码、配额安全门禁与本地缓存，图文并茂一气呵成。
+  *(Direct clipboard image pasting, async Base64 caching, and multimodal vision support).*
+- **内置附件自适应预览弹窗 (Adaptive Attachment Preview Dialog)**：
+  - **等比自适应主窗口**：附件图片与代码文本卡片支持一键唤起内置预览弹窗，弹窗尺寸随主窗口长宽等比自适应伸缩，文本支持自动软折行。
+  - **文件元信息与系统级调用**：标题栏集成文件类型、行数与大小元信息，右下角提供「在系统应用中打开」轻量操作胶囊。
+  *(Built-in attachment preview modal with proportional viewport resizing, soft-wrap formatting, metadata header, and system external open action).*
+
+### Improved / 优化
+- **终端 Inline AI 浮窗体验精进 (Terminal Inline AI Refinements)**：
+  - **Command Palette 风格单行条**：重新打磨初始单行交互条，文本垂直居中自然排布；展开后采用黄金比例自适应卡片。
+  - **底部输入框通透悬浮质感**：移除浮窗底部外层容器多余的背景底色叠加，使消息列表区与底部容器拥有统一一致的透明度，内部输入卡片呈现优雅悬浮效果。
+  *(Command Palette-style single bar, golden ratio card sizing, and unified transparent floating input card).*
+- **全链路 Markdown 与 AI 代码块透明度完美适配 (Opacity Adaptation for Markdown & Code Blocks)**：
+  - 全面改造 `velowork-markdown`（代码块、表格、Frontmatter）与 AI 消息面板，全面接入 `SemanticPalette::from_context(cx)`。
+  - 当用户在系统设置中调整磨砂背景透明度时，所有代码块与卡片即时联动透明化，彻底告别突兀的实心黑块。
+  *(SemanticPalette-driven transparent background adaptation across Markdown, code blocks, tables, and frontmatter).*
+
+### Fixed / 修复
+- **设置中心透明度滑动条释放回弹缺陷修复**：
+  - 修复设置中心滑动条在松开鼠标时因事件订阅时机导致的数值还原回弹 Bug。
+  *(Fix settings opacity slider rollback on release).*
+- **国际化架构深度收拢与标准化**：
+  - 梳理并发布 `SCHEMA.md` 规约，合并 6 个历史根命名空间，全面统一命令面板与全局 Action 键名。
+  *(Consolidate i18n schemas, eliminate legacy flat keys, and align command IDs).*
+
 ## [0.1.0-beta.9] - 2026-09-22
 
 ### Improved / 优化
