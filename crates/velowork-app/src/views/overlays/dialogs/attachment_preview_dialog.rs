@@ -129,13 +129,24 @@ fn format_file_size(bytes: u64) -> String {
 }
 
 impl Render for AttachmentPreviewDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = SemanticPalette::from_context(cx);
         let focus_handle = self.focus_handle.clone();
         let att = &self.attachment;
         let is_image = att.is_image;
         let file_exists = att.path.exists();
         let title = att.name.clone();
+
+        let win_size = window.viewport_size();
+        let max_w = (win_size.width - px(48.0)).max(px(320.0));
+        let max_h = (win_size.height - px(64.0)).max(px(240.0));
+        let dialog_w = (win_size.width * 0.72)
+            .clamp(px(640.0), px(1100.0))
+            .min(max_w);
+        let dialog_h = (win_size.height * 0.72)
+            .clamp(px(420.0), px(840.0))
+            .min(max_h);
+        let card_w = dialog_w - px(12.0);
 
         let meta_label = if is_image {
             if file_exists {
@@ -156,8 +167,8 @@ impl Render for AttachmentPreviewDialog {
         let close_tip = i18n!(cx, "common.action.close");
 
         modal_content("attachment-preview-dialog-modal", cx)
-            .w(px(720.0))
-            .max_w(px(800.0))
+            .w(dialog_w)
+            .h(dialog_h)
             .track_focus(&focus_handle)
             .key_context("AttachmentPreviewDialog")
             .on_action(cx.listener(|this, _: &Cancel, _, cx| {
@@ -222,16 +233,17 @@ impl Render for AttachmentPreviewDialog {
                             .child(AppIcon::Close.size(px(12.0)).text_color(p.text_muted)),
                     ),
             )
-            // 中间内容区：4px 精细边距，充满视口，内置右下角悬浮元信息与系统打开胶囊
+            // 中间内容区：4px 精细边距，自动撑满剩余高度，内置右下角悬浮元信息与系统打开胶囊
             .child(
                 div()
+                    .flex_1()
+                    .min_h_0()
                     .w_full()
                     .p(SPACE_XS)
                     .child(
                         div()
                             .relative()
-                            .w_full()
-                            .h(px(480.0))
+                            .size_full()
                             .rounded(RADIUS_STD)
                             .bg(p.surface_card)
                             .border_1()
@@ -293,6 +305,7 @@ impl Render for AttachmentPreviewDialog {
                             } else {
                                 let lines = self.lines.clone();
                                 let gutter_w = self.gutter_width;
+                                let content_w = card_w - gutter_w - px(1.0);
                                 let list_element = list(
                                     self.list_state.clone(),
                                     move |i, _window, cx| {
@@ -307,7 +320,7 @@ impl Render for AttachmentPreviewDialog {
                                         let line_str = lines.get(i).cloned().unwrap_or_default();
 
                                         h_flex()
-                                            .w_full()
+                                            .w(card_w)
                                             .min_h(px(24.0))
                                             .items_start()
                                             .child(
@@ -332,8 +345,9 @@ impl Render for AttachmentPreviewDialog {
                                             )
                                             .child(
                                                 div()
-                                                    .flex_1()
-                                                    .min_w(px(0.0))
+                                                    .flex_shrink_0()
+                                                    .w(content_w)
+                                                    .max_w(content_w)
                                                     .pl(SPACE_SM)
                                                     .pr(px(16.0))
                                                     .py(px(2.0))
@@ -410,8 +424,10 @@ impl Render for AttachmentPreviewDialog {
                                             .child(label)
                                     }))
                                     .children(file_exists.then(|| {
+                                        let btn_group: SharedString = "att-preview-open-system-btn".into();
                                         h_flex()
                                             .id("att-preview-open-system-btn")
+                                            .group(btn_group.clone())
                                             .h(px(28.0))
                                             .px(SPACE_SM)
                                             .items_center()
@@ -422,14 +438,20 @@ impl Render for AttachmentPreviewDialog {
                                             .border_color(p.border_subtle)
                                             .shadow_md()
                                             .cursor_pointer()
-                                            .text_color(p.text_muted)
-                                            .hover(|s| s.bg(p.surface_hover).text_color(p.text_primary))
+                                            .hover(|s| s.bg(p.surface_hover))
                                             .child(
                                                 div()
                                                     .text_size(ui_text_md(cx))
+                                                    .text_color(p.text_muted)
+                                                    .group_hover(btn_group.clone(), |s| s.text_color(p.text_primary))
                                                     .child(i18n!(cx, "ai.open_in_system")),
                                             )
-                                            .child(AppIcon::ExternalLink.size(px(13.0)))
+                                            .child(
+                                                AppIcon::ExternalLink
+                                                    .size(px(13.0))
+                                                    .text_color(p.text_muted)
+                                                    .group_hover(btn_group, |s| s.text_color(p.text_primary)),
+                                            )
                                             .on_click(cx.listener(|this, _, _, _| {
                                                 this.open_in_system();
                                             }))
