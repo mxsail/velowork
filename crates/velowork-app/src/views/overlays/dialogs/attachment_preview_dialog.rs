@@ -70,11 +70,11 @@ impl AttachmentPreviewDialog {
 
         let line_count = lines.len();
         let gutter_width = if line_count < 1000 {
-            px(36.0)
+            px(40.0)
         } else if line_count < 10000 {
-            px(46.0)
+            px(50.0)
         } else {
-            px(56.0)
+            px(60.0)
         };
 
         let mut watch_task = None;
@@ -276,16 +276,16 @@ impl Render for AttachmentPreviewDialog {
                             move |range, _window, cx| {
                                 let p = SemanticPalette::from_context(cx);
                                 let mono_font = mono_font_family(cx);
-                                let font_size = ui_text_xs(cx);
+                                let font_size = ui_text_md(cx);
+                                let gutter_font_size = ui_text_xs(cx);
                                 range
                                     .map(|i| {
                                         let line_num = (i + 1).to_string();
                                         let line_str = lines.get(i).cloned().unwrap_or_default();
                                         h_flex()
                                             .w_full()
-                                            .h(px(22.0))
+                                            .h(px(24.0))
                                             .items_center()
-                                            .text_size(font_size)
                                             .child(
                                                 div()
                                                     .flex_shrink_0()
@@ -295,6 +295,7 @@ impl Render for AttachmentPreviewDialog {
                                                     .items_center()
                                                     .justify_end()
                                                     .pr(SPACE_SM)
+                                                    .text_size(gutter_font_size)
                                                     .text_color(p.text_muted.opacity(0.6))
                                                     .child(line_num),
                                             )
@@ -314,6 +315,7 @@ impl Render for AttachmentPreviewDialog {
                                                     .items_center()
                                                     .pl(SPACE_SM)
                                                     .font_family(mono_font.clone())
+                                                    .text_size(font_size)
                                                     .text_color(p.text_primary)
                                                     .whitespace_nowrap()
                                                     .overflow_hidden()
