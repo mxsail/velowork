@@ -21,7 +21,7 @@ pub enum AttachmentPreviewDialogEvent {
 pub struct AttachmentPreviewDialog {
     attachment: ChatAttachment,
     focus_handle: FocusHandle,
-    scroll_handle: UniformListScrollHandle,
+    list_state: ListState,
     lines: Arc<Vec<SharedString>>,
     gutter_width: Pixels,
     is_truncated: bool,
@@ -74,6 +74,8 @@ impl AttachmentPreviewDialog {
             px(60.0)
         };
 
+        let list_state = ListState::new(line_count, ListAlignment::Top, px(1000.0));
+
         let mut watch_task = None;
         if is_image && !attachment.is_ready {
             let path = attachment.path.clone();
@@ -96,7 +98,7 @@ impl AttachmentPreviewDialog {
         Self {
             attachment,
             focus_handle: cx.focus_handle(),
-            scroll_handle: UniformListScrollHandle::new(),
+            list_state,
             lines: Arc::new(lines),
             gutter_width,
             is_truncated,
@@ -291,63 +293,63 @@ impl Render for AttachmentPreviewDialog {
                             } else {
                                 let lines = self.lines.clone();
                                 let gutter_w = self.gutter_width;
-                                let list = uniform_list(
-                                    "att-preview-code-list",
-                                    lines.len(),
-                                    move |range, _window, cx| {
+                                let list_element = list(
+                                    self.list_state.clone(),
+                                    move |i, _window, cx| {
+                                        if i >= lines.len() {
+                                            return div().into_any_element();
+                                        }
                                         let p = SemanticPalette::from_context(cx);
                                         let mono_font = mono_font_family(cx);
                                         let font_size = ui_text_md(cx);
                                         let gutter_font_size = ui_text_xs(cx);
-                                        range
-                                            .map(|i| {
-                                                let line_num = (i + 1).to_string();
-                                                let line_str = lines.get(i).cloned().unwrap_or_default();
-                                                h_flex()
-                                                    .w_full()
+                                        let line_num = (i + 1).to_string();
+                                        let line_str = lines.get(i).cloned().unwrap_or_default();
+
+                                        h_flex()
+                                            .w_full()
+                                            .min_h(px(24.0))
+                                            .items_start()
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .w(gutter_w)
                                                     .h(px(24.0))
+                                                    .flex()
                                                     .items_center()
-                                                    .child(
-                                                        div()
-                                                            .flex_shrink_0()
-                                                            .w(gutter_w)
-                                                            .h_full()
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_end()
-                                                            .pr(SPACE_SM)
-                                                            .text_size(gutter_font_size)
-                                                            .text_color(p.text_muted.opacity(0.6))
-                                                            .child(line_num),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .flex_shrink_0()
-                                                            .w(px(1.0))
-                                                            .h_full()
-                                                            .bg(p.border_subtle),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .flex_1()
-                                                            .min_w_0()
-                                                            .h_full()
-                                                            .flex()
-                                                            .items_center()
-                                                            .pl(SPACE_SM)
-                                                            .font_family(mono_font.clone())
-                                                            .text_size(font_size)
-                                                            .text_color(p.text_primary)
-                                                            .whitespace_nowrap()
-                                                            .overflow_hidden()
-                                                            .child(line_str),
-                                                    )
-                                                    .into_any_element()
-                                            })
-                                            .collect::<Vec<_>>()
+                                                    .justify_end()
+                                                    .pr(SPACE_SM)
+                                                    .text_size(gutter_font_size)
+                                                    .text_color(p.text_muted.opacity(0.6))
+                                                    .child(line_num),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_shrink_0()
+                                                    .w(px(1.0))
+                                                    .self_stretch()
+                                                    .bg(p.border_subtle),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_1()
+                                                    .min_w_0()
+                                                    .min_h(px(24.0))
+                                                    .flex()
+                                                    .items_center()
+                                                    .pl(SPACE_SM)
+                                                    .pr(px(16.0))
+                                                    .py(px(2.0))
+                                                    .font_family(mono_font.clone())
+                                                    .text_size(font_size)
+                                                    .line_height(px(20.0))
+                                                    .text_color(p.text_primary)
+                                                    .whitespace_normal()
+                                                    .child(line_str),
+                                            )
+                                            .into_any_element()
                                     },
                                 )
-                                .track_scroll(&self.scroll_handle)
                                 .size_full();
 
                                 v_flex()
@@ -377,7 +379,7 @@ impl Render for AttachmentPreviewDialog {
                                             .min_h_0()
                                             .w_full()
                                             .overflow_hidden()
-                                            .child(list)
+                                            .child(list_element)
                                             .child(
                                                 div()
                                                     .absolute()
@@ -386,7 +388,7 @@ impl Render for AttachmentPreviewDialog {
                                                     .bottom_0()
                                                     .w(px(8.0))
                                                     .child(
-                                                        Scrollbar::vertical(&self.scroll_handle)
+                                                        Scrollbar::vertical(&self.list_state)
                                                             .id("att-preview-scrollbar")
                                                             .scrollbar_show(ScrollbarShow::Hover),
                                                     ),
@@ -420,7 +422,7 @@ impl Render for AttachmentPreviewDialog {
                                             .items_center()
                                             .gap(px(5.0))
                                             .rounded(RADIUS_SM)
-                                            .bg(p.surface_card)
+                                            .bg(p.surface_raised)
                                             .border_1()
                                             .border_color(p.border_subtle)
                                             .shadow_md()
