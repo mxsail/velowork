@@ -830,7 +830,7 @@ impl SimpleInputState {
         }
     }
 
-    fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
+    pub fn insert_text(&mut self, text: &str, cx: &mut Context<Self>) {
         if self.read_only {
             return;
         }

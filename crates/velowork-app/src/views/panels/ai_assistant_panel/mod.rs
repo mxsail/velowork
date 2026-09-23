@@ -23,7 +23,7 @@ use velowork_ui::menu::PopupMenu;
 use crate::views::overlays::menus::ai_context_menu::open_ai_context_menu;
 use velowork_ui::confirm_dialog::{ConfirmDialog, ConfirmDialogEvent};
 use velowork_ui::design::appearance::{ControlSize, ControlVariant};
-use velowork_ui::input::{focus_ring_shadows, Input, InputState};
+use velowork_ui::input::{focus_ring_shadows, Input, InputState, KeyInterceptResult};
 use velowork_ui::overlay_registry::{ClosePolicy, OverlayInfo};
 use velowork_ui::scrollable::{Scrollbar, ScrollbarAxis, ScrollbarShow};
 use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState, SelectWidthMode};
@@ -952,12 +952,29 @@ impl AiAssistantPanel {
         .detach();
 
         let chat_input = cx.new(|cx| {
-            InputState::new(cx)
+            let mut state = InputState::new(cx)
                 .multiline()
                 .submit_on_enter(true)
                 .wrap(true)
                 .fill_height(true)
-                .placeholder(i18n!(cx, "terminal.inline_ai_follow_up_placeholder"))
+                .placeholder(i18n!(cx, "terminal.inline_ai_follow_up_placeholder"));
+
+            state.set_key_interceptor(|event, _val, cx| {
+                let key = event.keystroke.key.as_str();
+                let cmd_or_ctrl = event.keystroke.modifiers.platform || event.keystroke.modifiers.control;
+                if cmd_or_ctrl && key.eq_ignore_ascii_case("v") {
+                    if let Some(item) = cx.read_from_clipboard() {
+                        let has_image = item.entries().iter().any(|e| matches!(e, ClipboardEntry::Image(_)));
+                        let has_files = item.entries().iter().any(|e| matches!(e, ClipboardEntry::ExternalPaths(p) if !p.paths().is_empty()));
+                        if has_image || has_files {
+                            return KeyInterceptResult::NotHandled;
+                        }
+                    }
+                }
+                KeyInterceptResult::Unhandled
+            });
+
+            state
         });
         let chat_input_clone = chat_input.clone();
         cx.subscribe(
@@ -1891,105 +1908,289 @@ impl AiAssistantPanel {
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
                 let _ = this.update(cx, |this, cx| {
-                    let mut errors = Vec::new();
-                    let current_image_count = this.attachments.iter().filter(|a| a.is_image).count();
-                    let mut added_images = 0;
-
-                    for p in paths {
-                        let name = p
-                            .file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "附件".to_string());
-
-                        if is_vision_image_path(&p) {
-                            if current_image_count + added_images >= velowork_ai::MAX_IMAGES_PER_TURN {
-                                errors.push(format!("图片 {name} 未添加：单轮最多支持 5 张图片"));
-                                continue;
-                            }
-                            let Ok(meta) = std::fs::metadata(&p) else {
-                                errors.push(format!("图片 {name} 无法读取元数据"));
-                                continue;
-                            };
-                            if meta.len() > velowork_ai::MAX_IMAGE_ATTACHMENT_SIZE as u64 {
-                                errors.push(format!("图片 {name} 超出 10MB 大小限制"));
-                                continue;
-                            }
-
-                            // 预压入占位，标为未就绪 (is_ready = false)
-                            this.attachments.push(ChatAttachment {
-                                path: p.clone(),
-                                name: name.clone(),
-                                is_image: true,
-                                text_content: None,
-                                image_data_url: None,
-                                is_ready: false,
-                            });
-                            added_images += 1;
-
-                            // 调度后台异步线程读取与 Base64 编码，绝不阻塞 UI 主线程
-                            let p_clone = p.clone();
-                            let p_for_read = p.clone();
-                            cx.spawn(async move |this: WeakEntity<Self>, cx| {
-                                let read_res = cx.background_executor().spawn(async move {
-                                    let bytes = std::fs::read(&p_for_read)?;
-                                    let mime = image_mime_type(&p_for_read);
-                                    use base64::Engine;
-                                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                                    Ok::<_, std::io::Error>(format!("data:{mime};base64,{b64}"))
-                                }).await;
-
-                                let _ = this.update(cx, |this, cx| {
-                                    if let Ok(data_url) = read_res {
-                                        if let Some(att) = this.attachments.iter_mut().find(|a| a.path == p_clone) {
-                                            att.image_data_url = Some(data_url);
-                                            att.is_ready = true;
-                                        }
-                                    } else {
-                                        this.attachments.retain(|a| a.path != p_clone);
-                                    }
-                                    cx.notify();
-                                });
-                            }).detach();
-                        } else {
-                            // 文本 / 代码 / SVG 文件处理
-                            match read_text_safe(&p) {
-                                Ok(content) => {
-                                    this.attachments.push(ChatAttachment {
-                                        path: p,
-                                        name,
-                                        is_image: false,
-                                        text_content: Some(content),
-                                        image_data_url: None,
-                                        is_ready: true,
-                                    });
-                                }
-                                Err(err_reason) => {
-                                    errors.push(format!("{name}: {err_reason}"));
-                                }
-                            }
-                        }
-                    }
-
-                    if !errors.is_empty() {
-                        let err_text = format!("{}: {}", i18n!(cx, "ai.error"), errors.join("; "));
-                        this.push_message(ChatMessage {
-                            is_user: false,
-                            text: err_text,
-                            streaming: false,
-                            document_views: std::cell::RefCell::new(Vec::new()),
-                            tool_call: None,
-                            thinking: None,
-                            quote: None,
-                            attachments: Vec::new(),
-                        });
-                        this.scroll_to_bottom();
-                    }
-
-                    cx.notify();
+                    this.attach_file_paths(paths, cx);
                 });
             }
         })
         .detach();
+    }
+
+    /// 将指定的一组本地文件路径作为上下文附件加入输入框。
+    pub(crate) fn attach_file_paths(&mut self, paths: Vec<std::path::PathBuf>, cx: &mut Context<Self>) {
+        let mut errors = Vec::new();
+        let current_image_count = self.attachments.iter().filter(|a| a.is_image).count();
+        let mut added_images = 0;
+
+        for p in paths {
+            let name = p
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "附件".to_string());
+
+            if is_vision_image_path(&p) {
+                if current_image_count + added_images >= velowork_ai::MAX_IMAGES_PER_TURN {
+                    errors.push(format!("图片 {name} 未添加：单轮最多支持 5 张图片"));
+                    continue;
+                }
+                let Ok(meta) = std::fs::metadata(&p) else {
+                    errors.push(format!("图片 {name} 无法读取元数据"));
+                    continue;
+                };
+                if meta.len() > velowork_ai::MAX_IMAGE_ATTACHMENT_SIZE as u64 {
+                    errors.push(format!("图片 {name} 超出 10MB 大小限制"));
+                    continue;
+                }
+
+                // 预压入占位，标为未就绪 (is_ready = false)
+                self.attachments.push(ChatAttachment {
+                    path: p.clone(),
+                    name: name.clone(),
+                    is_image: true,
+                    text_content: None,
+                    image_data_url: None,
+                    is_ready: false,
+                });
+                added_images += 1;
+
+                // 调度后台异步线程读取与 Base64 编码，绝不阻塞 UI 主线程
+                let p_clone = p.clone();
+                let p_for_read = p.clone();
+                cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                    let read_res = cx.background_executor().spawn(async move {
+                        let bytes = std::fs::read(&p_for_read)?;
+                        let mime = image_mime_type(&p_for_read);
+                        use base64::Engine;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                        Ok::<_, std::io::Error>(format!("data:{mime};base64,{b64}"))
+                    }).await;
+
+                    let _ = this.update(cx, |this, cx| {
+                        if let Ok(data_url) = read_res {
+                            if let Some(att) = this.attachments.iter_mut().find(|a| a.path == p_clone) {
+                                att.image_data_url = Some(data_url);
+                                att.is_ready = true;
+                            }
+                        } else {
+                            this.attachments.retain(|a| a.path != p_clone);
+                        }
+                        cx.notify();
+                    });
+                }).detach();
+            } else {
+                // 文本 / 代码 / SVG 文件处理
+                match read_text_safe(&p) {
+                    Ok(content) => {
+                        self.attachments.push(ChatAttachment {
+                            path: p,
+                            name,
+                            is_image: false,
+                            text_content: Some(content),
+                            image_data_url: None,
+                            is_ready: true,
+                        });
+                    }
+                    Err(err_reason) => {
+                        errors.push(format!("{name}: {err_reason}"));
+                    }
+                }
+            }
+        }
+
+        if !errors.is_empty() {
+            let err_text = format!("{}: {}", i18n!(cx, "ai.error"), errors.join("; "));
+            self.push_message(ChatMessage {
+                is_user: false,
+                text: err_text,
+                streaming: false,
+                document_views: std::cell::RefCell::new(Vec::new()),
+                tool_call: None,
+                thinking: None,
+                quote: None,
+                attachments: Vec::new(),
+            });
+            self.scroll_to_bottom();
+        }
+
+        cx.notify();
+    }
+
+    /// 将剪贴板中的截图或位图数据加入输入框附件。
+    pub(crate) fn attach_clipboard_image(&mut self, image: gpui::Image, cx: &mut Context<Self>) {
+        let current_image_count = self.attachments.iter().filter(|a| a.is_image).count();
+        if current_image_count >= velowork_ai::MAX_IMAGES_PER_TURN {
+            let err_text = format!("{}: 单轮最多支持 5 张图片", i18n!(cx, "ai.error"));
+            self.push_message(ChatMessage {
+                is_user: false,
+                text: err_text,
+                streaming: false,
+                document_views: std::cell::RefCell::new(Vec::new()),
+                tool_call: None,
+                thinking: None,
+                quote: None,
+                attachments: Vec::new(),
+            });
+            self.scroll_to_bottom();
+            cx.notify();
+            return;
+        }
+
+        let bytes_len = image.bytes.len();
+        if bytes_len > velowork_ai::MAX_IMAGE_ATTACHMENT_SIZE {
+            let err_text = format!("{}: 粘贴图片超出 10MB 大小限制", i18n!(cx, "ai.error"));
+            self.push_message(ChatMessage {
+                is_user: false,
+                text: err_text,
+                streaming: false,
+                document_views: std::cell::RefCell::new(Vec::new()),
+                tool_call: None,
+                thinking: None,
+                quote: None,
+                attachments: Vec::new(),
+            });
+            self.scroll_to_bottom();
+            cx.notify();
+            return;
+        }
+
+        // SVG 特殊分流：若复制的是 SVG 矢量，转为文本代码附件
+        if image.format == gpui::ImageFormat::Svg {
+            if let Ok(svg_content) = std::str::from_utf8(&image.bytes) {
+                self.attachments.push(ChatAttachment {
+                    path: std::path::PathBuf::from("clipboard.svg"),
+                    name: "clipboard.svg".to_string(),
+                    is_image: false,
+                    text_content: Some(svg_content.to_string()),
+                    image_data_url: None,
+                    is_ready: true,
+                });
+                cx.notify();
+                return;
+            }
+        }
+
+        let ext = image.format.extension();
+        let mime = image.format.mime_type().to_string();
+        let cache_folder = velowork_core::profiles::cache_dir().join("attachments");
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let seq = (timestamp % 10000) as u32;
+        let file_name = format!("paste_{}_{:08x}.{}", timestamp, (image.id & 0xffff_ffff) as u32, ext);
+        let file_path = cache_folder.join(&file_name);
+        let display_name = format!("截图_{:04}.{}", seq, ext);
+
+        // 预压入占位，标为未就绪 (is_ready = false)
+        self.attachments.push(ChatAttachment {
+            path: file_path.clone(),
+            name: display_name,
+            is_image: true,
+            text_content: None,
+            image_data_url: None,
+            is_ready: false,
+        });
+        cx.notify();
+
+        // 调度后台异步线程写入本地缓存与 Base64 编码，绝不阻塞 UI 主线程
+        let path_clone = file_path.clone();
+        let path_for_write = file_path;
+        let bytes = image.bytes;
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let write_res = cx.background_executor().spawn(async move {
+                if let Some(parent) = path_for_write.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                std::fs::write(&path_for_write, &bytes)?;
+                use base64::Engine;
+                let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                Ok::<_, std::io::Error>(format!("data:{mime};base64,{b64}"))
+            }).await;
+
+            let _ = this.update(cx, |this, cx| {
+                if let Ok(data_url) = write_res {
+                    if let Some(att) = this.attachments.iter_mut().find(|a| a.path == path_clone) {
+                        att.image_data_url = Some(data_url);
+                        att.is_ready = true;
+                    }
+                } else {
+                    this.attachments.retain(|a| a.path != path_clone);
+                    let err_text = format!("{}: 写入剪贴板图片缓存失败", i18n!(cx, "ai.error"));
+                    this.push_message(ChatMessage {
+                        is_user: false,
+                        text: err_text,
+                        streaming: false,
+                        document_views: std::cell::RefCell::new(Vec::new()),
+                        tool_call: None,
+                        thinking: None,
+                        quote: None,
+                        attachments: Vec::new(),
+                    });
+                    this.scroll_to_bottom();
+                }
+                cx.notify();
+            });
+        }).detach();
+    }
+
+    /// 处理剪贴板粘贴（拦截 Ctrl+V / Cmd+V）：
+    /// 1. 若剪贴板中含系统截图或位图数据（`ClipboardEntry::Image`），保存至安全缓存目录并挂载为图片附件；
+    /// 2. 若剪贴板中含外部文件（`ClipboardEntry::ExternalPaths`），走附件通道挂载；
+    /// 3. 若剪贴板同时含有非空文本，自动将其填入输入框（图文并茂）；
+    /// 4. 若无图片及外部文件（纯文本），返回 false，交由原生输入框按普通文本粘贴处理。
+    pub(crate) fn handle_clipboard_paste(&mut self, cx: &mut Context<Self>) -> bool {
+        let Some(item) = cx.read_from_clipboard() else {
+            return false;
+        };
+
+        let mut pasted_image = None;
+        let mut external_paths = Vec::new();
+        let mut text_content = None;
+
+        for entry in item.entries() {
+            match entry {
+                ClipboardEntry::Image(img) => {
+                    if pasted_image.is_none() {
+                        pasted_image = Some(img.clone());
+                    }
+                }
+                ClipboardEntry::ExternalPaths(paths) => {
+                    for p in paths.paths() {
+                        external_paths.push(p.clone());
+                    }
+                }
+                ClipboardEntry::String(s) => {
+                    if text_content.is_none() && !s.text.trim().is_empty() {
+                        text_content = Some(s.text.clone());
+                    }
+                }
+            }
+        }
+
+        // 纯文本且无外部文件：交由原生 SimpleInput 粘贴
+        if pasted_image.is_none() && external_paths.is_empty() {
+            return false;
+        }
+
+        // 若同时有图文并茂中的文本，将其插入输入框
+        if let Some(text) = text_content {
+            if let Some(ref chat_input) = self.chat_input {
+                chat_input.update(cx, |input, cx| {
+                    input.insert_text(&text, cx);
+                });
+            }
+        }
+
+        // 处理外部文件
+        if !external_paths.is_empty() {
+            self.attach_file_paths(external_paths, cx);
+        }
+
+        // 处理剪贴板位图/系统截图
+        if let Some(image) = pasted_image {
+            self.attach_clipboard_image(image, cx);
+        }
+
+        true
     }
 
     /// 移除输入框中指定索引的附件。
@@ -5284,6 +5485,12 @@ impl AiAssistantPanel {
                         }
                     }
                 }
+                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("v") {
+                    if this.handle_clipboard_paste(cx) {
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
                 if cmd_or_ctrl && event.keystroke.key.as_str() == "f" {
 
                     this.ai_search_open = true;
@@ -5798,6 +6005,12 @@ impl AiAssistantPanel {
                                             cx.stop_propagation();
                                             return;
                                         }
+                                    }
+                                }
+                                if cmd_or_ctrl && event.keystroke.key.eq_ignore_ascii_case("v") {
+                                    if this.handle_clipboard_paste(cx) {
+                                        cx.stop_propagation();
+                                        return;
                                     }
                                 }
                             }))
@@ -6452,7 +6665,7 @@ fn render_ai_message(
                     let name = att.name.clone();
                     let is_image = att.is_image;
                     let icon_path = if is_image {
-                        AppIcon::File
+                        AppIcon::Image
                     } else {
                         AppIcon::File
                     };
