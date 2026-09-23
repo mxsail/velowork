@@ -333,10 +333,7 @@ impl Render for AttachmentPreviewDialog {
                                             .child(
                                                 div()
                                                     .flex_1()
-                                                    .min_w_0()
-                                                    .min_h(px(24.0))
-                                                    .flex()
-                                                    .items_center()
+                                                    .min_w(px(0.0))
                                                     .pl(SPACE_SM)
                                                     .pr(px(16.0))
                                                     .py(px(2.0))
@@ -413,10 +410,8 @@ impl Render for AttachmentPreviewDialog {
                                             .child(label)
                                     }))
                                     .children(file_exists.then(|| {
-                                        let btn_group: SharedString = "att-preview-open-system-btn".into();
                                         h_flex()
                                             .id("att-preview-open-system-btn")
-                                            .group(btn_group.clone())
                                             .h(px(28.0))
                                             .px(SPACE_SM)
                                             .items_center()
@@ -427,20 +422,14 @@ impl Render for AttachmentPreviewDialog {
                                             .border_color(p.border_subtle)
                                             .shadow_md()
                                             .cursor_pointer()
-                                            .hover(|s| s.bg(p.surface_hover))
+                                            .text_color(p.text_muted)
+                                            .hover(|s| s.bg(p.surface_hover).text_color(p.text_primary))
                                             .child(
                                                 div()
                                                     .text_size(ui_text_md(cx))
-                                                    .text_color(p.text_muted)
-                                                    .group_hover(btn_group.clone(), |s| s.text_color(p.text_primary))
                                                     .child(i18n!(cx, "ai.open_in_system")),
                                             )
-                                            .child(
-                                                AppIcon::ExternalLink
-                                                    .size(px(13.0))
-                                                    .text_color(p.text_muted)
-                                                    .group_hover(btn_group, |s| s.text_color(p.text_primary)),
-                                            )
+                                            .child(AppIcon::ExternalLink.size(px(13.0)))
                                             .on_click(cx.listener(|this, _, _, _| {
                                                 this.open_in_system();
                                             }))

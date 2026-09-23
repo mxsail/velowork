@@ -43,6 +43,7 @@ use velowork_workspace::focus::FocusManager;
 use velowork_workspace::repositories::AiConversationRow;
 use velowork_workspace::settings::AiModelConfig;
 use velowork_workspace::state::Workspace;
+use velowork_workspace::toast::{Toast, ToastManager};
 
 use regex::Regex;
 
@@ -1998,18 +1999,8 @@ impl AiAssistantPanel {
         }
 
         if !errors.is_empty() {
-            let err_text = format!("{}: {}", i18n!(cx, "ai.error"), errors.join("; "));
-            self.push_message(ChatMessage {
-                is_user: false,
-                text: err_text,
-                streaming: false,
-                document_views: std::cell::RefCell::new(Vec::new()),
-                tool_call: None,
-                thinking: None,
-                quote: None,
-                attachments: Vec::new(),
-            });
-            self.scroll_to_bottom();
+            let err_text = errors.join("\n");
+            ToastManager::post(Toast::warning(err_text), cx);
         }
 
         cx.notify();
@@ -2020,36 +2011,14 @@ impl AiAssistantPanel {
         let current_image_count = self.attachments.iter().filter(|a| a.is_image).count();
         if current_image_count >= velowork_ai::MAX_IMAGES_PER_TURN {
             let err_text = format!("{}: 单轮最多支持 5 张图片", i18n!(cx, "ai.error"));
-            self.push_message(ChatMessage {
-                is_user: false,
-                text: err_text,
-                streaming: false,
-                document_views: std::cell::RefCell::new(Vec::new()),
-                tool_call: None,
-                thinking: None,
-                quote: None,
-                attachments: Vec::new(),
-            });
-            self.scroll_to_bottom();
-            cx.notify();
+            ToastManager::post(Toast::warning(err_text), cx);
             return;
         }
 
         let bytes_len = image.bytes.len();
         if bytes_len > velowork_ai::MAX_IMAGE_ATTACHMENT_SIZE {
             let err_text = format!("{}: 粘贴图片超出 10MB 大小限制", i18n!(cx, "ai.error"));
-            self.push_message(ChatMessage {
-                is_user: false,
-                text: err_text,
-                streaming: false,
-                document_views: std::cell::RefCell::new(Vec::new()),
-                tool_call: None,
-                thinking: None,
-                quote: None,
-                attachments: Vec::new(),
-            });
-            self.scroll_to_bottom();
-            cx.notify();
+            ToastManager::post(Toast::warning(err_text), cx);
             return;
         }
 
