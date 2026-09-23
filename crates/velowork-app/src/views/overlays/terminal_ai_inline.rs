@@ -745,8 +745,18 @@ impl TerminalAiInline {
 
 
     pub fn trigger_explain(&mut self, cx: &mut Context<Self>) {
-        let user_text = i18n!(cx, "terminal.ai_toolbar_explain");
-        self.start_turn(user_text, Some(self.selection_text.clone()), cx);
+        let text = self.selection_text.trim().to_string();
+        if text.is_empty() {
+            return;
+        }
+        let last_exit_code = self.cached_snapshot.as_ref().and_then(|s| {
+            s.active_sessions
+                .iter()
+                .find(|sess| sess.terminal_id == self.terminal_id)
+                .and_then(|sess| sess.last_exit_code)
+        });
+        let rec = classify_selection_intent(&text, last_exit_code);
+        self.start_turn(rec.prompt_text, Some(text), cx);
     }
 
     pub fn trigger_search_in_browser(&mut self, cx: &mut Context<Self>) {
@@ -1016,9 +1026,6 @@ impl TerminalAiInline {
         let smart_tip: &'static str = Box::leak(i18n!(cx, rec.label_key).into_boxed_str());
         let prompt_text = rec.prompt_text.clone();
 
-        let explain_tip: &'static str =
-            Box::leak(i18n!(cx, "terminal.ai_toolbar_explain_tip").into_boxed_str());
-
         let search_tip: &'static str =
             Box::leak(i18n!(cx, "terminal.ai_toolbar_search_tip").into_boxed_str());
 
@@ -1039,13 +1046,6 @@ impl TerminalAiInline {
                     })),
             )
             .child(capsule_divider(cx))
-            .child(
-                capsule_icon_button("ai-tb-explain", AppIcon::AiAssistant, cx)
-                    .tooltip(move |_, cx| cx.new(|_| Tooltip::new(explain_tip)).into())
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.trigger_explain(cx);
-                    })),
-            )
             .child(
                 capsule_icon_button("ai-tb-search", AppIcon::Search, cx)
                     .tooltip(move |_, cx| cx.new(|_| Tooltip::new(search_tip)).into())
