@@ -47,7 +47,7 @@ use velowork_ui::scrollable::Scrollbar;
 use velowork_ui::select::{
     SelectEvent, SelectOption, SelectPlacement, SelectState, SelectWidthMode,
 };
-use velowork_ui::slider::SliderState;
+use velowork_ui::slider::{SliderEvent, SliderState, SliderValue};
 use velowork_ui::tokens::{
     RADIUS_CARD, SPACE_CARD_GAP, SPACE_MD, SPACE_LG, SPACE_XL, ui_text_lg,
 };
@@ -1274,6 +1274,30 @@ impl SettingsPanel {
             }
         });
 
+        let bg_opacity_slider = cx.new(|cx| {
+            SliderState::new(cx)
+                .min(10.0)
+                .max(100.0)
+                .step(1.0)
+                .value(s.bg_opacity * 100.0)
+        });
+        cx.subscribe(
+            &bg_opacity_slider,
+            |_this, _entity, ev: &SliderEvent, cx| {
+                match ev {
+                    SliderEvent::Change(SliderValue::Single(v))
+                    | SliderEvent::Release(SliderValue::Single(v)) => {
+                        let val = *v / 100.0;
+                        settings_entity(cx).update(cx, |state, cx| {
+                            state.set_bg_opacity(val, cx);
+                        });
+                    }
+                    _ => {}
+                }
+            },
+        )
+        .detach();
+
         let panel = Self {
             _workspace: workspace,
             focus_handle: cx.focus_handle(),
@@ -1446,13 +1470,7 @@ impl SettingsPanel {
                 map
             },
             bound_stepper_inputs: HashSet::new(),
-            bg_opacity_slider: Some(cx.new(|cx| {
-                velowork_ui::slider::SliderState::new(cx)
-                    .min(10.0)
-                    .max(100.0)
-                    .step(1.0)
-                    .value(settings_entity(cx).read(cx).settings.bg_opacity * 100.0)
-            })),
+            bg_opacity_slider: Some(bg_opacity_slider),
             nav_focus_handle: cx.focus_handle(),
             toggle_focus_handles: {
                 let mut map = HashMap::new();
