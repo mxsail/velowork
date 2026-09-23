@@ -1622,8 +1622,6 @@ impl TerminalAiInline {
                     .pb(SPACE_XS)
                     .pt(px(2.0))
                     .flex_shrink_0()
-                    .bg(p.surface_overlay)
-                    .rounded_b(RADIUS_MD)
                     .child(
                         div()
                             .relative()
