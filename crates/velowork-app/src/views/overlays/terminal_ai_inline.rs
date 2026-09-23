@@ -44,9 +44,9 @@ use crate::views::ai::types::ChatMessage;
 const MIN_POPOVER_WIDTH: f32 = 480.0;
 const MIN_POPOVER_HEIGHT: f32 = 280.0;
 const DEFAULT_POPOVER_WIDTH: f32 = 580.0;
-const DEFAULT_POPOVER_HEIGHT: f32 = 400.0;
+const DEFAULT_POPOVER_HEIGHT: f32 = 480.0;
 const INITIAL_BAR_HEIGHT: f32 = 48.0;
-const DEFAULT_INPUT_HEIGHT: f32 = 68.0;
+const DEFAULT_INPUT_HEIGHT: f32 = 82.0;
 const MIN_INPUT_HEIGHT: f32 = 56.0;
 const MIN_CHAT_HEIGHT: f32 = 140.0;
 
