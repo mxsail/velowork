@@ -164,6 +164,12 @@ impl Render for AttachmentPreviewDialog {
             Some(i18n!(cx, "ai.file_line_count").replace("{count}", &self.lines.len().to_string()))
         };
 
+        let header_title = if let Some(ref meta) = meta_label {
+            format!("{title} - {meta}")
+        } else {
+            title
+        };
+
         let close_tip = i18n!(cx, "common.action.close");
 
         modal_content("attachment-preview-dialog-modal", cx)
@@ -210,7 +216,7 @@ impl Render for AttachmentPreviewDialog {
                                     .whitespace_nowrap()
                                     .overflow_hidden()
                                     .text_ellipsis()
-                                    .child(title),
+                                    .child(header_title),
                             ),
                     )
                     .child(
@@ -407,24 +413,16 @@ impl Render for AttachmentPreviewDialog {
                                     )
                                     .into_any_element()
                             })
-                            // 经典桌面右下角区域：纯文字行数/大小（无背景）+ 独立的“在系统应用中打开”微按钮（4px 圆角）
-                            .children((meta_label.is_some() || file_exists).then(|| {
+                            // 右下角悬浮：独立的“在系统应用中打开”微按钮（4px 圆角）
+                            .children(file_exists.then(|| {
+                                let btn_group: SharedString = "att-preview-open-system-btn".into();
                                 h_flex()
                                     .occlude()
                                     .absolute()
                                     .bottom(px(8.0))
                                     .right(px(16.0))
-                                    .items_center()
-                                    .gap(SPACE_SM)
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                                    .children(meta_label.map(|label| {
-                                        div()
-                                            .text_size(ui_text_xs(cx))
-                                            .text_color(p.text_muted)
-                                            .child(label)
-                                    }))
-                                    .children(file_exists.then(|| {
-                                        let btn_group: SharedString = "att-preview-open-system-btn".into();
+                                    .child(
                                         h_flex()
                                             .id("att-preview-open-system-btn")
                                             .group(btn_group.clone())
@@ -454,8 +452,8 @@ impl Render for AttachmentPreviewDialog {
                                             )
                                             .on_click(cx.listener(|this, _, _, _| {
                                                 this.open_in_system();
-                                            }))
-                                    }))
+                                            })),
+                                    )
                             })),
                     ),
             )
