@@ -259,7 +259,7 @@ fn search_highlights_for_text(
 impl RenderOnce for MarkdownElement {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = theme(cx);
-        let p = SemanticPalette::from_theme(&t);
+        let p = SemanticPalette::from_context(cx);
 
         let mut children: Vec<AnyElement> = Vec::new();
         let doc = Rc::new(self.document);
@@ -375,7 +375,7 @@ impl RenderOnce for MarkdownElement {
                     div()
                         .w_full()
                         .h(px(1.0))
-                        .bg(rgb(t.border).opacity(0.6))
+                        .bg(p.border_subtle)
                         .my(px(6.0))
                         .into_any_element()
                 }
@@ -1031,18 +1031,18 @@ fn render_code_block(
         .min_w(px(0.0))
         .my(px(4.0))
         .rounded(px(6.0))
-        .bg(rgb(t.bg_panel))
+        .bg(p.surface_raised)
         .border_1()
-        .border_color(rgb(t.border))
+        .border_color(p.border_subtle)
         .overflow_hidden()
         // Header bar
         .child(
             h_flex()
                 .h(px(28.0))
                 .px(px(10.0))
-                .bg(rgb(t.bg_header))
+                .bg(p.surface_header)
                 .border_b_1()
-                .border_color(rgb(t.border).opacity(0.5))
+                .border_color(p.border_subtle)
                 .justify_between()
                 .items_center()
                 .child(
@@ -1062,10 +1062,10 @@ fn render_code_block(
                         .px(px(6.0))
                         .py(px(2.0))
                         .rounded(px(4.0))
-                        .bg(p.surface_card.opacity(0.85))
+                        .bg(p.surface_card)
                         .border_1()
-                        .border_color(rgb(t.border))
-                        .hover(|s| s.bg(rgb(t.bg_primary)))
+                        .border_color(p.border_subtle)
+                        .hover(|s| s.bg(p.surface_hover))
                         .on_mouse_down(MouseButton::Left, copy_action)
                         .child(copy_icon.size(px(11.0)).text_color(rgb(t.text_muted)))
                         .child(

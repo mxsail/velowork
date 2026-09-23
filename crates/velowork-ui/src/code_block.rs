@@ -10,8 +10,8 @@ use crate::v_flex;
 /// Code block container with rounded corners, bg, border, overflow_hidden, and optional language label.
 ///
 /// Caller adds `.child(...)` for the code content area.
-pub fn code_block_container(language: Option<&str>, t: &ThemeColors, cx: &App) -> Div {
-    let p = SemanticPalette::from_theme(t);
+pub fn code_block_container(language: Option<&str>, _t: &ThemeColors, cx: &App) -> Div {
+    let p = SemanticPalette::from_context(cx);
     let lang_label = language.unwrap_or("");
     v_flex()
         .rounded(px(6.0))
@@ -26,7 +26,7 @@ pub fn code_block_container(language: Option<&str>, t: &ThemeColors, cx: &App) -
                 div()
                     .px(SPACE_LG)
                     .py(SPACE_XS)
-                    .bg(rgb(t.bg_header))
+                    .bg(p.surface_header)
                     .border_b_1()
                     .border_color(p.border_subtle)
                     .text_size(ui_text_sm(cx))

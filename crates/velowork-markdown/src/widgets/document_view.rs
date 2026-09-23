@@ -292,7 +292,7 @@ impl Render for DocumentView {
                     let code_str = code.trim_end_matches(['\r', '\n']).to_string();
                     let block_idx = i;
                     let indent = depth * 16;
-                    let p = SemanticPalette::from_theme(&t);
+                    let p = SemanticPalette::from_context(cx);
 
                     div()
                         .w_full()
@@ -302,9 +302,9 @@ impl Render for DocumentView {
                                 .relative()
                                 .w_full()
                                 .rounded(px(6.0))
-                                .bg(rgb(t.bg_panel))
+                                .bg(p.surface_raised)
                                 .border_1()
-                                .border_color(rgb(t.border))
+                                .border_color(p.border_subtle)
                                 .overflow_hidden()
                                 .child(
                                     div()
@@ -343,10 +343,10 @@ impl Render for DocumentView {
                                                 .px(px(6.0))
                                                 .py(px(2.0))
                                                 .rounded(px(4.0))
-                                                .bg(p.surface_card.opacity(0.85))
+                                                .bg(p.surface_card)
                                                 .border_1()
-                                                .border_color(rgb(t.border))
-                                                .hover(|s| s.bg(rgb(t.bg_primary)))
+                                                .border_color(p.border_subtle)
+                                                .hover(|s| s.bg(p.surface_hover))
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     cx.write_to_clipboard(ClipboardItem::new_string(code_str.clone()));
                                                     this.copied_code_index = Some(block_idx);
@@ -444,12 +444,13 @@ impl Render for DocumentView {
                         .into_any_element()
                 }
                 DocumentBlock::Frontmatter { .. } => {
+                    let p = SemanticPalette::from_context(cx);
                     v_flex()
                         .w_full()
                         .p(px(8.0))
-                        .bg(rgb(t.bg_panel))
+                        .bg(p.surface_raised)
                         .border_1()
-                        .border_color(rgb(t.border))
+                        .border_color(p.border_subtle)
                         .rounded(px(4.0))
                         .child(
                             SimpleInput::new(state)
@@ -459,12 +460,13 @@ impl Render for DocumentView {
                         .into_any_element()
                 }
                 DocumentBlock::Table { .. } => {
+                    let p = SemanticPalette::from_context(cx);
                     div()
                         .w_full()
                         .p(px(8.0))
-                        .bg(rgb(t.bg_panel))
+                        .bg(p.surface_raised)
                         .border_1()
-                        .border_color(rgb(t.border))
+                        .border_color(p.border_subtle)
                         .rounded(px(4.0))
                         .font_family(mono_font_family(cx))
                         .child(

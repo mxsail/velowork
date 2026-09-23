@@ -7089,8 +7089,8 @@ fn render_ai_message(
                 .mt(SPACE_SM)
                 .rounded(RADIUS_LG)
                 .border_1()
-                .border_color(rgb(t.border))
-                .bg(with_alpha(t.bg_secondary, 0.4))
+                .border_color(p.border_subtle)
+                .bg(p.surface_raised)
                 .overflow_hidden()
                 .child(
                     div()
@@ -7387,11 +7387,12 @@ fn loading_indicator(_t: &ThemeColors, cx: &App, frame: u64) -> impl IntoElement
 /// 可折叠的思考过程展示区块。
 fn thinking_block(content: &str, t: &ThemeColors, cx: &App) -> impl IntoElement {
     let header_label = i18n!(cx, "ai.thinking_process");
+    let p = SemanticPalette::from_context(cx);
     div()
         .rounded(px(6.0))
         .border_1()
-        .border_color(with_alpha(t.text_muted, 0.3))
-        .bg(with_alpha(t.bg_secondary, 0.4))
+        .border_color(p.border_subtle)
+        .bg(p.surface_raised)
         .overflow_hidden()
         .child(
             // 思考过程 header（点击可折叠，默认展开）
@@ -7572,20 +7573,22 @@ fn code_block_with_actions(
     let ws = workspace.clone();
     let terms = terminals.clone();
 
+    let p = SemanticPalette::from_context(cx);
+
     div()
         .relative()
         .max_w(relative(1.0))
         .rounded(RADIUS_LG)
         .overflow_hidden()
         .border_1()
-        .border_color(rgb(t.border))
+        .border_color(p.border_subtle)
         .child(
             div()
                 .px(SPACE_MD)
                 .py(SPACE_XS)
-                .bg(rgb(t.bg_header))
+                .bg(p.surface_header)
                 .border_b_1()
-                .border_color(rgb(t.border))
+                .border_color(p.border_subtle)
                 .flex()
                 .items_center()
                 .justify_between()
@@ -7628,7 +7631,7 @@ fn code_block_with_actions(
             div()
                 .px(SPACE_MD)
                 .py(SPACE_MD)
-                .bg(rgb(t.bg_panel))
+                .bg(p.surface_raised)
                 .font_family(mono_font_family(cx))
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.text_primary))
@@ -7640,20 +7643,21 @@ fn code_block_with_actions(
 /// 只读代码块（仅复制，无「发送到终端」），用于工具结果与无命令的回退展示。
 fn result_code_block(code: &str, lang: &str, t: &ThemeColors, cx: &mut App) -> AnyElement {
     let code_clone = code.to_string();
+    let p = SemanticPalette::from_context(cx);
     div()
         .relative()
         .max_w(relative(1.0))
         .rounded(RADIUS_LG)
         .overflow_hidden()
         .border_1()
-        .border_color(rgb(t.border))
+        .border_color(p.border_subtle)
         .child(
             div()
                 .px(SPACE_MD)
                 .py(SPACE_XS)
-                .bg(rgb(t.bg_header))
+                .bg(p.surface_header)
                 .border_b_1()
-                .border_color(rgb(t.border))
+                .border_color(p.border_subtle)
                 .flex()
                 .items_center()
                 .justify_between()
@@ -7679,7 +7683,7 @@ fn result_code_block(code: &str, lang: &str, t: &ThemeColors, cx: &mut App) -> A
             div()
                 .px(SPACE_MD)
                 .py(SPACE_MD)
-                .bg(rgb(t.bg_panel))
+                .bg(p.surface_raised)
                 .font_family(mono_font_family(cx))
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.text_primary))
@@ -8012,14 +8016,15 @@ fn tool_call_card(
         }
     }
 
+    let p = SemanticPalette::from_context(cx);
     div()
         .relative()
         .w_full()
         .rounded(RADIUS_LG)
         .overflow_hidden()
         .border_1()
-        .border_color(rgb(t.border))
-        .bg(rgb(t.bg_panel))
+        .border_color(p.border_subtle)
+        .bg(p.surface_raised)
         .child(
             v_flex()
                 .gap(SPACE_SM)

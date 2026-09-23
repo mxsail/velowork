@@ -7,7 +7,7 @@ use velowork_ui::code_block::code_block_container;
 use velowork_ui::tokens::{mono_font_family, ui_text_md, ui_text_sm, ui_text_xl};
 use gpui::*;
 use gpui::prelude::FluentBuilder;
-use velowork_ui::{h_flex, v_flex};
+use velowork_ui::{h_flex, v_flex, SemanticPalette};
 
 use super::types::{
     char_len, slice_by_chars, FmValue, Frontmatter, Inline, Node,
@@ -275,12 +275,13 @@ impl MarkdownDocument {
         t: &ThemeColors,
         cx: &App,
     ) -> AnyElement {
+        let p = SemanticPalette::from_context(cx);
         let lang_label = language.clone().unwrap_or_default();
         v_flex()
             .rounded(px(6.0))
-            .bg(rgb(t.bg_primary))
+            .bg(p.surface_raised)
             .border_1()
-            .border_color(rgb(t.border))
+            .border_color(p.border_subtle)
             .overflow_hidden()
             .font_family(mono_font_family(cx))
             .when(!lang_label.is_empty(), |d| {
@@ -288,9 +289,9 @@ impl MarkdownDocument {
                     div()
                         .px(px(12.0))
                         .py(px(6.0))
-                        .bg(rgb(t.bg_header))
+                        .bg(p.surface_header)
                         .border_b_1()
-                        .border_color(rgb(t.border))
+                        .border_color(p.border_subtle)
                         .text_size(ui_text_sm(cx))
                         .text_color(rgb(t.text_muted))
                         .child(lang_label),
@@ -521,15 +522,16 @@ impl MarkdownDocument {
 
     /// Render a frontmatter block as a bordered metadata card.
     pub(crate) fn render_frontmatter(fm: &Frontmatter, t: &ThemeColors, cx: &App) -> Div {
+        let p = SemanticPalette::from_context(cx);
         let card = v_flex()
             .gap(px(4.0))
             .w_full()
             .p(px(12.0))
             .mb(px(8.0))
             .rounded(px(6.0))
-            .bg(rgb(t.bg_secondary))
+            .bg(p.surface_raised)
             .border_1()
-            .border_color(rgb(t.border))
+            .border_color(p.border_subtle)
             .text_size(ui_text_md(cx));
 
         match fm {
@@ -860,11 +862,12 @@ impl MarkdownDocument {
         cx: &App,
         selection: Option<(usize, usize)>,
     ) -> Div {
+        let p = SemanticPalette::from_context(cx);
         // Column widths are precomputed at parse time.
         let mut table = v_flex()
             .rounded(px(4.0))
             .border_1()
-            .border_color(rgb(t.border))
+            .border_color(p.border_subtle)
             .overflow_hidden();
 
         let mut offset = 0usize;
@@ -873,9 +876,9 @@ impl MarkdownDocument {
         if !headers.is_empty() {
             let mut header_row = div()
                 .flex()
-                .bg(rgb(t.bg_header))
+                .bg(p.surface_header)
                 .border_b_1()
-                .border_color(rgb(t.border));
+                .border_color(p.border_subtle);
 
             for (i, header) in headers.iter().enumerate() {
                 let cell_len = Self::inlines_text_length(header) + if i > 0 { 1 } else { 0 }; // +1 for tab
@@ -919,10 +922,10 @@ impl MarkdownDocument {
         for (row_idx, row) in rows.iter().enumerate() {
             let mut row_div = div()
                 .flex()
-                .when(row_idx % 2 == 1, |d| d.bg(rgb(t.bg_secondary)));
+                .when(row_idx % 2 == 1, |d| d.bg(p.surface_raised));
 
             if row_idx < rows.len() - 1 {
-                row_div = row_div.border_b_1().border_color(rgb(t.border));
+                row_div = row_div.border_b_1().border_color(p.border_subtle);
             }
 
             for (i, cell) in row.iter().enumerate() {
