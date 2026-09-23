@@ -19,9 +19,11 @@ pub mod import_session_dialog;
 pub mod project_export_dialog;
 pub mod project_import_dialog;
 pub mod terminal_color_scheme_dialog;
+pub mod attachment_preview_dialog;
 
 pub use service_dialog::{ServiceDialog, ServiceDialogEvent, ServiceDialogMode};
 pub use import_session_dialog::{ImportSessionsDialog, ImportSessionsDialogEvent};
 pub use project_export_dialog::{ProjectExportDialog, ProjectExportDialogEvent};
 pub use project_import_dialog::{ProjectImportDialog, ProjectImportDialogEvent};
 pub use terminal_color_scheme_dialog::{TerminalColorSchemeDialog, TerminalColorSchemeDialogEvent};
+pub use attachment_preview_dialog::{AttachmentPreviewDialog, AttachmentPreviewDialogEvent};

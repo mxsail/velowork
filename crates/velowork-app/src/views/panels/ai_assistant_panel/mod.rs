@@ -22,6 +22,7 @@ use velowork_ui::icon::AppIcon;
 use velowork_ui::menu::PopupMenu;
 use crate::views::overlays::menus::ai_context_menu::open_ai_context_menu;
 use velowork_ui::confirm_dialog::{ConfirmDialog, ConfirmDialogEvent};
+use crate::views::overlays::dialogs::{AttachmentPreviewDialog, AttachmentPreviewDialogEvent};
 use velowork_ui::design::appearance::{ControlSize, ControlVariant};
 use velowork_ui::input::{focus_ring_shadows, Input, InputState, KeyInterceptResult};
 use velowork_ui::overlay_registry::{ClosePolicy, OverlayInfo};
@@ -2201,6 +2202,24 @@ impl AiAssistantPanel {
         }
     }
 
+    /// 打开应用内附件预览弹窗（居中展示大图或文本/代码）。
+    pub(crate) fn open_attachment_preview(&mut self, att: ChatAttachment, cx: &mut Context<Self>) {
+        let dialog = cx.new(|cx| AttachmentPreviewDialog::new(att, cx));
+
+        cx.subscribe(&dialog, move |this, _dialog, event: &AttachmentPreviewDialogEvent, cx| {
+            match event {
+                AttachmentPreviewDialogEvent::Close => {
+                    this.overlay_manager.update(cx, |om, cx| om.close_modal(cx));
+                }
+            }
+        })
+        .detach();
+
+        self.overlay_manager.update(cx, |om, cx| {
+            om.open_modal(dialog, cx);
+        });
+    }
+
     /// 切换历史消息下拉的展开 / 收起。
     fn toggle_history(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.ai_history_open = !self.ai_history_open;
@@ -3427,10 +3446,11 @@ impl AiAssistantPanel {
             .into_any_element()
     }
 
-    /// 输入框上方、附件预览行：以缩略图（图片）或文件图标（文本）展示已添加附件，
-    /// 每项提供移除按钮。点击图片缩略图可在系统默认程序中打开该文件。
+    /// 输入框上方、附件预览行：以缩略图（图片）或文件图标（文本）展示已添加附件。
+    /// 点击卡片主体打开内置弹窗预览；明确点击右上角删除按钮才移除附件。
     fn render_attachment_preview(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
+        let p = SemanticPalette::from_context(cx);
         let this = cx.entity();
         let attachments = self.attachments.clone();
 
@@ -3446,6 +3466,9 @@ impl AiAssistantPanel {
                 let is_image = att.is_image;
                 let name = att.name.clone();
                 let remove_tip = i18n!(cx, "ai.attachment_remove");
+                let preview_tip = format!("{}: {}", i18n!(cx, "ai.attachment_preview"), name);
+                let att_for_preview = att.clone();
+
                 div()
                     .id(ElementId::Name(format!("ai-att-{}", i).into()))
                     .relative()
@@ -3455,6 +3478,11 @@ impl AiAssistantPanel {
                     .border_1()
                     .border_color(rgb(t.border))
                     .bg(rgb(t.bg_hover))
+                    .cursor_pointer()
+                    .stateful_behavior(HoverBehavior {
+                        hover_border: Some(p.border_active),
+                        ..Default::default()
+                    })
                     .overflow_hidden()
                     .child(if is_image {
                         div()
@@ -3494,41 +3522,47 @@ impl AiAssistantPanel {
                             .into_any_element()
                     })
                     .tooltip(move |_, cx| {
-                        let __tip = name.clone();
+                        let __tip = preview_tip.clone();
                         cx.new(|_| Tooltip::new(__tip)).into()
                     })
                     .on_click({
                         let _this = this.clone();
                         cx.listener(move |this, _, _window, cx| {
-                            this.remove_attachment(i, cx);
+                            this.open_attachment_preview(att_for_preview.clone(), cx);
                         })
                     })
-                    // 右上角移除按钮（覆盖在缩略图之上）。
+                    // 右上角移除按钮（覆盖在缩略图之上，带独立阻断与告警反馈）。
                     .child(
                         div()
                             .id(ElementId::Name(format!("ai-att-remove-{}", i).into()))
                             .absolute()
-                            .top(px(1.0))
-                            .right(px(1.0))
-                            .w(px(16.0))
-                            .h(px(16.0))
+                            .top(px(2.0))
+                            .right(px(2.0))
+                            .w(px(20.0))
+                            .h(px(20.0))
                             .flex()
                             .items_center()
                             .justify_center()
-                            .rounded(RADIUS_MD)
-                            .bg(rgb(t.bg_secondary))
+                            .rounded(RADIUS_SM)
+                            .bg(p.surface_card)
                             .border_1()
-                            .border_color(rgb(t.border))
+                            .border_color(p.border_subtle)
                             .cursor_pointer()
-                            .text_color(rgb(t.text_muted))
+                            .text_color(p.text_muted)
                             .stateful_behavior(HoverBehavior {
-                                hover_bg: rgb(t.border_active).into(),
+                                hover_bg: p.status_error.opacity(0.15),
+                                hover_fg: Some(p.status_error),
+                                hover_border: Some(p.status_error.opacity(0.5)),
                                 ..Default::default()
                             })
-                            .child(AppIcon::Close.size(ICON_SM).text_color(rgb(t.text_muted)))
+                            .child(AppIcon::Close.size(ICON_SM))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                cx.stop_propagation();
+                            })
                             .on_click({
                                 let _this = this.clone();
                                 cx.listener(move |this, _, _window, cx| {
+                                    cx.stop_propagation();
                                     this.remove_attachment(i, cx);
                                 })
                             })
@@ -6669,6 +6703,9 @@ fn render_ai_message(
                     } else {
                         AppIcon::File
                     };
+                    let panel_ent = panel_entity.clone();
+                    let att_for_preview = att.clone();
+                    let preview_tip = format!("{}: {}", i18n!(cx, "ai.attachment_preview"), name);
                     h_flex()
                         .id(ElementId::Name(format!("msg-att-chip-{}", name).into()))
                         .items_center()
@@ -6679,6 +6716,12 @@ fn render_ai_message(
                         .bg(p.surface_hover)
                         .border_1()
                         .border_color(p.border_subtle)
+                        .cursor_pointer()
+                        .stateful_behavior(HoverBehavior {
+                            hover_bg: p.surface_hover,
+                            hover_border: Some(p.border_active),
+                            ..Default::default()
+                        })
                         .child(icon_path.size(px(11.0)).text_color(p.text_muted))
                         .child({
                             let n = name.clone();
@@ -6689,8 +6732,13 @@ fn render_ai_message(
                                 .into_any_element()
                         })
                         .tooltip(move |_, cx| {
-                            let __tip = name.clone();
+                            let __tip = preview_tip.clone();
                             cx.new(|_| Tooltip::new(__tip)).into()
+                        })
+                        .on_click(move |_, _window, cx| {
+                            panel_ent.update(cx, |this, cx| {
+                                this.open_attachment_preview(att_for_preview.clone(), cx);
+                            });
                         })
                 })
                 .collect::<Vec<_>>();

@@ -117,6 +117,30 @@ pub fn open_in_file_manager(path: &std::path::Path) {
     }
 }
 
+/// Open a file in the default system application.
+pub fn open_file(path: &std::path::Path) {
+    if !path.exists() {
+        log::warn!("open_file: path does not exist: {path:?}");
+        return;
+    }
+    let path_str = path.to_string_lossy();
+    #[cfg(target_os = "linux")]
+    let result = spawn_and_reap(command("xdg-open").arg(path_str.as_ref()));
+    #[cfg(target_os = "macos")]
+    let result = spawn_and_reap(command("open").arg(path_str.as_ref()));
+    #[cfg(windows)]
+    let result = spawn_and_reap(command("cmd").args(["/C", "start", "", path_str.as_ref()]));
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    let result: std::io::Result<()> = {
+        log::warn!("open_file is not supported on this platform: {path:?}");
+        Ok(())
+    };
+
+    if let Err(e) = result {
+        log::warn!("failed to open file {path:?}: {e}");
+    }
+}
+
 /// Raise the soft open-file-descriptor limit toward the hard limit at startup.
 ///
 /// The command bus caps concurrent child processes (~20), but interactive PTY
