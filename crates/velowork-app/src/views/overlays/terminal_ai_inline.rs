@@ -163,6 +163,7 @@ pub struct TerminalAiInline {
     pub model_select: Entity<SelectState<String>>,
     pub selected_model_id: Option<String>,
     pub toolbar_input: Entity<SimpleInputState>,
+    pub initial_input: Entity<SimpleInputState>,
     pub followup_input: Entity<SimpleInputState>,
     pub active_selection: Option<InlineChatSelection>,
     pub selection_dragging: Option<InlineSelectionDrag>,
@@ -205,7 +206,14 @@ impl TerminalAiInline {
                 .submit_on_enter(true)
         });
 
-        let fu_ph = i18n!(cx, "terminal.inline_ai_initial_placeholder");
+        let init_ph = i18n!(cx, "terminal.inline_ai_initial_placeholder");
+        let initial_input = cx.new(|cx| {
+            SimpleInputState::new(cx)
+                .placeholder(init_ph)
+                .submit_on_enter(true)
+        });
+
+        let fu_ph = i18n!(cx, "terminal.inline_ai_follow_up_placeholder");
         let followup_input = cx.new(|cx| {
             SimpleInputState::new(cx)
                 .placeholder(fu_ph)
@@ -224,6 +232,13 @@ impl TerminalAiInline {
                     });
                     this.start_turn(query, Some(this.selection_text.clone()), cx);
                 }
+            }
+        })
+        .detach();
+
+        cx.subscribe(&initial_input, |this: &mut Self, _, event: &InputEvent, cx| {
+            if *event == InputEvent::PressEnter {
+                this.submit_initial(cx);
             }
         })
         .detach();
@@ -248,6 +263,7 @@ impl TerminalAiInline {
             model_select,
             selected_model_id,
             toolbar_input,
+            initial_input,
             followup_input,
             active_selection: None,
             selection_dragging: None,
@@ -277,7 +293,11 @@ impl TerminalAiInline {
                 self.toolbar_input.update(cx, |inp, cx| inp.focus(window, cx));
             }
             InlineAiMode::Popover => {
-                self.followup_input.update(cx, |inp, cx| inp.focus(window, cx));
+                if self.messages.is_empty() {
+                    self.initial_input.update(cx, |inp, cx| inp.focus(window, cx));
+                } else {
+                    self.followup_input.update(cx, |inp, cx| inp.focus(window, cx));
+                }
             }
         }
     }
@@ -748,6 +768,27 @@ impl TerminalAiInline {
         cx.emit(TerminalAiInlineEvent::Close);
     }
 
+    pub fn submit_initial(&mut self, cx: &mut Context<Self>) {
+        if self.is_streaming {
+            return;
+        }
+
+        let text = self.initial_input.read(cx).value().to_string();
+        let trimmed = text.trim().to_string();
+        if trimmed.is_empty() {
+            return;
+        }
+
+        let inp = self.initial_input.clone();
+        cx.defer(move |cx| {
+            inp.update(cx, |inp, cx| {
+                inp.set_value("", cx);
+            });
+        });
+
+        self.start_turn(trimmed, None, cx);
+    }
+
     pub fn submit_followup(&mut self, cx: &mut Context<Self>) {
         if self.is_streaming {
             return;
@@ -1185,9 +1226,9 @@ impl TerminalAiInline {
                     .flex()
                     .items_center()
                     .child(
-                        SimpleInput::new(&self.followup_input)
+                        SimpleInput::new(&self.initial_input)
                             .borderless(true)
-                            .fill_height()
+                            .h(px(32.0))
                             .text_size(ui_text_md(cx)),
                     ),
             )
@@ -1221,7 +1262,7 @@ impl TerminalAiInline {
                 icon_button_sized("btn-initial-bar-send", AppIcon::Send, 24.0, 14.0, &t)
                     .tooltip(move |_, cx| cx.new(|_| Tooltip::new(send_tip)).into())
                     .on_click(cx.listener(|this, _, _, cx| {
-                        this.submit_followup(cx);
+                        this.submit_initial(cx);
                     })),
             )
             .child(

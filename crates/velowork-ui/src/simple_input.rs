@@ -3645,6 +3645,7 @@ impl RenderOnce for SimpleInput {
                     div()
                         .flex_1()
                         .when(self.fill_height, |d| d.h_full())
+                        .when(!self.fill_height, |d| d.h_full().items_center())
                         .flex()
                         .child(self.state),
                 )
