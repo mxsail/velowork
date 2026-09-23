@@ -399,6 +399,12 @@ pub fn render_quote_capsule(
 
 /// 渲染附件 Chip
 pub fn render_attachment_chip(att: &ChatAttachment, p: &SemanticPalette, cx: &App) -> AnyElement {
+    let icon = if att.is_image {
+        AppIcon::Image
+    } else {
+        AppIcon::File
+    };
+
     h_flex()
         .items_center()
         .gap(SPACE_XS)
@@ -408,7 +414,7 @@ pub fn render_attachment_chip(att: &ChatAttachment, p: &SemanticPalette, cx: &Ap
         .bg(p.surface_hover)
         .border_1()
         .border_color(p.border_subtle)
-        .child(AppIcon::File.size(px(11.0)).text_color(p.text_muted))
+        .child(icon.size(px(11.0)).text_color(p.text_muted))
         .child(
             div()
                 .text_size(ui_text_md(cx))

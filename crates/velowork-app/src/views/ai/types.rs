@@ -46,6 +46,10 @@ pub struct ChatAttachment {
     pub is_image: bool,
     /// 文本类附件解析出的内容；图片类为 `None`。
     pub text_content: Option<String>,
+    /// 图片专属：Base64 Data URL（如 "data:image/png;base64,..."）
+    pub image_data_url: Option<String>,
+    /// 是否已就绪（文本读取或图片 Base64 异步转码已完成，可安全提交发送）
+    pub is_ready: bool,
 }
 
 /// 统一的高保真聊天消息结构体。
@@ -195,6 +199,8 @@ impl ChatMessage {
                     name: a.name,
                     is_image: a.is_image,
                     text_content: a.text_content,
+                    image_data_url: None,
+                    is_ready: true,
                 })
                 .collect(),
         }

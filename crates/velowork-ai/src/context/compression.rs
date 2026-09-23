@@ -3,6 +3,15 @@
 use serde::{Deserialize, Serialize};
 pub use velowork_workspace::settings::AiCompressionStrategy;
 
+/// 文本类附件单个文件最大允许字节数 (500 KB)
+pub const MAX_TEXT_ATTACHMENT_SIZE: usize = 500 * 1024;
+/// 图片类附件单个文件最大允许字节数 (10 MB)
+pub const MAX_IMAGE_ATTACHMENT_SIZE: usize = 10 * 1024 * 1024;
+/// 单轮对话允许添加的图片附件数量上限 (5 张，对齐 Warp 标准)
+pub const MAX_IMAGES_PER_TURN: usize = 5;
+/// 单轮对话所有图片附件合计大小上限 (20 MB)
+pub const MAX_TOTAL_IMAGES_SIZE: usize = 20 * 1024 * 1024;
+
 /// 通用简单消息接口，用于估算 Token 与按策略压缩上下文。
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SimpleChatMessage {
@@ -10,6 +19,9 @@ pub struct SimpleChatMessage {
     pub text: String,
     pub thinking: Option<String>,
     pub quote: Option<String>,
+    /// 随本条消息附带的图片（Base64 Data URL 格式，如 "data:image/png;base64,..."）
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 impl SimpleChatMessage {
@@ -19,6 +31,7 @@ impl SimpleChatMessage {
             text: text.into(),
             thinking: None,
             quote: None,
+            images: Vec::new(),
         }
     }
 
@@ -32,6 +45,11 @@ impl SimpleChatMessage {
         self
     }
 
+    pub fn with_images(mut self, images: Vec<String>) -> Self {
+        self.images = images;
+        self
+    }
+
     /// 估算本条消息的 Token 使用量。
     pub fn estimate_tokens(&self) -> usize {
         let mut total = estimate_tokens(&self.text);
@@ -41,6 +59,8 @@ impl SimpleChatMessage {
         if let Some(quote) = &self.quote {
             total += estimate_tokens(quote);
         }
+        // 视觉多模态 Token：标准分辨率图像约 1000~1600 tokens，取中位数 1200
+        total += self.images.len() * 1200;
         // 加上消息 header 开销 (~4 tokens)
         total + 4
     }
@@ -212,5 +232,17 @@ mod tests {
         let compressed = compress_chat_history(&msgs, AiCompressionStrategy::Summarize, 10000, 4);
         assert!(compressed[0].text.contains("[History Summary"));
         assert!(compressed[0].text.contains("占用非常高"));
+    }
+
+    #[test]
+    fn test_estimate_tokens_with_images() {
+        let msg_text_only = SimpleChatMessage::new(true, "看看这张图");
+        let tokens_text = msg_text_only.estimate_tokens();
+
+        let msg_with_image = SimpleChatMessage::new(true, "看看这张图")
+            .with_images(vec!["data:image/png;base64,abc".to_string()]);
+        let tokens_image = msg_with_image.estimate_tokens();
+
+        assert_eq!(tokens_image, tokens_text + 1200);
     }
 }

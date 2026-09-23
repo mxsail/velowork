@@ -439,6 +439,112 @@ pub fn stream_api_reply_with_system(
     stream_api_raw(base_url, api_key, model_id, api_messages, &[], std::time::Duration::from_secs(30))
 }
 
+/// 将系统内部的 [`SimpleChatMessage`] 列表转换为符合 OpenAI 规范的 API 消息 JSON 数组。
+///
+/// 特性与安全保障：
+/// 1. **多模态 Vision 兼容**：若消息附带 `images`（Base64 Data URL），则将 `content` 构造为
+///    `[{"type": "text", "text": ...}, {"type": "image_url", "image_url": {"url": ...}}]`；
+/// 2. **纯文本向后兼容**：若消息无图片，`content` 保持为纯字符串 `"..."`，100% 兼容老旧及纯文本模型；
+/// 3. **多轮历史瘦身**：仅保留最近 `keep_recent_images` 条含图消息的完整 Base64，更早历史轮次中的图片
+///    自动替换为紧凑的文本占位符，防止多轮请求体指数级膨胀超限（避免 HTTP 413 Payload Too Large）；
+/// 4. **引用内容格式化**：若包含终端 `quote`，自动规范化放入 prompt。
+pub fn simple_messages_to_api_values(
+    messages: &[crate::context::SimpleChatMessage],
+    system_prompt: Option<&str>,
+    keep_recent_images: usize,
+) -> Vec<serde_json::Value> {
+    let mut api_messages = Vec::new();
+
+    if let Some(sys) = system_prompt.map(str::trim).filter(|s| !s.is_empty()) {
+        api_messages.push(json!({
+            "role": "system",
+            "content": sys,
+        }));
+    }
+
+    // 找出所有带有有效图片的消息索引（从后往前数保留 keep_recent_images 个）
+    let image_msg_indices: Vec<usize> = messages
+        .iter()
+        .enumerate()
+        .filter(|(_, m)| !m.images.is_empty())
+        .map(|(i, _)| i)
+        .collect();
+
+    let cutoff_idx = if image_msg_indices.len() > keep_recent_images {
+        image_msg_indices[image_msg_indices.len() - keep_recent_images]
+    } else {
+        0
+    };
+
+    for (idx, m) in messages.iter().enumerate() {
+        let role = if m.is_user { "user" } else { "assistant" };
+
+        let mut text = m.text.clone();
+        if let Some(q) = &m.quote {
+            let trimmed = q.trim();
+            if !trimmed.is_empty() {
+                if text.trim().is_empty() {
+                    text = format!("> {}\n", trimmed);
+                } else {
+                    text = format!("> {}\n\n{}", trimmed, text);
+                }
+            }
+        }
+
+        if m.images.is_empty() {
+            // 纯文本消息：直接使用字符串 content
+            api_messages.push(json!({
+                "role": role,
+                "content": text,
+            }));
+        } else if idx < cutoff_idx {
+            // 更早历史轮次中的图片：降级为文本占位符，避免 payload 暴增
+            let placeholder = format!(
+                "\n\n[包含 {} 张历史图片附件，已在此轮对话中省略完整数据以节省带宽]",
+                m.images.len()
+            );
+            text.push_str(&placeholder);
+            api_messages.push(json!({
+                "role": role,
+                "content": text,
+            }));
+        } else {
+            // 最近轮次：构建 OpenAI 兼容多模态 Vision content 数组
+            let mut parts = Vec::new();
+            parts.push(json!({
+                "type": "text",
+                "text": text,
+            }));
+            for img_url in &m.images {
+                parts.push(json!({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": img_url,
+                    }
+                }));
+            }
+            api_messages.push(json!({
+                "role": role,
+                "content": parts,
+            }));
+        }
+    }
+
+    api_messages
+}
+
+/// 向 OpenAI 兼容端点发起包含多模态（文本与图片）的通用流式请求。
+pub fn stream_api_reply_simple(
+    base_url: &str,
+    api_key: &str,
+    model_id: &str,
+    system_prompt: Option<&str>,
+    messages: &[crate::context::SimpleChatMessage],
+) -> mpsc::Receiver<StreamChunk> {
+    let api_messages = simple_messages_to_api_values(messages, system_prompt, 1);
+    stream_api_raw(base_url, api_key, model_id, api_messages, &[], std::time::Duration::from_secs(30))
+}
+
 /// 向 OpenAI 兼容端点发起带工具定义的流式请求（支持 tool calling）。
 ///
 /// `messages` 为完整 OpenAI 格式的消息列表（含 system / user / assistant / tool）。
@@ -586,5 +692,56 @@ mod tests {
             build_chat_completions_url("https://api.openai.com/v1"),
             "https://api.openai.com/v1/chat/completions"
         );
+    }
+
+    #[test]
+    fn test_simple_messages_to_api_values_pure_text() {
+        let msgs = vec![
+            crate::context::SimpleChatMessage::new(true, "hello"),
+            crate::context::SimpleChatMessage::new(false, "world"),
+        ];
+        let values = simple_messages_to_api_values(&msgs, Some("system prompt"), 1);
+        assert_eq!(values.len(), 3);
+        assert_eq!(values[0]["role"], "system");
+        assert_eq!(values[0]["content"], "system prompt");
+        assert_eq!(values[1]["role"], "user");
+        assert_eq!(values[1]["content"], "hello"); // 纯字符串
+        assert_eq!(values[2]["role"], "assistant");
+        assert_eq!(values[2]["content"], "world");
+    }
+
+    #[test]
+    fn test_simple_messages_to_api_values_multimodal_and_history_slimming() {
+        let msg1 = crate::context::SimpleChatMessage::new(true, "看第一张图")
+            .with_images(vec!["data:image/png;base64,img1".to_string()]);
+        let msg2 = crate::context::SimpleChatMessage::new(false, "已看到图1");
+        let msg3 = crate::context::SimpleChatMessage::new(true, "再看第二张图")
+            .with_images(vec!["data:image/jpeg;base64,img2".to_string()]);
+
+        let msgs = vec![msg1, msg2, msg3];
+        // keep_recent_images = 1：只保留 msg3 的真实图片，msg1 的图片转为占位符
+        let values = simple_messages_to_api_values(&msgs, None, 1);
+        assert_eq!(values.len(), 3);
+
+        // 第 1 轮：历史轮次被瘦身，content 为纯文本字符串（含省略说明）
+        assert_eq!(values[0]["role"], "user");
+        assert!(values[0]["content"].is_string());
+        let c1 = values[0]["content"].as_str().unwrap();
+        assert!(c1.contains("看第一张图"));
+        assert!(c1.contains("已在此轮对话中省略完整数据以节省带宽"));
+
+        // 第 2 轮：助手回复
+        assert_eq!(values[1]["role"], "assistant");
+        assert_eq!(values[1]["content"], "已看到图1");
+
+        // 第 3 轮：最新轮次，content 为包含 image_url 的多模态数组
+        assert_eq!(values[2]["role"], "user");
+        assert!(values[2]["content"].is_array());
+        let arr = values[2]["content"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["type"], "text");
+        assert_eq!(arr[0]["text"], "再看第二张图");
+        assert_eq!(arr[1]["type"], "image_url");
+        assert_eq!(arr[1]["image_url"]["url"], "data:image/jpeg;base64,img2");
     }
 }

@@ -8920,6 +8920,7 @@ dependencies = [
  "anyhow",
  "arc-swap",
  "async-channel",
+ "base64 0.22.1",
  "chrono",
  "dirs 5.0.1",
  "env_filter 0.1.4",

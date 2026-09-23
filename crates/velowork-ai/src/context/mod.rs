@@ -6,7 +6,8 @@
 pub mod compression;
 pub use compression::{
     compress_chat_history, estimate_messages_tokens, estimate_tokens, AiCompressionStrategy,
-    SimpleChatMessage,
+    SimpleChatMessage, MAX_IMAGES_PER_TURN, MAX_IMAGE_ATTACHMENT_SIZE, MAX_TEXT_ATTACHMENT_SIZE,
+    MAX_TOTAL_IMAGES_SIZE,
 };
 
 use gpui::{App, Entity};

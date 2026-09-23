@@ -48,6 +48,7 @@ sysinfo = "0.33"
 notify-rust = "4"
 
 # Utilities
+base64 = "0.22"
 uuid = { version = "1.10", features = ["v4"] }
 regex = "1.10"
 dirs = "5.0"

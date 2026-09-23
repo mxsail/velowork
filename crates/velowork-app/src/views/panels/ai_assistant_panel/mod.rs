@@ -3,7 +3,6 @@ use crate::settings::settings_entity;
 use crate::views::overlays::overlay_manager::OverlayManager;
 use gpui::prelude::*;
 use gpui::*;
-use serde_json::json;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use velowork_ai::{
@@ -76,6 +75,10 @@ pub struct ChatAttachment {
     pub is_image: bool,
     /// 文本类附件解析出的内容；图片类为 `None`。
     pub text_content: Option<String>,
+    /// 图片专属：Base64 Data URL（如 "data:image/png;base64,..."）
+    pub image_data_url: Option<String>,
+    /// 是否已就绪（文本读取或图片 Base64 异步转码已完成，可安全提交发送）
+    pub is_ready: bool,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
@@ -195,6 +198,8 @@ impl ChatMessage {
                     name: a.name,
                     is_image: a.is_image,
                     text_content: a.text_content,
+                    image_data_url: None,
+                    is_ready: true,
                 })
                 .collect(),
         }
@@ -249,6 +254,8 @@ fn parse_message_row(m_row: velowork_workspace::repositories::AiMessageRow, repo
                 path: p,
                 is_image: is_img,
                 text_content,
+                image_data_url: None,
+                is_ready: true,
             });
         }
     }
@@ -436,7 +443,15 @@ fn chat_messages_to_simple(messages: &[ChatMessage]) -> Vec<velowork_ai::SimpleC
             if !m.attachments.is_empty() {
                 text.push_str(&attachment_context(&m.attachments));
             }
-            let mut simple = velowork_ai::SimpleChatMessage::new(m.is_user, text);
+            let mut images = Vec::new();
+            for a in &m.attachments {
+                if a.is_image {
+                    if let Some(url) = &a.image_data_url {
+                        images.push(url.clone());
+                    }
+                }
+            }
+            let mut simple = velowork_ai::SimpleChatMessage::new(m.is_user, text).with_images(images);
             if let Some(t) = &m.thinking {
                 simple = simple.with_thinking(t);
             }
@@ -482,14 +497,58 @@ fn is_image_path(p: &std::path::Path) -> bool {
         .is_some_and(|e| IMAGE_EXTS.contains(&e.as_str()))
 }
 
-/// 安全读取文本类附件内容：仅读取体量适中（< 200KB）且可成功解码为 UTF-8 的文件，
-/// 其余（二进制 / 超大文件）返回 `None`，避免把无意义数据塞进模型上下文。
-fn read_text_safe(p: &std::path::Path) -> Option<String> {
-    let content = std::fs::read_to_string(p).ok()?;
-    if content.is_empty() || content.len() > 200_000 {
-        return None;
+/// 判断是否为支持传入 Vision API 的光栅图片格式（PNG, JPG, WEBP, GIF）。
+/// 注意：SVG 属于矢量代码，不在此列（SVG 自动分流为文本代码内联，防止 Vision API 报错）。
+fn is_vision_image_path(p: &std::path::Path) -> bool {
+    const VISION_IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif"];
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| VISION_IMAGE_EXTS.contains(&e.as_str()))
+}
+
+/// 根据扩展名推导标准图片 MIME 类型
+fn image_mime_type(p: &std::path::Path) -> &'static str {
+    match p.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase()).as_deref() {
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("webp") => "image/webp",
+        Some("gif") => "image/gif",
+        _ => "image/png",
     }
-    Some(content)
+}
+
+/// 常见黑名单二进制文件格式，严禁作为文本附件添加。
+fn is_binary_blacklisted(p: &std::path::Path) -> bool {
+    const BLACKLIST: &[&str] = &[
+        "exe", "dll", "so", "dylib", "bin", "iso", "zip", "tar", "gz", "7z", "rar",
+        "pdf", "docx", "xlsx", "pptx", "dmg", "pkg", "deb", "rpm", "class", "pyc",
+        "o", "a", "wasm",
+    ];
+    p.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| BLACKLIST.contains(&e.as_str()))
+}
+
+/// 安全读取文本/代码/SVG类附件内容：
+/// 仅读取体量适中（<= 500KB）且可成功解码为 UTF-8 的文件，其余返回明确错误描述。
+fn read_text_safe(p: &std::path::Path) -> Result<String, &'static str> {
+    if is_binary_blacklisted(p) {
+        return Err("暂不支持二进制或压缩包文件格式");
+    }
+    let Ok(meta) = std::fs::metadata(p) else {
+        return Err("无法读取文件元数据");
+    };
+    if meta.len() > velowork_ai::MAX_TEXT_ATTACHMENT_SIZE as u64 {
+        return Err("文本文件超出 500KB 大小限制");
+    }
+    let Ok(content) = std::fs::read_to_string(p) else {
+        return Err("文件内容不是有效的 UTF-8 文本");
+    };
+    if content.trim().is_empty() {
+        return Err("文件内容为空");
+    }
+    Ok(content)
 }
 
 /// 统计一条消息正文中「纯文本片段」的总行数（工具调用卡片不计入），至少返回 1。
@@ -521,23 +580,22 @@ fn ai_message_skips_reveal(msg: &ChatMessage) -> bool {
     msg.text.contains("```")
 }
 
-/// 将附件拼装为供模型消费的上下文段落。文本附件内联其内容，图片附件给出
-/// 路径与名称（当前文本模型无法接收图像像素，路径可作为检索线索）。
+/// 将文本/代码附件拼装为供模型消费的上下文段落。
+/// 图片附件通过多模态 Vision 接口（Base64 Data URL）向模型传输真实像素，不再生成无意义的本地磁盘路径。
 fn attachment_context(attachments: &[ChatAttachment]) -> String {
-    if attachments.is_empty() {
+    let text_attachments: Vec<_> = attachments
+        .iter()
+        .filter(|a| !a.is_image && a.text_content.is_some())
+        .collect();
+
+    if text_attachments.is_empty() {
         return String::new();
     }
     let mut s = String::from("\n\n[附件上下文 / Attachments]\n");
-    for a in attachments {
-        let kind = if a.is_image {
-            "图片 Image"
-        } else {
-            "文本 Text"
-        };
-        s.push_str(&format!("--- 文件: {} ({})\n", a.name, kind));
-        match &a.text_content {
-            Some(c) => s.push_str(c),
-            None => s.push_str(&format!("(图片附件，磁盘路径: {})\n", a.path.display())),
+    for a in text_attachments {
+        s.push_str(&format!("--- 文件: {} (文本 Text)\n", a.name));
+        if let Some(c) = &a.text_content {
+            s.push_str(c);
         }
         s.push('\n');
     }
@@ -1830,24 +1888,103 @@ impl AiAssistantPanel {
             multiple: true,
             prompt: Some(i18n!(cx, "ai.attach").into()),
         });
-        let _this = cx.entity().clone();
         cx.spawn(async move |this: WeakEntity<Self>, cx| {
             if let Ok(Ok(Some(paths))) = rx.await {
                 let _ = this.update(cx, |this, cx| {
+                    let mut errors = Vec::new();
+                    let current_image_count = this.attachments.iter().filter(|a| a.is_image).count();
+                    let mut added_images = 0;
+
                     for p in paths {
                         let name = p
                             .file_name()
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| "附件".to_string());
-                        let is_image = is_image_path(&p);
-                        let text_content = if is_image { None } else { read_text_safe(&p) };
-                        this.attachments.push(ChatAttachment {
-                            path: p,
-                            name,
-                            is_image,
-                            text_content,
-                        });
+
+                        if is_vision_image_path(&p) {
+                            if current_image_count + added_images >= velowork_ai::MAX_IMAGES_PER_TURN {
+                                errors.push(format!("图片 {name} 未添加：单轮最多支持 5 张图片"));
+                                continue;
+                            }
+                            let Ok(meta) = std::fs::metadata(&p) else {
+                                errors.push(format!("图片 {name} 无法读取元数据"));
+                                continue;
+                            };
+                            if meta.len() > velowork_ai::MAX_IMAGE_ATTACHMENT_SIZE as u64 {
+                                errors.push(format!("图片 {name} 超出 10MB 大小限制"));
+                                continue;
+                            }
+
+                            // 预压入占位，标为未就绪 (is_ready = false)
+                            this.attachments.push(ChatAttachment {
+                                path: p.clone(),
+                                name: name.clone(),
+                                is_image: true,
+                                text_content: None,
+                                image_data_url: None,
+                                is_ready: false,
+                            });
+                            added_images += 1;
+
+                            // 调度后台异步线程读取与 Base64 编码，绝不阻塞 UI 主线程
+                            let p_clone = p.clone();
+                            let p_for_read = p.clone();
+                            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                                let read_res = cx.background_executor().spawn(async move {
+                                    let bytes = std::fs::read(&p_for_read)?;
+                                    let mime = image_mime_type(&p_for_read);
+                                    use base64::Engine;
+                                    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                                    Ok::<_, std::io::Error>(format!("data:{mime};base64,{b64}"))
+                                }).await;
+
+                                let _ = this.update(cx, |this, cx| {
+                                    if let Ok(data_url) = read_res {
+                                        if let Some(att) = this.attachments.iter_mut().find(|a| a.path == p_clone) {
+                                            att.image_data_url = Some(data_url);
+                                            att.is_ready = true;
+                                        }
+                                    } else {
+                                        this.attachments.retain(|a| a.path != p_clone);
+                                    }
+                                    cx.notify();
+                                });
+                            }).detach();
+                        } else {
+                            // 文本 / 代码 / SVG 文件处理
+                            match read_text_safe(&p) {
+                                Ok(content) => {
+                                    this.attachments.push(ChatAttachment {
+                                        path: p,
+                                        name,
+                                        is_image: false,
+                                        text_content: Some(content),
+                                        image_data_url: None,
+                                        is_ready: true,
+                                    });
+                                }
+                                Err(err_reason) => {
+                                    errors.push(format!("{name}: {err_reason}"));
+                                }
+                            }
+                        }
                     }
+
+                    if !errors.is_empty() {
+                        let err_text = format!("{}: {}", i18n!(cx, "ai.error"), errors.join("; "));
+                        this.push_message(ChatMessage {
+                            is_user: false,
+                            text: err_text,
+                            streaming: false,
+                            document_views: std::cell::RefCell::new(Vec::new()),
+                            tool_call: None,
+                            thinking: None,
+                            quote: None,
+                            attachments: Vec::new(),
+                        });
+                        this.scroll_to_bottom();
+                    }
+
                     cx.notify();
                 });
             }
@@ -1988,6 +2125,8 @@ impl AiAssistantPanel {
                     name: a.name.clone(),
                     is_image: a.is_image,
                     text_content: a.text_content.clone(),
+                    image_data_url: a.image_data_url.clone(),
+                    is_ready: a.is_ready,
                 }).collect(),
             };
             self.push_message(panel_msg);
@@ -2003,7 +2142,12 @@ impl AiAssistantPanel {
             .as_ref()
             .map(|i| i.read(cx).text().to_string().trim().to_string())
             .unwrap_or_default();
-        if (input_text.is_empty() && self.ai_quote.is_none()) || self.ai_streaming_index.is_some() {
+        if (input_text.is_empty() && self.ai_quote.is_none() && self.attachments.is_empty()) || self.ai_streaming_index.is_some() {
+            return;
+        }
+
+        // 检查是否有仍在后台转码中的图片附件，防止并发漏发
+        if self.attachments.iter().any(|a| !a.is_ready) {
             return;
         }
 
@@ -2071,6 +2215,10 @@ impl AiAssistantPanel {
     fn on_send_button(&mut self, cx: &mut Context<Self>) {
         // 引用文本正在编辑中时，严禁误触发发送，避免未保存的引用或未完成输入被意外提交。
         if self.ai_quote_editing {
+            return;
+        }
+        // 附件仍在后台异步读取/转码中，拦截发送防止图片漏发
+        if self.attachments.iter().any(|a| !a.is_ready) {
             return;
         }
         let is_streaming = self.ai_streaming_index.is_some();
@@ -2252,11 +2400,6 @@ impl AiAssistantPanel {
                 simple_msgs
             };
 
-            let history: Vec<(String, bool)> = compressed
-                .into_iter()
-                .map(|m| (m.text, m.is_user))
-                .collect();
-
             self.push_message(ChatMessage {
                 is_user: false,
                 text: String::new(),
@@ -2265,7 +2408,6 @@ impl AiAssistantPanel {
                 tool_call: None,
                 thinking: None,
                 attachments: Vec::new(),
-
                 quote: None,
             });
             let streaming_idx = self.messages.len() - 1;
@@ -2273,11 +2415,12 @@ impl AiAssistantPanel {
             self.update_message_input_states(streaming_idx, cx);
             self.scroll_to_bottom();
 
-            let rx = self.ai_client.stream_reply(
+            let rx = self.ai_client.stream_reply_simple(
                 &model_config.base_url,
                 &model_config.api_key,
                 &model_config.model_id,
-                &history,
+                None,
+                &compressed,
             );
             self.ai_stream_rx = Some(rx);
 
@@ -2330,10 +2473,16 @@ impl AiAssistantPanel {
                                             }
                                             StreamChunk::Error(e) => {
                                                 if let Some(idx) = this.ai_streaming_index {
+                                                    let err_str = e.to_string();
+                                                    let display_err = if err_str.contains("400") && (err_str.contains("content") || err_str.contains("image")) {
+                                                        format!("{err_str}\n（提示：当前模型可能不支持视觉多模态输入，建议在顶部切换为 GPT-4o、Claude 3.5 Sonnet 或 Qwen-VL 等多模态模型）")
+                                                    } else {
+                                                        err_str
+                                                    };
                                                     this.messages[idx].text = format!(
                                                         "{}: {}",
                                                         i18n!(cx, "ai.error"),
-                                                        e
+                                                        display_err
                                                     );
                                                     this.messages[idx].streaming = false;
                                                     this.update_message_input_states(idx, cx);
@@ -2542,16 +2691,11 @@ impl AiAssistantPanel {
         std::thread::spawn(move || {
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let system = render_prompt(PromptScene::General, &bundle);
-                let mut agent_messages = Vec::new();
-                agent_messages.push(json!({ "role": "system", "content": system }));
-                for m in compressed {
-                    let role = if m.is_user { "user" } else { "assistant" };
-                    let mut content = m.text;
-                    if let Some(q) = m.quote {
-                        content = format!("> {}\n\n{}", q, content);
-                    }
-                    agent_messages.push(json!({ "role": role, "content": content }));
-                }
+                let agent_messages = velowork_ai::simple_messages_to_api_values(
+                    &compressed,
+                    Some(&system),
+                    1,
+                );
                 // 在 HTTP 调用前检查取消
                 if rt_cancel.is_cancelled() {
                     return;
@@ -2699,10 +2843,15 @@ impl AiAssistantPanel {
                                         }
                                         AgentEvent::Error(e) => {
                                             if let Some(idx) = this.ai_streaming_index {
+                                                let display_err = if e.contains("400") && (e.contains("content") || e.contains("image")) {
+                                                    format!("{e}\n（提示：当前模型可能不支持视觉多模态输入，建议在顶部切换为 GPT-4o、Claude 3.5 Sonnet 或 Qwen-VL 等多模态模型）")
+                                                } else {
+                                                    e
+                                                };
                                                 this.messages[idx].text = format!(
                                                     "{}: {}",
                                                     i18n!(cx, "ai.error"),
-                                                    e
+                                                    display_err
                                                 );
                                                 this.messages[idx].streaming = false;
                                                 this.update_message_input_states(idx, cx);
@@ -3107,10 +3256,30 @@ impl AiAssistantPanel {
                     .bg(rgb(t.bg_hover))
                     .overflow_hidden()
                     .child(if is_image {
-                        img(att_path.clone())
+                        div()
+                            .relative()
                             .w_full()
                             .h_full()
-                            .object_fit(ObjectFit::Cover)
+                            .child(
+                                img(att_path.clone())
+                                    .w_full()
+                                    .h_full()
+                                    .object_fit(ObjectFit::Cover),
+                            )
+                            .children((!att.is_ready).then(|| {
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .bg(rgb(t.bg_primary).opacity(0.6))
+                                    .child(
+                                        ProgressRing::new(0.5)
+                                            .size(px(16.0))
+                                            .stroke_width(px(2.0)),
+                                    )
+                            }))
                             .into_any_element()
                     } else {
                         div()

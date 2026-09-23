@@ -35,9 +35,13 @@ pub use workflow::{
 pub use context::{
     capture_live_context, compress_chat_history, estimate_messages_tokens, estimate_tokens,
     list_sessions, read_focused_terminal, session_config, AiCompressionStrategy, LiveContext,
-    SimpleChatMessage,
+    SimpleChatMessage, MAX_IMAGES_PER_TURN, MAX_IMAGE_ATTACHMENT_SIZE, MAX_TEXT_ATTACHMENT_SIZE,
+    MAX_TOTAL_IMAGES_SIZE,
 };
-pub use provider::{AiModel, LlmConfig, LocalRuleProvider, RuleReply, StreamChunk, ToolCall, ToolSpec};
+pub use provider::{
+    simple_messages_to_api_values, stream_api_reply_simple, AiModel, LlmConfig, LocalRuleProvider,
+    RuleReply, StreamChunk, ToolCall, ToolSpec,
+};
 pub use runtime::{
     AIError, AIRequest, AIResponse, AITaskManager, AiPermission, CancelToken, RequestId,
     RequestState, RetryConfig, StreamEvent, TimeoutConfig,
@@ -123,6 +127,18 @@ impl AiClient {
         messages: &[(String, bool)],
     ) -> mpsc::Receiver<StreamChunk> {
         provider::stream_api_reply(base_url, api_key, model_id, messages)
+    }
+
+    /// 支持多模态（文本与图片 Base64 Data URL）的流式 API 回复。
+    pub fn stream_reply_simple(
+        &self,
+        base_url: &str,
+        api_key: &str,
+        model_id: &str,
+        system_prompt: Option<&str>,
+        messages: &[SimpleChatMessage],
+    ) -> mpsc::Receiver<StreamChunk> {
+        provider::stream_api_reply_simple(base_url, api_key, model_id, system_prompt, messages)
     }
 
     /// 本地规则回退回复。根据输入决策后调用对应上下文 / 工具，并翻译为 i18n 文案。
