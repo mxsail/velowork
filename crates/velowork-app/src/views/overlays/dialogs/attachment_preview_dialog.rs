@@ -394,23 +394,15 @@ impl Render for AttachmentPreviewDialog {
                                     )
                                     .into_any_element()
                             })
-                            // 经典桌面右下角半透明悬浮胶囊：展示大小/行数，并集成“在系统应用中打开”
+                            // 经典桌面右下角区域：纯文字行数/大小（无背景）+ 独立的“在系统应用中打开”微按钮（4px 圆角）
                             .children((meta_label.is_some() || file_exists).then(|| {
-                                let has_meta = meta_label.is_some();
                                 h_flex()
                                     .occlude()
                                     .absolute()
-                                    .bottom(px(10.0))
+                                    .bottom(px(8.0))
                                     .right(px(16.0))
-                                    .h(px(24.0))
-                                    .px(px(8.0))
                                     .items_center()
-                                    .gap(px(6.0))
-                                    .rounded(px(12.0))
-                                    .bg(p.surface_card.opacity(0.92))
-                                    .border_1()
-                                    .border_color(p.border_subtle)
-                                    .shadow_sm()
+                                    .gap(SPACE_SM)
                                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                                     .children(meta_label.map(|label| {
                                         div()
@@ -418,27 +410,26 @@ impl Render for AttachmentPreviewDialog {
                                             .text_color(p.text_muted)
                                             .child(label)
                                     }))
-                                    .children((has_meta && file_exists).then(|| {
-                                        div()
-                                            .w(px(3.0))
-                                            .h(px(3.0))
-                                            .rounded_full()
-                                            .bg(p.text_muted.opacity(0.4))
-                                    }))
                                     .children(file_exists.then(|| {
                                         h_flex()
                                             .id("att-preview-open-system-btn")
+                                            .h(px(22.0))
+                                            .px(px(6.0))
                                             .items_center()
                                             .gap(px(4.0))
+                                            .rounded(RADIUS_SM)
+                                            .bg(p.surface_card.opacity(0.85))
+                                            .border_1()
+                                            .border_color(p.border_subtle)
                                             .cursor_pointer()
                                             .text_color(p.text_muted)
-                                            .hover(|s| s.text_color(p.text_primary))
+                                            .hover(|s| s.bg(p.surface_hover).text_color(p.text_primary))
                                             .child(
                                                 div()
                                                     .text_size(ui_text_xs(cx))
                                                     .child(i18n!(cx, "ai.open_in_system")),
                                             )
-                                            .child(AppIcon::ExternalLink.size(px(10.0)))
+                                            .child(AppIcon::ExternalLink.size(px(11.0)))
                                             .on_click(cx.listener(|this, _, _, _| {
                                                 this.open_in_system();
                                             }))
