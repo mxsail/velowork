@@ -2417,6 +2417,8 @@
     "file_truncated_tip": "File is long, showing first {count} characters",
     "file_binary_not_supported": "Binary file preview is not supported, please open in system app",
     "file_empty": "(Empty file)",
+    "file_line_count": "{count} lines",
+    "file_binary_label": "Binary file",
     "file_size_exceeded_tip": "File exceeds 2MB safety limit, showing first 2MB for scrolling",
     "preparing_preview": "Preparing image preview…",
     "history_empty": "No history messages",
