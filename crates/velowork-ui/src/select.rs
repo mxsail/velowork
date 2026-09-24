@@ -715,6 +715,14 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
             p.surface_card
         };
 
+        // Ghost 模式下默认展示 secondary（偏暗静默），hover/active 时升至 primary。
+        // 非 ghost 模式始终使用 primary（有背景和边框托底，对比度已足够）。
+        let trigger_text_color = if self.ghost && !is_active {
+            p.text_secondary
+        } else {
+            p.text_primary
+        };
+
         let text_font_size = self.text_size.unwrap_or_else(|| {
             if self.ghost {
                 ui_text_sm(cx)
@@ -763,14 +771,14 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                 .child(Input::new(&input).appearance(false).text_size(text_font_size))
                 .into_any_element()
         } else if let Some(opt) = selected_opt {
-            let icon_el = opt.icon.map(|ic| ic.size(ui_icon_sm(cx)).text_color(rgb(t.text_primary)));
+            let icon_el = opt.icon.map(|ic| ic.size(ui_icon_sm(cx)));
             div()
                 .flex()
                 .items_center()
                 .gap(SPACE_SM)
                 .truncate()
                 .children(icon_el)
-                .child(div().text_size(text_font_size).text_color(rgb(t.text_primary)).child(opt.label))
+                .child(div().text_size(text_font_size).child(opt.label))
                 .into_any_element()
         } else {
             div()
@@ -818,13 +826,14 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
             .h(trigger_h)
             .px(trigger_px)
             .bg(bg_color)
+            .text_color(trigger_text_color)
             .rounded(RADIUS_MD)
             .border_1()
             .border_color(border_color)
             .when(is_active && !self.disabled && !self.ghost, |d| d.shadow(focus_ring_shadows(&t)))
             .when(!self.disabled && !is_active, |d| {
                 if self.ghost {
-                    d.hover(|s| s.bg(p.surface_hover))
+                    d.hover(|s| s.bg(p.surface_hover).text_color(p.text_primary))
                 } else {
                     d.hover(|s| s.border_color(p.surface_accent.opacity(0.6)).bg(p.surface_hover))
                 }
