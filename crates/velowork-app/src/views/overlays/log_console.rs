@@ -250,13 +250,38 @@ impl Render for LogConsole {
             self.pending_scroll = false;
         }
 
-        let p = SemanticPalette::from_theme(&t);
+        let p = SemanticPalette::from_context(cx);
+
+        let window_corner_radius =
+            if let Some(global) = cx.try_global::<velowork_app_core::settings::GlobalSettings>() {
+                global.0.read(cx).settings.window_corner_radius
+            } else {
+                8.0
+            };
+        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
+            if let Some(global) = cx.try_global::<velowork_app_core::settings::GlobalSettings>() {
+                global.0.read(cx).settings.titlebar_style
+                    == velowork_workspace::settings::TitlebarStyle::Custom
+            } else {
+                true
+            }
+        } else {
+            matches!(window.window_decorations(), Decorations::Client { .. })
+        };
+        let has_rounded_corners = is_custom_titlebar
+            && !window.is_maximized()
+            && !window.is_fullscreen()
+            && window_corner_radius > 0.0;
+        let radius = px(window_corner_radius);
 
         div()
             .id("log-console-window-root")
             .size_full()
             .flex()
             .flex_col()
+            .when(has_rounded_corners, |d| {
+                d.rounded_b(radius).overflow_hidden()
+            })
             .bg(p.surface_base)
             .text_color(p.text_primary)
             .track_focus(&focus_handle)
@@ -328,6 +353,7 @@ impl Render for LogConsole {
                     .map(|(k, v)| (k.as_str(), v.as_str()))
                     .collect();
                 keyboard_hints_footer(&hint_refs, &t, cx)
+                    .when(has_rounded_corners, |d| d.rounded_b(radius))
             })
     }
 }
