@@ -88,6 +88,18 @@ pub enum OverlayMenuDirection {
     Above,
 }
 
+/// Horizontal alignment of the menu relative to the trigger bounds.
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
+pub enum OverlayMenuAlign {
+    /// Left-aligned with the trigger (menu expands to the right).
+    #[default]
+    Start,
+    /// Horizontally centered relative to the trigger.
+    Center,
+    /// Right-aligned with the trigger (menu expands to the left).
+    End,
+}
+
 pub struct OverlayMenu {
     pub focus_handle: FocusHandle,
     query: String,
@@ -111,6 +123,8 @@ pub struct OverlayMenu {
     pub overlay_id: SharedString,
     /// Side of the trigger the menu expands toward.
     direction: OverlayMenuDirection,
+    /// Horizontal alignment relative to the trigger bounds.
+    align: OverlayMenuAlign,
     /// Optional minimum width applied to the menu surface.
     min_width: Option<Pixels>,
     /// Optional maximum width applied to the menu surface.
@@ -211,6 +225,7 @@ impl OverlayMenu {
             overlay_registry,
             overlay_id,
             direction: OverlayMenuDirection::Below,
+            align: OverlayMenuAlign::Start,
             min_width: None,
             max_width: None,
             item_tooltips: HashMap::new(),
@@ -227,6 +242,11 @@ impl OverlayMenu {
 
     pub fn with_direction(mut self, direction: OverlayMenuDirection) -> Self {
         self.direction = direction;
+        self
+    }
+
+    pub fn with_align(mut self, align: OverlayMenuAlign) -> Self {
+        self.align = align;
         self
     }
 
@@ -658,17 +678,46 @@ impl Render for OverlayMenu {
         let sp = SemanticPalette::from_context(cx);
         let this_weak = std::rc::Rc::new(cx.entity().downgrade());
 
-        let (pos, anchor) = match self.direction {
-            OverlayMenuDirection::Below => (
+        let menu_width = self.min_width.unwrap_or(px(260.0));
+        let (pos, anchor) = match (self.direction, self.align) {
+            (OverlayMenuDirection::Below, OverlayMenuAlign::Start) => (
                 point(
                     self.trigger_bounds.origin.x,
                     self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_XS,
                 ),
                 gpui::Anchor::TopLeft,
             ),
-            OverlayMenuDirection::Above => (
+            (OverlayMenuDirection::Below, OverlayMenuAlign::End) => (
+                point(
+                    self.trigger_bounds.origin.x + self.trigger_bounds.size.width,
+                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_XS,
+                ),
+                gpui::Anchor::TopRight,
+            ),
+            (OverlayMenuDirection::Below, OverlayMenuAlign::Center) => (
+                point(
+                    self.trigger_bounds.origin.x + (self.trigger_bounds.size.width - menu_width) / 2.0,
+                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_XS,
+                ),
+                gpui::Anchor::TopLeft,
+            ),
+            (OverlayMenuDirection::Above, OverlayMenuAlign::Start) => (
                 point(
                     self.trigger_bounds.origin.x,
+                    self.trigger_bounds.origin.y - SPACE_XS,
+                ),
+                gpui::Anchor::BottomLeft,
+            ),
+            (OverlayMenuDirection::Above, OverlayMenuAlign::End) => (
+                point(
+                    self.trigger_bounds.origin.x + self.trigger_bounds.size.width,
+                    self.trigger_bounds.origin.y - SPACE_XS,
+                ),
+                gpui::Anchor::BottomRight,
+            ),
+            (OverlayMenuDirection::Above, OverlayMenuAlign::Center) => (
+                point(
+                    self.trigger_bounds.origin.x + (self.trigger_bounds.size.width - menu_width) / 2.0,
                     self.trigger_bounds.origin.y - SPACE_XS,
                 ),
                 gpui::Anchor::BottomLeft,

@@ -21,7 +21,8 @@ use velowork_ui::header_buttons::{HeaderAction, header_button_base};
 use velowork_ui::icon::AppIcon;
 use velowork_ui::menu::{PopupMenu, PopupMenuDirection, PopupMenuItem};
 use velowork_ui::overlay_menu::{
-    OverlayMenu, OverlayMenuAction, OverlayMenuDirection, OverlayMenuEntry, OverlayMenuItem,
+    OverlayMenu, OverlayMenuAction, OverlayMenuAlign, OverlayMenuDirection, OverlayMenuEntry,
+    OverlayMenuItem,
 };
 use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::tab::{tab_height, tab_style};
@@ -2323,6 +2324,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 SharedString::from("terminal-tab-list-menu"),
             )
             .with_direction(OverlayMenuDirection::Below)
+            .with_align(OverlayMenuAlign::Center)
             .with_min_width(px(260.0))
             .with_active_id(Some(format!("tab-{}", active_tab)))
             .with_text_size(ui_text_md(cx))
