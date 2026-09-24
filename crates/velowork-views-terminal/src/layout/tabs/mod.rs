@@ -2220,6 +2220,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         let workspace = self.workspace.clone();
         let focus_manager = self.focus_manager.clone();
         let this_weak = cx.entity().downgrade();
+        let tab_count = tab_infos.len();
 
         for (i, label, tid, icon, _shell_short) in tab_infos {
             let click_project_id = project_id.clone();
@@ -2300,7 +2301,11 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             }));
         }
 
-        let search_placeholder = i18n!(cx, "terminal.tab_search_placeholder");
+        let search_placeholder = if tab_count >= 5 {
+            Some(i18n!(cx, "terminal.tab_search_placeholder"))
+        } else {
+            None
+        };
         let bounds = *self.tab_list_btn_bounds.borrow();
         let overlay_registry = self.overlay_registry.clone();
 
@@ -2309,7 +2314,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             OverlayMenu::new(
                 cx,
                 menu_items,
-                Some(search_placeholder),
+                search_placeholder,
                 bounds,
                 Some(Arc::new(move |_, cx| {
                     if let Some(this) = this_weak_close.upgrade() {

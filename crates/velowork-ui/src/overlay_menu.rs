@@ -449,11 +449,21 @@ impl OverlayMenu {
 
         let mut panel = div()
             .occlude()
+            .relative()
             .bg(bg)
             .border_1()
             .border_color(sp.border_subtle)
             .rounded(RADIUS_MD)
             .shadow(crate::tokens::elevation_menu_shadow())
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .left(RADIUS_MD)
+                    .right(RADIUS_MD)
+                    .h(px(1.0))
+                    .bg(white().opacity(0.08)),
+            )
             .min_w(px(140.0))
             .p(SPACE_XS)
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
@@ -873,6 +883,15 @@ impl Render for OverlayMenu {
                         .rounded(RADIUS_MD)
                         .shadow(crate::tokens::elevation_menu_shadow())
                         .child(canvas(bounds_setter, |_, _, _, _| {}).absolute().inset_0())
+                        .child(
+                            div()
+                                .absolute()
+                                .top_0()
+                                .left(RADIUS_MD)
+                                .right(RADIUS_MD)
+                                .h(px(1.0))
+                                .bg(white().opacity(0.08)),
+                        )
                         .when_some(search_input, |this, search_input| {
                             this.child(
                                 div()
