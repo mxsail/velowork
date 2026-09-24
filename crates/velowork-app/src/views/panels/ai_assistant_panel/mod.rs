@@ -884,7 +884,8 @@ impl AiAssistantPanel {
                 .placement(SelectPlacement::Above)
                 .ghost(true)
                 .size(ControlSize::Compact)
-                .text_size(ui_text_md(cx));
+                .text_size(ui_text_md(cx))
+                .width_mode(SelectWidthMode::ContentAdaptive);
             s.set_overlay_registry(reg.clone());
             s
         });
@@ -3985,7 +3986,7 @@ impl AiAssistantPanel {
             }
         });
 
-        div().w(px(140.0)).child(Select::new(&self.ai_model_select))
+        div().min_w(px(80.0)).max_w(px(200.0)).child(Select::new(&self.ai_model_select))
     }
 
     fn render_perm_dropdown(&self, cx: &mut Context<Self>) -> impl IntoElement {
