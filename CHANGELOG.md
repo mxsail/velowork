@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.11] - 2026-09-25
+
+### Improved / 优化
+- **弹窗体系与设计规范全面收敛 (Modal Refinements & Design Tokens Alignment)**：
+  - **配置文件管理器去重与单行化**：移除配置文件卡片中冗余的 ID 副标题，卡片重构为单行优雅居中布局，列表与底部输入栏两侧留白统一采用 `SPACE_XS` 标准，Footer 高度严格规范为 48px。
+  - **项目管理器视觉体验升级**：项目管理器弹窗设计与快捷键中心全面对齐，消除冗余关闭按钮，搜索框与列表容器边距紧凑化为 `SPACE_XS`。
+  - **全局浮层光影与边距安全屏障**：升级全局浮动菜单与弹窗阴影为精细物理光影，消除硬边缘，增加视口安全边距保护，标签页列表下拉框改为精准下方居中展开。
+  - **独立日志控制台圆角一致性**：统一独立弹窗底部两侧圆角样式，彻底消除内层顶角外溢问题。
+  *(Refine Profile Manager and Project Manager modals with tokenized SPACE_XS padding, unified 48px footer, Apple-like physical shadows, and seamless detached window corner radiuses).*
+
+### Added / 新增
+- **AI 系统级契约架构与终端意图自适应 (Hardened System Prompts & Intent Adaptation)**：
+  - **AI Prompt 五层防御体系**：落地上下文边界、格式契约、工具使用、安全准则及反注入防御，确保 AI 输出精准可信、零啰嗦无冗余。
+  - **终端 Inline AI 点击外部自动失焦关闭**：支持全局点击外部遮罩/空白处即刻平滑隐藏 AI 工具栏与输入浮窗，极大提升敲键流畅度。
+  *(Hardened AI prompt architecture with 5-layer injection defense and intent adaptation, plus outside-click auto-dismiss for terminal inline AI).*
+
 ## [0.1.0-beta.10] - 2026-09-24
 
 ### Added / 新增
