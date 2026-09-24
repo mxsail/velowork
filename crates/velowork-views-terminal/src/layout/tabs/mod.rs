@@ -2003,6 +2003,10 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             })
             .collect();
 
+        if children.len() <= 1 && self.tab_list_menu.is_some() {
+            self.tab_list_menu = None;
+        }
+
         let tab_list_btn_bounds = self.tab_list_btn_bounds.clone();
 
         let item_height = px((tab_height(cx) - 8.0).max(24.0));
@@ -2057,48 +2061,6 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             .relative()
             .when(has_top_corners, |d| d.rounded_t(RADIUS_CARD))
             .bg(tab_bar_bg)
-            .child(
-                // Tab-list toggle button pinned to the front (leftmost) of the row.
-                // A full-size canvas captures the button's global bounds so the
-                // dropdown can be anchored precisely below it.
-                div().flex_shrink_0().child({
-                    let tab_infos = tab_infos.clone();
-                    let tab_list_btn_bounds = tab_list_btn_bounds.clone();
-                    header_button_base(
-                        HeaderAction::TabList,
-                        &tab_dropdown_id_suffix,
-                        &t,
-                        None,
-                        None,
-                        cx,
-                    )
-                    .child(
-                        canvas(
-                            {
-                                let tab_list_btn_bounds = tab_list_btn_bounds.clone();
-                                move |bounds, _window, _cx| {
-                                    *tab_list_btn_bounds.borrow_mut() = bounds;
-                                }
-                            },
-                            |_bounds, _prepaint, _window, _cx| {},
-                        )
-                        .absolute()
-                        .size_full(),
-                    )
-                    .on_click({
-                        let tab_infos = tab_infos.clone();
-                        cx.listener(move |this, _, window, cx| {
-                            this.toggle_tab_dropdown(
-                                tab_infos.clone(),
-                                active_tab,
-                                standalone,
-                                window,
-                                cx,
-                            );
-                        })
-                    })
-                }),
-            )
             .child(
                 div()
                     .id(ElementId::Name(
@@ -2156,6 +2118,45 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                             }
                         }),
                     )
+                    .when(children.len() > 1, |el| {
+                        let tab_infos = tab_infos.clone();
+                        let tab_list_btn_bounds = tab_list_btn_bounds.clone();
+                        el.child(
+                            header_button_base(
+                                HeaderAction::TabList,
+                                &tab_dropdown_id_suffix,
+                                &t,
+                                None,
+                                None,
+                                cx,
+                            )
+                            .child(
+                                canvas(
+                                    {
+                                        let tab_list_btn_bounds = tab_list_btn_bounds.clone();
+                                        move |bounds, _window, _cx| {
+                                            *tab_list_btn_bounds.borrow_mut() = bounds;
+                                        }
+                                    },
+                                    |_bounds, _prepaint, _window, _cx| {},
+                                )
+                                .absolute()
+                                .size_full(),
+                            )
+                            .on_click({
+                                let tab_infos = tab_infos.clone();
+                                cx.listener(move |this, _, window, cx| {
+                                    this.toggle_tab_dropdown(
+                                        tab_infos.clone(),
+                                        active_tab,
+                                        standalone,
+                                        window,
+                                        cx,
+                                    );
+                                })
+                            }),
+                        )
+                    })
                     .when(show_shell, |el| {
                         el.child(self.render_shell_indicator(active_tab, cx))
                     })
