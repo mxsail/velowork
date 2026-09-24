@@ -272,41 +272,45 @@ pub fn render_session_dialog(
         .flex_shrink_0()
         .flex()
         .items_center()
-        .justify_end()
+        .justify_between()
         .px(SPACE_LG)
         .rounded_b(RADIUS_LG)
         .border_t_1()
         .border_color(p.border_subtle)
         .child(
             div()
+                .flex_1()
+                .min_w_0()
                 .flex()
                 .items_center()
-                .gap(SPACE_MD)
                 .when(is_ssh_session, |d| {
                     d.child(render_dialog_test_status(test_status, t, cx))
-                        .child(action_button(
-                            "test-connection",
-                            &i18n!(cx, "ssh.action.test_connection"),
-                            t,
-                            cx,
-                            false,
-                            &model.focus.test,
-                            {
-                                let panel = panel.clone();
-                                move |_: &ClickEvent, _w, cx| {
-                                    panel.update(cx, |this, cx| {
-                                        this.test_connection(cx);
-                                    })
-                                }
-                            },
-                        ))
                 }),
         )
         .child(
             div()
+                .flex_shrink_0()
                 .flex()
                 .items_center()
                 .gap(SPACE_SM)
+                .when(is_ssh_session, |d| {
+                    d.child(action_button(
+                        "test-connection",
+                        &i18n!(cx, "ssh.action.test_connection"),
+                        t,
+                        cx,
+                        false,
+                        &model.focus.test,
+                        {
+                            let panel = panel.clone();
+                            move |_: &ClickEvent, _w, cx| {
+                                panel.update(cx, |this, cx| {
+                                    this.test_connection(cx);
+                                })
+                            }
+                        },
+                    ))
+                })
                 .child(action_button(
                     "cancel",
                     &i18n!(cx, "common.action.cancel"),
