@@ -13,7 +13,6 @@
 //! 仅 `context` / `tool` 需要读取运行时实体（依赖 gpui / workspace / terminal）。
 
 pub mod agent;
-pub mod completion;
 pub mod context;
 pub mod prompt;
 pub mod provider;
@@ -22,8 +21,6 @@ pub mod runtime;
 pub mod skill;
 pub mod tool;
 pub mod workflow;
-
-pub use completion::{clean_ghost_command, fast_local_history_match, generate_ghost_command};
 pub use recommendation::{
     classify_selection_intent, SmartActionKind, SmartActionRecommendation,
 };

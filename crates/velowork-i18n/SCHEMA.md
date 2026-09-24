@@ -22,7 +22,7 @@
 - `project.switcher.search_placeholder`
 - `session.dialog.host`
 - `settings.terminal.cursor_blink`
-- `ai.ghost_text.tab_accept`
+- `ai.thinking`
 
 ### 4. 双语强对称性保障
 `crates/velowork-i18n/locales/zh.json` 与 `en.json` 的 Key 树必须保持严格的 100% 结构一致，由编译期与单元测试门禁（`test_locales_keys_match`）强制校验。
@@ -47,7 +47,7 @@
 | `service` | 服务监控 | 远程主机守护进程与容器状态监控 | `service.add`, `service.status.*`, `service.start_command` |
 | `quick_commands` | 快捷指令 | 快捷指令与变量模板库 | `quick_commands.title`, `quick_commands.variable.*` |
 | `command_history` | 历史命令 | 终端历史命令搜索与持久化治理 | `command_history.search_placeholder`, `command_history.clear_all` |
-| `ai` | AI 与智能辅助 | 智能助手面板、Agent 工具调用、流式思考与 GhostText | `ai.title`, `ai.thinking`, `ai.ghost_text.*` |
+| `ai` | AI 与智能辅助 | 智能助手面板、Agent 工具调用与流式思考 | `ai.title`, `ai.thinking` |
 | `skill` | 智能技能系统 | 终端错误诊断、命令生成与部署工作流技能 | `skill.diagnose.*`, `skill.resource_inspect.*` |
 | `dock` | 停靠面板系统 | 面板停靠状态、Dock 标题、全屏与拆分操作 | `dock.panel.*`, `dock.tab.*`, `dock.action.*` |
 | `search` | 全局搜索 | 快速跳转、文件查找与内容全局匹配检索 | `search.command_palette.*`, `search.file_search.*`, `search.content_search.*` |

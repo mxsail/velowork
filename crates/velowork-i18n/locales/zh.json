@@ -2412,7 +2412,6 @@
     "attachment_label": "附件",
     "open_in_system": "在系统应用中打开",
     "copy_content": "复制内容",
-    "copied": "已复制",
     "file_not_found": "本地文件不存在",
     "file_truncated_tip": "文本内容较长，已展示前 {count} 字符",
     "file_binary_not_supported": "二进制文件不支持纯文本预览，请在系统应用中打开",
@@ -2437,11 +2436,7 @@
     "pending_send_now": "立即发送",
     "clear_tooltip": "清空聊天记录",
     "token_usage_hint": "当前会话估算 Token 使用量。接近限制时自动压缩历史上下文。",
-    "context_used": "上下文已使用",
-    "ghost_text": {
-      "tab_accept": "Tab 接受",
-      "esc_dismiss": "Esc 取消"
-    }
+    "context_used": "上下文已使用"
   },
   "transfers": {
     "label": "传输管理",

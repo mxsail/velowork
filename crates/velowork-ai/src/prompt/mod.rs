@@ -13,8 +13,6 @@ pub enum PromptScene {
     LogExplain,
     ConfigGen,
     Troubleshoot,
-    GhostTextCompletion,
-    CommandCompletion,
     General,
 }
 
@@ -131,19 +129,6 @@ fn scene_instruction(scene: PromptScene) -> &'static str {
             "## Scenario: Interactive Troubleshooting\n\
              Walk through troubleshooting steps for the reported issue. Inspect evidence step by step, \
              validate hypotheses before proposing changes, and guide the user through verification."
-        }
-        PromptScene::GhostTextCompletion => {
-            "## Scenario: Ghost Text Inline Command Synthesis\n\
-             Translate the user's natural language request into a single, precise, executable shell command.\n\
-             CRITICAL OUTPUT CONTRACT: Output ONLY the single raw command line matching the detected shell. \
-             Do NOT output markdown code blocks. Do NOT output explanations, greetings, quotes, or multiple lines."
-        }
-        PromptScene::CommandCompletion => {
-            "## Scenario: Command Prefix Completion\n\
-             Complete the user's unfinished shell command prefix. Treat any active command draft as the primary \
-             editing target, preserving valid parts unless the user request requires changes.\n\
-             CRITICAL OUTPUT CONTRACT: Output ONLY the completed command line matching the detected shell. \
-             Do NOT output markdown code blocks. Do NOT output explanations, greetings, quotes, or multiple lines."
         }
         PromptScene::General => {
             "## Scenario: General Technical Assistance\n\
@@ -292,14 +277,6 @@ fn inline_scene_instruction(scene: PromptScene) -> &'static str {
             "## Scenario: Log & Output Explanation\n\
              Explain the selected log output concisely in plain language, identifying critical warnings, errors, or status codes."
         }
-        PromptScene::GhostTextCompletion => {
-            "## Scenario: Ghost Text Inline Command Synthesis\n\
-             Translate the user's request into a single executable shell command matching the detected environment."
-        }
-        PromptScene::CommandCompletion => {
-            "## Scenario: Command Prefix Completion\n\
-             Complete the user's unfinished shell command prefix. Refine or complete the draft command into a full executable command."
-        }
         _ => {
             "## Scenario: General Terminal Assistance\n\
              Answer directly and concisely, providing accurate shell commands when actionable."
@@ -308,22 +285,11 @@ fn inline_scene_instruction(scene: PromptScene) -> &'static str {
 }
 
 /// 独立的输出协议契约（彻底消除机器协议与交互对话的代码块冲突）。
-fn inline_output_contract(scene: PromptScene) -> &'static str {
-    match scene {
-        PromptScene::GhostTextCompletion | PromptScene::CommandCompletion => {
-            "## Output Contract (Strict Machine Protocol)\n\
-             - Output ONLY the single raw executable command line.\n\
-             - Do NOT wrap in markdown code blocks (NO ```).\n\
-             - Do NOT include explanations, greetings, quotes, or multiple lines.\n\
-             - Exactly one single executable command line."
-        }
-        _ => {
-            "## Output Contract\n\
-             - Command Execution Intent: When proposing runnable terminal commands, enclose them in markdown fenced code blocks with the exact shell tag (e.g., ```bash, ```powershell, ```zsh, ```cmd).\n\
-             - Informational / Q&A Intent: When answering questions, explaining concepts, or conversing, output concise markdown text without code blocks.\n\
-             - CRITICAL ANTI-PATTERN: NEVER wrap conversational messages, explanations, greetings, or text answers inside `echo` or `printf` commands just to force a code block. Only use `echo` if the user explicitly asks to print/output text in shell."
-        }
-    }
+fn inline_output_contract(_scene: PromptScene) -> &'static str {
+    "## Output Contract\n\
+     - Command Execution Intent: When proposing runnable terminal commands, enclose them in markdown fenced code blocks with the exact shell tag (e.g., ```bash, ```powershell, ```zsh, ```cmd).\n\
+     - Informational / Q&A Intent: When answering questions, explaining concepts, or conversing, output concise markdown text without code blocks.\n\
+     - CRITICAL ANTI-PATTERN: NEVER wrap conversational messages, explanations, greetings, or text answers inside `echo` or `printf` commands just to force a code block. Only use `echo` if the user explicitly asks to print/output text in shell."
 }
 
 #[cfg(test)]
@@ -370,19 +336,5 @@ mod tests {
         assert!(p.contains("Active Shell: bash"));
         assert!(p.contains("Working Directory (cwd): /home/user/project"));
         assert!(p.contains("Treat this draft as the primary editing/completion target"));
-    }
-
-    #[test]
-    fn render_inline_prompt_ghost_text_machine_contract() {
-        let snapshot = crate::context::TerminalContextSnapshot {
-            os: "windows".to_string(),
-            shell: "powershell".to_string(),
-            ..Default::default()
-        };
-        let p = render_inline_prompt(PromptScene::GhostTextCompletion, &snapshot);
-        assert!(p.contains("Output ONLY the single raw executable command line"));
-        assert!(p.contains("Do NOT wrap in markdown code blocks (NO ```)"));
-        // GhostText 协议中不应出现多轮意图对话引导
-        assert!(!p.contains("Informational / Q&A Intent"));
     }
 }

@@ -2412,7 +2412,6 @@
     "attachment_label": "Attachments",
     "open_in_system": "Open in system app",
     "copy_content": "Copy content",
-    "copied": "Copied",
     "file_not_found": "Local file not found",
     "file_truncated_tip": "File is long, showing first {count} characters",
     "file_binary_not_supported": "Binary file preview is not supported, please open in system app",
@@ -2437,11 +2436,7 @@
     "pending_send_now": "Send now",
     "clear_tooltip": "Clear chat history",
     "token_usage_hint": "Estimated token usage for the current session. Context is automatically compressed when approaching the limit.",
-    "context_used": "context used",
-    "ghost_text": {
-      "tab_accept": "Tab to accept",
-      "esc_dismiss": "Esc to dismiss"
-    }
+    "context_used": "context used"
   },
   "transfers": {
     "label": "Transfer Manager",

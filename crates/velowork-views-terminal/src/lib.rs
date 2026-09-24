@@ -175,8 +175,6 @@ pub struct TerminalViewSettings {
     pub ai_enabled: bool,
     #[serde(default = "default_true")]
     pub terminal_ai_floating_toolbar_enabled: bool,
-    #[serde(default = "default_true")]
-    pub terminal_ai_ghost_text_enabled: bool,
 }
 
 impl TerminalViewSettings {
@@ -325,7 +323,6 @@ pub fn terminal_view_settings(cx: &gpui::App) -> TerminalViewSettings {
             true_color: true,
             ai_enabled: true,
             terminal_ai_floating_toolbar_enabled: true,
-            terminal_ai_ghost_text_enabled: true,
         })
 }
 

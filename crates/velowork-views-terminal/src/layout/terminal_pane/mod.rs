@@ -5,7 +5,6 @@ pub mod blocks_popup;
 pub mod commands_panel;
 mod content;
 pub mod file_row;
-pub mod ghost_text;
 pub mod history_cache;
 pub mod history_popup;
 mod navigation;
@@ -96,10 +95,6 @@ pub struct TerminalPane<D: ActionDispatch> {
     history_popup_items: Vec<velowork_workspace::repositories::HistoryEntry>,
     history_popup_selected: Option<usize>,
     history_popup_open: bool,
-
-    // Ghost Text & Inline Completion
-    pub(super) ghost_text: Option<ghost_text::GhostTextState>,
-    pub(super) ghost_epoch: u64,
 
     // Welcome screen search selection
     pub(super) welcome_selected_index: Option<usize>,
@@ -210,8 +205,6 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             history_popup_items: Vec::new(),
             history_popup_selected: None,
             history_popup_open: false,
-            ghost_text: None,
-            ghost_epoch: 0,
             welcome_selected_index: None,
             is_reconnecting: false,
         };
