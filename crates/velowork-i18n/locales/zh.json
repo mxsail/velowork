@@ -1995,7 +1995,8 @@
     "tip_record": "点击录制新快捷键",
     "hint_navigate": "切换选择",
     "hint_record": "录制修改",
-    "hint_toggle": "启用/禁用"
+    "hint_toggle": "启用/禁用",
+    "hint_search": "快速搜索"
   },
   "welcome": {
     "title": "Velowork",

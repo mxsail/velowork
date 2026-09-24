@@ -395,10 +395,10 @@ impl KeybindingsHelp {
                 }
 
                 // Filter by selected tab for final rendered row list
-                if let Some(tab_cat) = self.selected_tab {
-                    if tab_cat != category {
-                        continue;
-                    }
+                if let Some(tab_cat) = self.selected_tab
+                    && tab_cat != category
+                {
+                    continue;
                 }
 
                 if !matches_search {
@@ -499,6 +499,7 @@ impl Render for KeybindingsHelp {
         }
 
         let focus_handle = self.focus_handle.clone();
+        let is_list_focused = self.focus_handle.is_focused(window);
 
         // Precompute tooltips and localized strings for closures
         let tip_add = i18n!(cx, "keybindings.tip_add");
@@ -533,7 +534,7 @@ impl Render for KeybindingsHelp {
                     this.close(cx);
                 }
             }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _window, cx| {
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if this.editing.is_some() {
                     if event.keystroke.key == "escape" {
                         this.cancel_recording(cx);
@@ -541,20 +542,51 @@ impl Render for KeybindingsHelp {
                     return;
                 }
 
+                // Ctrl+F / Cmd+F: Focus search input and select all text
+                if (event.keystroke.modifiers.control || event.keystroke.modifiers.platform)
+                    && event.keystroke.key == "f"
+                {
+                    if let Some(inp) = this.search_input.as_ref() {
+                        inp.update(cx, |i, cx| {
+                            i.focus(window, cx);
+                            i.select_all(cx);
+                        });
+                    }
+                    cx.notify();
+                    return;
+                }
+
                 match event.keystroke.key.as_str() {
                     "up" => {
                         let (rows, _) = this.collect_display_rows(cx);
-                        if this.select_prev(rows.len()) {
+                        if this.selected_index == 0 {
+                            if let Some(inp) = this.search_input.as_ref() {
+                                inp.update(cx, |i, cx| i.focus(window, cx));
+                            }
+                        } else if this.select_prev(rows.len()) {
                             this.scroll_to_selected();
-                            cx.notify();
                         }
+                        cx.notify();
                     }
                     "down" => {
                         let (rows, _) = this.collect_display_rows(cx);
                         if this.select_next(rows.len()) {
                             this.scroll_to_selected();
-                            cx.notify();
                         }
+                        window.focus(&this.focus_handle, cx);
+                        cx.notify();
+                    }
+                    "tab" => {
+                        let is_search = this
+                            .search_input
+                            .as_ref()
+                            .is_some_and(|inp| inp.read(cx).focus_handle(cx).is_focused(window));
+                        if is_search {
+                            window.focus(&this.focus_handle, cx);
+                        } else if let Some(inp) = this.search_input.as_ref() {
+                            inp.update(cx, |i, cx| i.focus(window, cx));
+                        }
+                        cx.notify();
                     }
                     "enter" => {
                         let (rows, _) = this.collect_display_rows(cx);
@@ -563,12 +595,9 @@ impl Render for KeybindingsHelp {
                         }
                     }
                     "space" => {
-                        // Toggle enabled status if search query is empty
-                        if this.search_query.is_empty() {
-                            let (rows, _) = this.collect_display_rows(cx);
-                            if let Some(row) = rows.get(this.selected_index) {
-                                this.toggle_binding_entry(&row.action, row.entry_index, cx);
-                            }
+                        let (rows, _) = this.collect_display_rows(cx);
+                        if let Some(row) = rows.get(this.selected_index) {
+                            this.toggle_binding_entry(&row.action, row.entry_index, cx);
                         }
                     }
                     "escape" => {
@@ -590,7 +619,7 @@ impl Render for KeybindingsHelp {
                     // Modal Header (Clean, without redundant subtitle)
                     .child(
                         modal_header(
-                            &i18n!(cx, "keybindings.title"),
+                            i18n!(cx, "keybindings.title"),
                             None::<&str>,
                             &t,
                             cx,
@@ -770,11 +799,16 @@ impl Render for KeybindingsHelp {
                                             .when(is_selected, |d| {
                                                 d.bg(surface_bg_t(t.bg_selection, &t))
                                                     .border_1()
-                                                    .border_color(p.border_subtle)
+                                                    .border_color(if is_list_focused {
+                                                        p.border_active
+                                                    } else {
+                                                        p.border_subtle
+                                                    })
                                             })
                                             .on_mouse_down(MouseButton::Left, {
-                                                cx.listener(move |this, _, _window, cx| {
+                                                cx.listener(move |this, _, window, cx| {
                                                     this.selected_index = idx;
+                                                    window.focus(&this.focus_handle, cx);
                                                     cx.notify();
                                                 })
                                             })
@@ -1000,15 +1034,17 @@ impl Render for KeybindingsHelp {
                             .items_center()
                             .justify_between()
                             .gap(SPACE_MD)
-                            .child(
+                            .child({
+                                let search_key = if cfg!(target_os = "macos") { "Cmd+F" } else { "Ctrl+F" };
                                 h_flex()
                                     .items_center()
                                     .gap(SPACE_MD)
                                     .child(keyboard_hint("↑↓", i18n!(cx, "keybindings.hint_navigate"), &t, cx))
                                     .child(keyboard_hint("Enter", i18n!(cx, "keybindings.hint_record"), &t, cx))
                                     .child(keyboard_hint("Space", i18n!(cx, "keybindings.hint_toggle"), &t, cx))
-                                    .child(keyboard_hint("Esc", i18n!(cx, "common.action.close"), &t, cx)),
-                            )
+                                    .child(keyboard_hint(search_key, i18n!(cx, "keybindings.hint_search"), &t, cx))
+                                    .child(keyboard_hint("Esc", i18n!(cx, "common.action.close"), &t, cx))
+                            })
                             .child(
                                 div()
                                     .when(self.show_reset_confirmation, |d| {

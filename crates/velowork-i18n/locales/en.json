@@ -1995,7 +1995,8 @@
     "tip_record": "Click to record new keybinding",
     "hint_navigate": "Navigate",
     "hint_record": "Record",
-    "hint_toggle": "Toggle"
+    "hint_toggle": "Toggle",
+    "hint_search": "Search"
   },
   "welcome": {
     "title": "Velowork",
