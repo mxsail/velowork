@@ -3,7 +3,7 @@ use crate::design::semantic::SemanticPalette;
 use crate::overlay_registry::{ClosePolicy, OverlayInfo, OverlayRegistry};
 use crate::icon::AppIcon;
 use crate::theme::theme;
-use crate::tokens::{ICON_MICRO, ICON_STD, RADIUS_MD, RADIUS_SM, RADIUS_STD, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_XS, ui_text_md, ui_text_xs};
+use crate::tokens::{ICON_MICRO, ICON_STD, RADIUS_MD, RADIUS_SM, RADIUS_STD, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS, ui_text_md, ui_text_xs};
 use crate::tooltip::Tooltip;
 use crate::h_flex;
 use gpui::prelude::*;
@@ -449,21 +449,11 @@ impl OverlayMenu {
 
         let mut panel = div()
             .occlude()
-            .relative()
             .bg(bg)
             .border_1()
             .border_color(sp.border_subtle)
             .rounded(RADIUS_MD)
             .shadow(crate::tokens::elevation_menu_shadow())
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .left(RADIUS_MD)
-                    .right(RADIUS_MD)
-                    .h(px(1.0))
-                    .bg(white().opacity(0.08)),
-            )
             .min_w(px(140.0))
             .p(SPACE_XS)
             .on_mouse_down(MouseButton::Left, |_, _, cx| {
@@ -695,42 +685,42 @@ impl Render for OverlayMenu {
             (OverlayMenuDirection::Below, OverlayMenuAlign::Start) => (
                 point(
                     self.trigger_bounds.origin.x,
-                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_XS,
+                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_SM,
                 ),
                 gpui::Anchor::TopLeft,
             ),
             (OverlayMenuDirection::Below, OverlayMenuAlign::End) => (
                 point(
                     self.trigger_bounds.origin.x + self.trigger_bounds.size.width,
-                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_XS,
+                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_SM,
                 ),
                 gpui::Anchor::TopRight,
             ),
             (OverlayMenuDirection::Below, OverlayMenuAlign::Center) => (
                 point(
                     self.trigger_bounds.origin.x + (self.trigger_bounds.size.width - menu_width) / 2.0,
-                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_XS,
+                    self.trigger_bounds.origin.y + self.trigger_bounds.size.height + SPACE_SM,
                 ),
                 gpui::Anchor::TopLeft,
             ),
             (OverlayMenuDirection::Above, OverlayMenuAlign::Start) => (
                 point(
                     self.trigger_bounds.origin.x,
-                    self.trigger_bounds.origin.y - SPACE_XS,
+                    self.trigger_bounds.origin.y - SPACE_SM,
                 ),
                 gpui::Anchor::BottomLeft,
             ),
             (OverlayMenuDirection::Above, OverlayMenuAlign::End) => (
                 point(
                     self.trigger_bounds.origin.x + self.trigger_bounds.size.width,
-                    self.trigger_bounds.origin.y - SPACE_XS,
+                    self.trigger_bounds.origin.y - SPACE_SM,
                 ),
                 gpui::Anchor::BottomRight,
             ),
             (OverlayMenuDirection::Above, OverlayMenuAlign::Center) => (
                 point(
                     self.trigger_bounds.origin.x + (self.trigger_bounds.size.width - menu_width) / 2.0,
-                    self.trigger_bounds.origin.y - SPACE_XS,
+                    self.trigger_bounds.origin.y - SPACE_SM,
                 ),
                 gpui::Anchor::BottomLeft,
             ),
@@ -788,6 +778,7 @@ impl Render for OverlayMenu {
         } else {
             None
         };
+        let has_search = search_input.is_some();
 
         // 启动基于真实的 80ms 极速时间差展开动画（纯对齐 VSync 刷新率）
         if !self.animation_started {
@@ -883,15 +874,6 @@ impl Render for OverlayMenu {
                         .rounded(RADIUS_MD)
                         .shadow(crate::tokens::elevation_menu_shadow())
                         .child(canvas(bounds_setter, |_, _, _, _| {}).absolute().inset_0())
-                        .child(
-                            div()
-                                .absolute()
-                                .top_0()
-                                .left(RADIUS_MD)
-                                .right(RADIUS_MD)
-                                .h(px(1.0))
-                                .bg(white().opacity(0.08)),
-                        )
                         .when_some(search_input, |this, search_input| {
                             this.child(
                                 div()
@@ -915,7 +897,9 @@ impl Render for OverlayMenu {
                                 .id("items-scroll-container")
                                 .w_full()
                                 .overflow_y_scroll()
-                                .p(SPACE_XS)
+                                .px(SPACE_XS)
+                                .pb(SPACE_XS)
+                                .pt(if has_search { SPACE_XS } else { SPACE_SM })
                                 .children(self.items.iter().enumerate().map(|(ix, entry)| {
                                     match entry {
                                         OverlayMenuEntry::Separator => {
