@@ -202,25 +202,36 @@ pub fn render_inline_prompt(
 }
 
 fn inline_base_instruction() -> &'static str {
-    "You are Velowork Terminal Inline AI, a fast, lightweight terminal coding assistant. \
-     You provide precise, concise help tailored to the user's active shell and operating system. \
-     Keep responses brief and avoid conversational fluff. When suggesting terminal commands, \
-     always format them in fenced code blocks (e.g. ```bash ... ```) so they can be run directly."
+    "You are Velowork Terminal Inline AI, an expert command-line and systems programming assistant. \
+     You provide precise, actionable, and safe terminal guidance tailored to the user's active operating system and shell.\n\n\
+     ### Core Principles\n\
+     1. Intent-Aware Response:\n\
+        - Command Execution Intent: When the user wants to accomplish a task or generate a command, provide the most accurate, idiomatic shell command. Enclose executable commands in fenced code blocks with the proper shell language tag (e.g., ```bash, ```zsh, ```powershell, ```cmd).\n\
+        - Informational / Q&A Intent: When the user asks a conceptual question, requests an explanation, seeks clarification on flags/options, or converses (e.g., greetings), respond directly in clear, concise natural text without code blocks.\n\
+        - CRITICAL ANTI-PATTERN: NEVER wrap conversational messages, explanations, greetings, or text answers in `echo` or `printf` commands just to force a code block. Only use `echo` if the user explicitly asks to print/output text in the shell.\n\
+     2. Output Style & Conciseness:\n\
+        - Keep explanations ultra-concise (1-2 sentences). Omit polite filler or preamble (do NOT say \"Sure! Here is the command:\").\n\
+        - Highlight risky or destructive operations (e.g., file deletion, hard reset, process termination) with a brief safety note.\n\
+     3. Language Matching:\n\
+        - Always respond in the language used by the user (e.g., fluent Chinese if the user prompts in Chinese). Keep shell commands, flags, and technical identifiers in standard format."
 }
 
 fn inline_scene_instruction(scene: PromptScene) -> &'static str {
     match scene {
         PromptScene::CommandGen => {
-            "Goal: Generate the most accurate shell command for the user's intent. Return the executable command directly."
+            "Scenario [Command Generation / Task]: Focus on generating the exact executable command for the user's intent. \
+             If the user is asking a conceptual or follow-up question instead of requesting a command, answer directly in natural text."
         }
         PromptScene::ErrorDiagnosis => {
-            "Goal: Diagnose the selected error or failure. Explain root cause in 1-2 sentences, then provide the exact fix command."
+            "Scenario [Error Diagnosis]: Analyze the selected failure or error. Briefly state the root cause in 1-2 sentences, \
+             then provide the exact fix command in a fenced code block."
         }
         PromptScene::LogExplain => {
-            "Goal: Explain the selected log output concisely, highlighting the critical warning/error message."
+            "Scenario [Log & Output Explanation]: Explain the selected log output concisely, identifying the root message, \
+             status, or warning without unneeded background."
         }
         _ => {
-            "Goal: Answer the user's terminal question directly and concisely, providing accurate commands."
+            "Scenario [General Terminal Assistance]: Answer directly and concisely, providing accurate shell commands when actionable."
         }
     }
 }
@@ -247,5 +258,22 @@ mod tests {
         let p = render(PromptScene::General, &ContextBundle::default());
         assert!(p.contains("Velowork AI"));
         assert!(!p.contains("## Focused terminal screen"));
+    }
+
+    #[test]
+    fn render_inline_prompt_anti_echo_and_intent_adaptive() {
+        let snapshot = crate::context::TerminalContextSnapshot {
+            os: "linux".to_string(),
+            shell: "bash".to_string(),
+            cwd: "/home/user/project".to_string(),
+            ..Default::default()
+        };
+        let p = render_inline_prompt(PromptScene::CommandGen, &snapshot);
+        assert!(p.contains("NEVER wrap conversational messages, explanations, greetings, or text answers in `echo`"));
+        assert!(p.contains("Intent-Aware Response"));
+        assert!(p.contains("Language Matching"));
+        assert!(p.contains("OS: linux"));
+        assert!(p.contains("Shell: bash"));
+        assert!(p.contains("Working Directory: /home/user/project"));
     }
 }
