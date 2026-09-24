@@ -185,39 +185,29 @@ impl ProfileManager {
             )
         } else {
             row.child(
-                v_flex()
-                    .gap(SPACE_XS)
-                    .child(
-                        h_flex()
-                            .gap(SPACE_SM)
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_size(ui_text_md(cx))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(t.text_primary))
-                                    .child(display_name),
-                            )
-                            .when(is_active, |d| {
-                                d.child(
-                                    div()
-                                        .px(SPACE_SM)
-                                        .py(px(1.0))
-                                        .rounded(RADIUS_STD)
-                                        .bg(with_alpha(t.accent, 0.15))
-                                        .text_size(ui_text_ms(cx))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(rgb(t.accent))
-                                        .child(i18n!(cx, "profile.manager.active")),
-                                )
-                            }),
-                    )
+                h_flex()
+                    .gap(SPACE_SM)
+                    .items_center()
                     .child(
                         div()
-                            .text_size(ui_text_ms(cx))
-                            .text_color(rgb(t.text_muted))
-                            .child(id.clone()),
-                    ),
+                            .text_size(ui_text_md(cx))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(t.text_primary))
+                            .child(display_name),
+                    )
+                    .when(is_active, |d| {
+                        d.child(
+                            div()
+                                .px(SPACE_SM)
+                                .py(px(1.0))
+                                .rounded(RADIUS_STD)
+                                .bg(with_alpha(t.accent, 0.15))
+                                .text_size(ui_text_ms(cx))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(t.accent))
+                                .child(i18n!(cx, "profile.manager.active")),
+                        )
+                    }),
             )
             .child(
                 h_flex()
@@ -354,7 +344,8 @@ impl Render for ProfileManager {
                     })
                     .child(
                         v_flex()
-                            .p(SPACE_LG)
+                            .px(SPACE_XS)
+                            .py(SPACE_MD)
                             .gap(SPACE_MD)
                             .flex_1()
                             .min_h_0()
@@ -396,11 +387,11 @@ impl Render for ProfileManager {
                     .child(
                         // Create new profile footer (aligned width and height)
                         h_flex()
-                            .h(px(52.0))
+                            .h(px(48.0))
                             .flex_shrink_0()
                             .w_full()
                             .gap(SPACE_MD)
-                            .px(SPACE_LG)
+                            .px(SPACE_XS)
                             .border_t_1()
                             .border_color(p.border_subtle)
                             .items_center()
