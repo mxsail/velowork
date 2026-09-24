@@ -570,7 +570,7 @@ impl ManageProjectsDialog {
             .child(
                 // Search Input Toolbar
                 div()
-                    .px(px(4.0))
+                    .px(SPACE_XS)
                     .py(SPACE_SM)
                     .border_b_1()
                     .border_color(p.border_subtle)
@@ -584,7 +584,7 @@ impl ManageProjectsDialog {
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .px(px(4.0))
+                    .px(SPACE_XS)
                     .py(SPACE_SM)
                     .child(list_el),
             )
