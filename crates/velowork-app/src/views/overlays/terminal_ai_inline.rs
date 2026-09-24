@@ -26,7 +26,7 @@ use velowork_ui::icon::AppIcon;
 use velowork_ui::icon_button::icon_button_sized;
 use velowork_ui::motion::{ease_out_cubic, DURATION_PANEL};
 use velowork_ui::overlay_registry::OverlayRegistry;
-use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState};
+use velowork_ui::select::{Select, SelectEvent, SelectOption, SelectPlacement, SelectState, SelectWidthMode};
 use velowork_ui::simple_input::{InputEvent, SimpleInput, SimpleInputState};
 use velowork_ui::theme::theme;
 use velowork_ui::tokens::{
@@ -489,7 +489,8 @@ impl TerminalAiInline {
                 .placement(SelectPlacement::Auto)
                 .ghost(true)
                 .size(ControlSize::Compact)
-                .text_size(ui_text_md(cx));
+                .text_size(ui_text_md(cx))
+                .width_mode(SelectWidthMode::ContentAdaptive);
             if let Some(r) = reg {
                 s.set_overlay_registry(r);
             }
@@ -1252,7 +1253,8 @@ impl TerminalAiInline {
                         .into_any_element()
                 } else {
                     div()
-                        .w(px(130.0))
+                        .min_w(px(80.0))
+                        .max_w(px(200.0))
                         .flex_shrink_0()
                         .child(Select::new(&self.model_select))
                         .into_any_element()
@@ -1705,7 +1707,8 @@ impl TerminalAiInline {
                                     .pt(px(2.0))
                                     .child(
                                         div()
-                                            .w(px(140.0))
+                                            .min_w(px(80.0))
+                                            .max_w(px(200.0))
                                             .child(Select::new(&self.model_select)),
                                     )
                                     .child(
