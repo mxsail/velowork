@@ -673,13 +673,15 @@ impl Focusable for OverlayMenu {
 }
 
 impl Render for OverlayMenu {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let sp = SemanticPalette::from_context(cx);
         let this_weak = std::rc::Rc::new(cx.entity().downgrade());
 
+        let viewport = window.viewport_size();
+        let safe_margin = SPACE_MD; // 12px 面板安全留白，确保阴影 100% 收敛在窗口内部
         let menu_width = self.min_width.unwrap_or(px(260.0));
-        let (pos, anchor) = match (self.direction, self.align) {
+        let (mut pos, anchor) = match (self.direction, self.align) {
             (OverlayMenuDirection::Below, OverlayMenuAlign::Start) => (
                 point(
                     self.trigger_bounds.origin.x,
@@ -723,6 +725,21 @@ impl Render for OverlayMenu {
                 gpui::Anchor::BottomLeft,
             ),
         };
+
+        // 视口安全边距钳制：消除紧贴窗口边缘现象，避免阴影穿透/外溢到主窗口之外
+        match anchor {
+            gpui::Anchor::TopRight | gpui::Anchor::BottomRight => {
+                let max_right = (viewport.width - safe_margin).max(px(0.0));
+                let min_right = (menu_width + safe_margin).min(max_right);
+                pos.x = pos.x.clamp(min_right, max_right);
+            }
+            gpui::Anchor::TopLeft | gpui::Anchor::BottomLeft => {
+                let min_left = safe_margin;
+                let max_left = (viewport.width - menu_width - safe_margin).max(min_left);
+                pos.x = pos.x.clamp(min_left, max_left);
+            }
+            _ => {}
+        }
 
         let registry_for_bounds = self.overlay_registry.clone();
         let id_for_bounds = self.overlay_id.clone();
