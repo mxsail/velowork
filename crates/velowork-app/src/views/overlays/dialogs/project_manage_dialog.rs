@@ -6,7 +6,7 @@ use crate::ui::tokens::{
 };
 use crate::views::components::{
     dropdown_anchored_below, dropdown_overlay,
-    modal_content,
+    modal_content, modal_header,
 };
 use crate::views::overlays::dialogs::project_add_dialog::{
     AddProjectDialog, AddProjectDialogEvent,
@@ -28,8 +28,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use velowork_core::theme::FolderColor;
 use velowork_i18n::i18n;
+use velowork_ui::badge::keyboard_hint;
 use velowork_ui::button::Button;
 use velowork_ui::design::appearance::ControlSize;
+use velowork_ui::design::semantic::SemanticPalette;
+use velowork_ui::empty_state::empty_state;
 use velowork_ui::h_flex;
 use velowork_ui::icon::AppIcon;
 use velowork_ui::input::{InputEvent, InputState, KeyInterceptResult};
@@ -505,18 +508,14 @@ impl ManageProjectsDialog {
         let list_el: AnyElement = if total_count == 0 {
             div()
                 .w_full()
-                .py(SPACE_LG)
-                .text_size(ui_text_md(cx))
-                .text_color(rgb(t.text_muted))
-                .child(i18n!(cx, "project.no_projects"))
+                .py(SPACE_XL)
+                .child(empty_state(i18n!(cx, "project.no_projects"), &t, cx))
                 .into_any_element()
         } else if filtered_len == 0 {
             div()
                 .w_full()
-                .py(SPACE_LG)
-                .text_size(ui_text_md(cx))
-                .text_color(rgb(t.text_muted))
-                .child(i18n!(cx, "common.state.no_results"))
+                .py(SPACE_XL)
+                .child(empty_state(i18n!(cx, "common.state.no_results"), &t, cx))
                 .into_any_element()
         } else {
             virtual_list(
@@ -547,12 +546,12 @@ impl ManageProjectsDialog {
             .into_any_element()
         };
 
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
+        let p = SemanticPalette::from_context(cx);
 
-        let count_text = if self.query.is_empty() {
-            format!("{}", total_count)
+        let title_text = if self.query.is_empty() {
+            format!("{} ({})", i18n!(cx, "project.manage.title"), total_count)
         } else {
-            format!("{} / {}", filtered_len, total_count)
+            format!("{} ({} / {})", i18n!(cx, "project.manage.title"), filtered_len, total_count)
         };
 
         v_flex()
@@ -560,51 +559,21 @@ impl ManageProjectsDialog {
             .w_full()
             .h_full()
             .child(
-                // Header Toolbar
-                h_flex()
-                    .w_full()
-                    .px(px(20.0))
-                    .py(SPACE_LG)
-                    .border_b_1()
-                    .border_color(p.border_subtle)
-                    .items_center()
-                    .child(
-                        h_flex()
-                            .gap(SPACE_MD)
-                            .items_center()
-                            .child(
-                                AppIcon::Folder
-                                    .size(px(20.0))
-                                    .text_color(p.surface_accent),
-                            )
-                            .child(
-                                div()
-                                    .text_size(ui_text_md(cx))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(p.text_primary)
-                                    .child(i18n!(cx, "project.manage.title")),
-                            )
-                            .child(
-                                div()
-                                    .px(SPACE_SM)
-                                    .py(px(2.0))
-                                    .rounded_full()
-                                    .bg(p.surface_card)
-                                    .border_1()
-                                    .border_color(p.border_subtle)
-                                    .text_size(ui_text_sm(cx))
-                                    .text_color(p.text_secondary)
-                                    .child(count_text),
-                            ),
-                    ),
+                modal_header(
+                    title_text,
+                    None::<&str>,
+                    &t,
+                    cx,
+                    cx.listener(|this, _, _window, cx| this.dismiss(cx)),
+                ),
             )
             .child(
                 // Search Input Toolbar
                 div()
-                    .w_full()
-                    .px(px(20.0))
-                    .pt(SPACE_MD)
-                    .pb(SPACE_SM)
+                    .px(SPACE_LG)
+                    .py(SPACE_SM)
+                    .border_b_1()
+                    .border_color(p.border_subtle)
                     .when_some(self.search_input.as_ref(), |this, inp| {
                         this.child(velowork_ui::Input::new(inp).cleanable(true))
                     }),
@@ -615,7 +584,7 @@ impl ManageProjectsDialog {
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .px(px(20.0))
+                    .px(SPACE_LG)
                     .py(SPACE_SM)
                     .child(list_el),
             )
@@ -623,33 +592,45 @@ impl ManageProjectsDialog {
                 // Bottom Fixed Actions Toolbar
                 h_flex()
                     .w_full()
-                    .px(px(20.0))
-                    .py(SPACE_MD)
+                    .h(px(48.0))
+                    .px(SPACE_LG)
                     .border_t_1()
                     .border_color(p.border_subtle)
-                    .justify_end()
-                    .gap(SPACE_MD)
+                    .justify_between()
                     .items_center()
                     .child(
-                        Button::new("mp-bottom-import-btn", &t)
-                            .focus_handle(&self.import_button_focus)
-                            .size(ControlSize::Default)
-                            .icon_left(AppIcon::FolderInput)
-                            .label(i18n!(cx, "project.import_project"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_import_dialog(cx);
-                            })),
+                        h_flex()
+                            .items_center()
+                            .gap(SPACE_MD)
+                            .child(keyboard_hint("↑↓", i18n!(cx, "keybindings.hint_navigate"), &t, cx))
+                            .child(keyboard_hint("Enter", i18n!(cx, "common.action.open"), &t, cx))
+                            .child(keyboard_hint("Esc", i18n!(cx, "common.action.close"), &t, cx)),
                     )
                     .child(
-                        Button::new("mp-bottom-new-btn", &t)
-                            .focus_handle(&self.new_button_focus)
-                            .primary()
-                            .size(ControlSize::Default)
-                            .icon_left(AppIcon::Plus)
-                            .label(i18n!(cx, "project.new_project"))
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.open_create_dialog(cx);
-                            })),
+                        h_flex()
+                            .items_center()
+                            .gap(SPACE_MD)
+                            .child(
+                                Button::new("mp-bottom-import-btn", &t)
+                                    .focus_handle(&self.import_button_focus)
+                                    .size(ControlSize::Default)
+                                    .icon_left(AppIcon::FolderInput)
+                                    .label(i18n!(cx, "project.import_project"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_import_dialog(cx);
+                                    })),
+                            )
+                            .child(
+                                Button::new("mp-bottom-new-btn", &t)
+                                    .focus_handle(&self.new_button_focus)
+                                    .primary()
+                                    .size(ControlSize::Default)
+                                    .icon_left(AppIcon::Plus)
+                                    .label(i18n!(cx, "project.new_project"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.open_create_dialog(cx);
+                                    })),
+                            ),
                     ),
             )
     }
@@ -940,10 +921,10 @@ impl ManageProjectsDialog {
             .justify_between()
             .border_1()
             .border_color(with_alpha(0x000000, 0.0))
-            .hover(|s| s.bg(surface_bg_t(t.bg_hover, &t)))
+            .when(!is_selected, |d| d.hover(|s| s.bg(surface_bg_t(t.bg_hover, &t))))
             .when(is_selected && !is_rename, |d| {
-                d.bg(surface_bg_t(t.bg_hover, &t))
-                    .border_color(rgb(t.border_active))
+                d.bg(surface_bg_t(t.bg_selection, &t))
+                    .border_color(p.border_active)
             })
             .on_mouse_down(
                 MouseButton::Left,
@@ -1201,8 +1182,8 @@ impl Render for ManageProjectsDialog {
         div()
             .child(
                 modal_content("manage-projects-modal", cx)
-                    .w(px(580.0))
-                    .h(px(520.0))
+                    .w(px(640.0))
+                    .h(px(560.0))
                     .track_focus(&focus_handle)
                     .tab_cycle(&focus_group)
                     .key_context("ManageProjectsDialog")
