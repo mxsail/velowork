@@ -3599,7 +3599,7 @@ impl AiAssistantPanel {
                                         div()
                                             .id("ai-quote-content")
                                             .w_full()
-                                            .text_color(p.text_primary)
+                                            .text_color(p.text_secondary)
                                             .text_size(ui_text_md(cx))
                                             .tooltip(move |_, cx| {
                                                 cx.new(|_| Tooltip::new(quote_tip.clone())).into()
@@ -3712,7 +3712,7 @@ impl AiAssistantPanel {
                                         .min_w(px(0.0))
                                         .truncate()
                                         .whitespace_nowrap()
-                                        .text_color(rgb(t.text_primary))
+                                        .text_color(p.text_secondary)
                                         .text_size(ui_text_md(cx))
                                         .child(text),
                                 )
@@ -3899,7 +3899,7 @@ impl AiAssistantPanel {
                                     .flex_1()
                                     .min_w(px(0.0))
                                     .text_size(ui_text_md(cx))
-                                    .text_color(rgb(t.text_primary))
+                                    .text_color(rgb(t.text_secondary))
                                     .child(truncated),
                             ),
                         )
@@ -4086,7 +4086,7 @@ impl AiAssistantPanel {
                             .child(
                                 div()
                                     .text_size(ui_text_md(cx))
-                                    .text_color(rgb(t.text_primary))
+                                    .text_color(rgb(t.text_secondary))
                                     .child(label),
                             )
                             .child(
@@ -7134,7 +7134,7 @@ fn render_ai_message(
                                 .child(
                                     div()
                                         .text_size(ui_text_md(cx))
-                                        .text_color(rgb(t.text_primary))
+                                        .text_color(p.text_secondary)
                                         .child(toggle_label),
                                 ),
                         )
@@ -7529,7 +7529,7 @@ fn text_bubble(
         })
         .child(
             div()
-                .text_color(p.text_primary)
+                .text_color(p.text_secondary)
                 .text_size(ui_text_md(cx))
                 .child(StyledText::new(text.to_string()).with_highlights(highlights)),
         )
@@ -7961,7 +7961,7 @@ fn tool_call_card(
             s.child(
                 div()
                     .text_size(ui_text_md(cx))
-                    .text_color(rgb(t.text_primary))
+                    .text_color(rgb(t.text_secondary))
                     .child(data.name.clone()),
             )
         });
@@ -8006,7 +8006,7 @@ fn tool_call_card(
                 list = list.child(
                     div()
                         .text_size(ui_text_md(cx))
-                        .text_color(rgb(t.text_primary))
+                        .text_color(rgb(t.text_secondary))
                         .child(format!("{}: {}", k, v)),
                 );
             }

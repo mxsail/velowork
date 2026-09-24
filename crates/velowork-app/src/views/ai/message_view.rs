@@ -110,7 +110,7 @@ fn render_user_message(
                 .w_full()
                 .min_w(px(0.0))
                 .text_size(ui_text_md(cx))
-                .text_color(p.text_primary)
+                .text_color(p.text_secondary)
                 .child(msg.text.clone())
                 .into_any_element(),
         );
