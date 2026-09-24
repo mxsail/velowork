@@ -183,6 +183,7 @@ pub struct TerminalAiInline {
     pub focus_handle: FocusHandle,
     pub animation_frame: u64,
     pub cached_snapshot: Option<TerminalContextSnapshot>,
+    pub current_bounds: Option<Bounds<Pixels>>,
 }
 
 impl TerminalAiInline {
@@ -283,6 +284,7 @@ impl TerminalAiInline {
             focus_handle: cx.focus_handle(),
             animation_frame: 0,
             cached_snapshot: snapshot,
+            current_bounds: None,
         }
     }
 
@@ -305,6 +307,65 @@ impl TerminalAiInline {
     /// Retrieve the currently selected plain text, if any.
     pub fn get_active_selection_text(&self) -> Option<String> {
         self.active_selection.as_ref().map(|s| s.text.clone())
+    }
+
+    /// Check whether a screen coordinate falls within this floating surface
+    /// or any of its child popup elements (such as the model selection dropdown).
+    pub fn contains_point(&self, click_pos: &Point<Pixels>, cx: &App) -> bool {
+        // While user is actively dragging to resize the popover or the input card,
+        // pointer may move outside bounds temporarily; do not consider this an outside click.
+        if self.resize_drag.is_some() || self.input_resize_drag.is_some() {
+            return true;
+        }
+
+        // 1. Check primary content bounds (recorded by prepaint canvas)
+        if let Some(ref bounds) = self.current_bounds {
+            let inside = click_pos.x >= bounds.origin.x
+                && click_pos.x <= bounds.origin.x + bounds.size.width
+                && click_pos.y >= bounds.origin.y
+                && click_pos.y <= bounds.origin.y + bounds.size.height;
+            if inside {
+                return true;
+            }
+        } else {
+            // Fallback estimation before first layout pass completes
+            let pos = match self.mode {
+                InlineAiMode::Toolbar => point(self.position.x, (self.position.y - px(42.0)).max(px(4.0))),
+                InlineAiMode::Popover => point(self.position.x, self.position.y + px(4.0)),
+            };
+            let (w, h) = match self.mode {
+                InlineAiMode::Toolbar => (px(450.0), px(44.0)),
+                InlineAiMode::Popover => {
+                    if self.messages.is_empty() {
+                        (self.popover_size.width, px(INITIAL_BAR_HEIGHT))
+                    } else {
+                        (self.popover_size.width, self.popover_size.height)
+                    }
+                }
+            };
+            let inside = click_pos.x >= pos.x
+                && click_pos.x <= pos.x + w
+                && click_pos.y >= pos.y
+                && click_pos.y <= pos.y + h;
+            if inside {
+                return true;
+            }
+        }
+
+        // 2. Check if the model dropdown select popup is open and contains the point
+        if self.model_select.read(cx).is_open() {
+            if let Some(ref reg) = self.overlay_registry {
+                let reg_ref = reg.read(cx);
+                let select_overlay_id = format!("select-overlay-{}", self.model_select.entity_id());
+                if let Some(topmost) = reg_ref.topmost_at(click_pos) {
+                    if topmost.as_ref() == select_overlay_id {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
     }
 
     /// Clear any active selection or in-progress selection drag.
@@ -985,6 +1046,13 @@ impl Render for TerminalAiInline {
             None
         };
 
+        let state_entity = cx.entity();
+        let bounds_listener = move |bounds: Bounds<Pixels>, _window: &mut Window, cx: &mut App| {
+            state_entity.update(cx, |this, _| {
+                this.current_bounds = Some(bounds);
+            });
+        };
+
         div()
             .children(drag_overlay)
             .child(
@@ -993,7 +1061,12 @@ impl Render for TerminalAiInline {
                         .position(pos)
                         .anchor(gpui::Anchor::TopLeft)
                         .snap_to_window()
-                        .child(content),
+                        .child(
+                            div()
+                                .relative()
+                                .child(content)
+                                .child(canvas(bounds_listener, |_, _, _, _| {}).absolute().inset_0()),
+                        ),
                 ),
             )
     }

@@ -775,6 +775,13 @@ impl OverlayManager {
     ) {
         self.overlay_registry
             .update(cx, |r, cx| r.handle_mouse_down(point, window, cx));
+
+        if let Some(view) = self.terminal_ai_inline.render() {
+            let contains = view.read(cx).contains_point(&point, cx);
+            if !contains {
+                self.dismiss_terminal_ai_inline(cx);
+            }
+        }
     }
 
     // ========================================================================
