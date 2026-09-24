@@ -570,7 +570,7 @@ impl ManageProjectsDialog {
             .child(
                 // Search Input Toolbar
                 div()
-                    .px(SPACE_LG)
+                    .px(px(4.0))
                     .py(SPACE_SM)
                     .border_b_1()
                     .border_color(p.border_subtle)
@@ -584,7 +584,7 @@ impl ManageProjectsDialog {
                     .flex_1()
                     .w_full()
                     .min_h_0()
-                    .px(SPACE_LG)
+                    .px(px(4.0))
                     .py(SPACE_SM)
                     .child(list_el),
             )
@@ -1341,31 +1341,7 @@ impl Render for ManageProjectsDialog {
                             }
                         }),
                     )
-                    .child(self.render_list_view(window, cx).into_any_element())
-                    .child(
-                        div()
-                            .id("manage-projects-close")
-                            .absolute()
-                            .top(SPACE_MD)
-                            .right(SPACE_MD)
-                            .cursor_pointer()
-                            .w(px(28.0))
-                            .h(px(28.0))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(RADIUS_STD)
-                            .hover(|s| s.bg(surface_bg_t(t.bg_hover, &t)))
-                            .child(
-                                AppIcon::Close
-                                    .size(px(16.0))
-                                    .text_color(rgb(t.text_secondary)),
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _, _, cx| this.dismiss(cx)),
-                            ),
-                    ),
+                    .child(self.render_list_view(window, cx).into_any_element()),
             )
             .when_some(action_menu_element, |d, o| d.child(o))
     }
