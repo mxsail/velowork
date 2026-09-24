@@ -2324,7 +2324,7 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 SharedString::from("terminal-tab-list-menu"),
             )
             .with_direction(OverlayMenuDirection::Below)
-            .with_align(OverlayMenuAlign::Center)
+            .with_align(OverlayMenuAlign::End)
             .with_min_width(px(260.0))
             .with_active_id(Some(format!("tab-{}", active_tab)))
             .with_text_size(ui_text_md(cx))
