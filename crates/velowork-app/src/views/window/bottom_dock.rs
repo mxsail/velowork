@@ -510,15 +510,15 @@ impl WindowView {
     /// with `enable_sftp: true`.
     fn sync_sftp_tab(&mut self, cx: &mut Context<Self>) {
         let focused_id = self.dock_focused_terminal_id(cx);
-        let show = if let Some(ref tid) = focused_id {
-            if let Some(sid) = self.backend.get_ssh_session_id(tid) {
-                let session_store = cx.global::<GlobalSessionStore>().0.read(cx);
-                session_store
-                    .find_session(&sid)
-                    .map_or(false, |s| s.enable_sftp)
-            } else {
-                false
-            }
+        let show = if let Some(ref tid) = focused_id
+            && let Some(sid) = self.backend.get_ssh_session_id(tid)
+        {
+            let session_store = cx.global::<GlobalSessionStore>().0.read(cx);
+            session_store
+                .find_session(&sid)
+                .is_some_and(|s| s.protocol == velowork_state::SessionProtocol::Ssh && s.enable_sftp)
+        } else if focused_id.is_some() {
+            false
         } else {
             self.sftp_tab_added
         };

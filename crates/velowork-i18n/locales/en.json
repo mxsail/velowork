@@ -603,6 +603,10 @@
     "connecting": "Connecting...",
     "copy_ip": "Copy IP",
     "ip_copied": "IP copied to clipboard",
+    "copy_host": "Copy Host",
+    "host_copied": "Host address copied to clipboard",
+    "copy_serial": "Copy Serial Port",
+    "serial_copied": "Serial port copied to clipboard",
     "monitor": {
       "path_copied": "Path copied to clipboard",
       "title": "Server Resource Monitor",

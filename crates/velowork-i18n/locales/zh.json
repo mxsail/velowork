@@ -603,6 +603,10 @@
     "connecting": "连接中…",
     "copy_ip": "复制 IP",
     "ip_copied": "已复制 IP 到剪贴板",
+    "copy_host": "复制主机地址",
+    "host_copied": "已复制主机地址到剪贴板",
+    "copy_serial": "复制串口号",
+    "serial_copied": "已复制串口号到剪贴板",
     "monitor": {
       "path_copied": "路径已成功复制到剪贴板",
       "title": "服务器资源监控",

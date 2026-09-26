@@ -25,8 +25,25 @@ use velowork_extensions::{ExtensionInstance, ExtensionRegistry};
 use velowork_i18n::i18n;
 use velowork_updater::{GlobalUpdateInfo, UpdateStatus};
 use velowork_monitor::{MonitorCollector, MonitorOptions, MonitorSnapshot};
-use velowork_state::{ServiceDefinition, ServiceNode, ServiceOp, ServiceRuntimeState, ServiceStatus};
+use velowork_state::{ServiceDefinition, ServiceNode, ServiceOp, ServiceRuntimeState, ServiceStatus, SessionProtocol};
 use crate::views::overlays::menus::service_context_menu::{ServiceMenuRequest, ServiceMenuTarget};
+
+/// Connection badge displayed in the status bar for remote or hardware sessions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TerminalConnectionBadge {
+    Ssh {
+        display: String,
+        copy_text: String,
+    },
+    Telnet {
+        display: String,
+        copy_text: String,
+    },
+    Serial {
+        display: String,
+        copy_text: String,
+    },
+}
 use velowork_terminal::backend::TerminalBackend;
 use velowork_terminal::{GlobalServiceMonitorEngine, ServiceMonitorEngine};
 use velowork_terminal::{SshMonitorSource, SshSessionHandle, TerminalsRegistry};
@@ -1005,78 +1022,69 @@ impl Render for StatusBar {
 
         let divider = || div().w(px(1.0)).h(px(10.0)).bg(palette.border_subtle);
 
-        // Active session IP. We show the literal address the user configured
-        // (e.g. "10.254.100.224") rather than a resolved peer name.
-        //
-        // An SSH session runs `ssh user@host` inside an ordinary project, so we
-        // read the host straight from the focused terminal's shell args.
-        // Local (non-remote) sessions fall back to "localhost".
-        let active_ip = self
-            .focus_manager
-            .read(cx)
-            .focused_terminal_state()
-            .and_then(|ft| {
-                // SSH terminal: parse `user@host` from the focused pane's shell.
-                let layout = self
-                    .workspace
-                    .read(cx)
-                    .project(&ft.project_id)?
-                    .layout
-                    .as_ref()?;
-                let node = layout.get_at_path(&ft.layout_path)?;
-                if let LayoutNode::Terminal { shell_type, .. } = node {
-                    if let ShellType::Custom { path, args } = shell_type {
-                        if path == "ssh" {
-                            if let Some(host) = args
-                                .iter()
-                                .find(|a| a.contains('@'))
-                                .and_then(|a| a.rsplit('@').next())
-                                .filter(|h| !h.is_empty())
-                            {
-                                return Some(host.to_string());
-                            }
-                        }
-                    }
-                }
-                None
-            });
-        let ip_display = active_ip.clone().unwrap_or_else(|| "localhost".to_string());
-        let ip_label = i18n!(cx, "status.copy_ip");
-        let ip_to_copy = ip_display.clone();
-        let ip_trigger = div()
-            .id("sb-ip")
-            .group("sb-ip")
-            .cursor_pointer()
-            .h(px(20.0))
-            .px(SPACE_SM)
-            .rounded(RADIUS_STD)
-            .flex()
-            .items_center()
-            .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
-            .child(
-                h_flex()
-                    .gap(SPACE_XS)
-                    .items_center()
-                    .child(
-                        AppIcon::Network
-                            .size(ICON_STD)
-                            .text_color(rgb(t.text_secondary))
-                            .group_hover("sb-ip", |s| s.text_color(rgb(t.text_primary))),
-                    )
-                    .child(
-                        div()
-                            .text_size(ui_text_sm(cx))
-                            .text_color(rgb(t.text_primary))
-                            .child(ip_display.clone()),
-                    ),
-            )
-            .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                cx.write_to_clipboard(ClipboardItem::new_string(ip_to_copy.clone()));
-                ToastManager::success(i18n!(cx, "status.ip_copied"), cx);
-            }));
-        let ip_el = ip_trigger.tooltip(move |_, cx| {
-            cx.new(|_| Tooltip::new(ip_label.clone()).direction(TooltipDirection::Top))
-                .into()
+        // Focused terminal connection info badge (SSH host / Telnet host / Serial parameters).
+        // Local terminals or unfocused state return None and hide the badge.
+        let connection_badge = self.focused_connection_badge(cx);
+        let connection_badge_el = connection_badge.map(|badge| {
+            let (icon, display, copy_text, copy_toast, copy_tip) = match badge {
+                TerminalConnectionBadge::Ssh { display, copy_text } => (
+                    AppIcon::Network,
+                    display,
+                    copy_text,
+                    i18n!(cx, "status.ip_copied"),
+                    i18n!(cx, "status.copy_ip"),
+                ),
+                TerminalConnectionBadge::Telnet { display, copy_text } => (
+                    AppIcon::Telnet,
+                    display,
+                    copy_text,
+                    i18n!(cx, "status.host_copied"),
+                    i18n!(cx, "status.copy_host"),
+                ),
+                TerminalConnectionBadge::Serial { display, copy_text } => (
+                    AppIcon::Serial,
+                    display,
+                    copy_text,
+                    i18n!(cx, "status.serial_copied"),
+                    i18n!(cx, "status.copy_serial"),
+                ),
+            };
+            let trigger = div()
+                .id("sb-connection-badge")
+                .group("sb-connection-badge")
+                .cursor_pointer()
+                .h(px(20.0))
+                .px(SPACE_SM)
+                .rounded(RADIUS_STD)
+                .flex()
+                .items_center()
+                .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
+                .child(
+                    h_flex()
+                        .gap(SPACE_XS)
+                        .items_center()
+                        .child(
+                            icon.size(ICON_STD)
+                                .text_color(rgb(t.text_secondary))
+                                .group_hover("sb-connection-badge", |s| {
+                                    s.text_color(rgb(t.text_primary))
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_size(ui_text_sm(cx))
+                                .text_color(rgb(t.text_primary))
+                                .child(display),
+                        ),
+                )
+                .on_click(cx.listener(move |_this, _ev, _window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy_text.clone()));
+                    ToastManager::success(copy_toast.clone(), cx);
+                }));
+            trigger.tooltip(move |_, cx| {
+                cx.new(|_| Tooltip::new(copy_tip.clone()).direction(TooltipDirection::Top))
+                    .into()
+            })
         });
 
         // CPU / memory monitor summary. Clicking toggles the resource popup.
@@ -1118,21 +1126,7 @@ impl Render for StatusBar {
         // Service overview for the status-bar monitor entry (running/total).
         // Computed independently of the service popover block below so the
         // summary is available before that block runs.
-        let ov_focused = self.focus_manager.read(cx).focused_terminal_state();
-        let ov_terminal_id = ov_focused.and_then(|f| {
-            let project = self.workspace.read(cx).project(&f.project_id)?;
-            let layout = project.layout.as_ref()?;
-            match layout.get_at_path(&f.layout_path) {
-                Some(LayoutNode::Terminal {
-                    terminal_id: Some(tid),
-                    ..
-                }) => Some(tid),
-                _ => None,
-            }
-        });
-        let ov_session_id = ov_terminal_id
-            .as_ref()
-            .and_then(|tid| self.backend.get_ssh_session_id(tid));
+        let ov_session_id = self.focused_ssh_info(cx).0;
         let ov_monitored: Vec<ServiceDefinition> = match &ov_session_id {
             Some(sid) => cx
                 .try_global::<GlobalServiceStore>()
@@ -1256,7 +1250,7 @@ impl Render for StatusBar {
         let right_area = h_flex()
             .gap(SPACE_XS)
             .items_center()
-            .child(ip_el)
+            .when_some(connection_badge_el, |el, b| el.child(b))
             // .child(divider())
             // .child(charset_selector)
             .when(show_monitor, |el| el.child(divider()))
@@ -1430,6 +1424,9 @@ impl StatusBar {
     ) -> Option<AnyElement> {
         let show_monitor = self.update_monitor_target(cx);
         if !self.monitor_open || !show_monitor {
+            if !show_monitor && self.monitor_open {
+                self.monitor_open = false;
+            }
             return None;
         }
 
@@ -1437,51 +1434,9 @@ impl StatusBar {
 
         // Gather the same data the popup needs — same sources as render().
         let stats = self.cache.lock().clone();
-        let ip_display = self
-            .focus_manager
-            .read(cx)
-            .focused_terminal_state()
-            .and_then(|ft| {
-                let layout = self
-                    .workspace
-                    .read(cx)
-                    .project(&ft.project_id)?
-                    .layout
-                    .as_ref()?;
-                let node = layout.get_at_path(&ft.layout_path)?;
-                if let LayoutNode::Terminal { shell_type, .. } = node {
-                    if let ShellType::Custom { path, args } = shell_type {
-                        if path == "ssh" {
-                            if let Some(host) = args
-                                .iter()
-                                .find(|a| a.contains('@'))
-                                .and_then(|a| a.rsplit('@').next())
-                                .filter(|h| !h.is_empty())
-                            {
-                                return Some(host.to_string());
-                            }
-                        }
-                    }
-                }
-                None
-            })
-            .unwrap_or_else(|| "localhost".to_string());
+        let ip_display = self.focused_ssh_host(cx).unwrap_or_else(|| "SSH".to_string());
 
-        let focused = self.focus_manager.read(cx).focused_terminal_state();
-        let terminal_id = focused.and_then(|f| {
-            let project = self.workspace.read(cx).project(&f.project_id)?;
-            let layout = project.layout.as_ref()?;
-            match layout.get_at_path(&f.layout_path) {
-                Some(LayoutNode::Terminal {
-                    terminal_id: Some(tid),
-                    ..
-                }) => Some(tid),
-                _ => None,
-            }
-        });
-        let session_id = terminal_id
-            .as_ref()
-            .and_then(|tid| self.backend.get_ssh_session_id(tid));
+        let (session_id, _) = self.focused_ssh_info(cx);
         let all_services: Vec<ServiceDefinition> = cx
             .try_global::<GlobalServiceStore>()
             .map(|s| s.0.read(cx).all_services())
@@ -1615,9 +1570,208 @@ impl StatusBar {
             Some(LayoutNode::Terminal {
                 terminal_id: Some(tid),
                 ..
-            }) => self.backend.get_ssh_session(&tid),
+            }) => self.backend.get_ssh_session(tid),
             _ => None,
         }
+    }
+
+    /// Resolve the connection badge for the focused terminal (SSH host, Telnet host, or Serial settings).
+    /// Returns `None` for local terminals or when no terminal is focused.
+    fn focused_connection_badge(&self, cx: &App) -> Option<TerminalConnectionBadge> {
+        let focused = self.focus_manager.read(cx).focused_terminal_state()?;
+        let project = self.workspace.read(cx).project(&focused.project_id)?;
+        let layout = project.layout.as_ref()?;
+        let (terminal_id, shell_type) = match layout.get_at_path(&focused.layout_path) {
+            Some(LayoutNode::Terminal {
+                terminal_id,
+                shell_type,
+                ..
+            }) => (terminal_id.as_deref(), shell_type),
+            _ => return None,
+        };
+
+        // 1. Try resolving via saved session in GlobalSessionStore
+        let session_id = terminal_id
+            .and_then(|tid| self.backend.get_ssh_session_id(tid))
+            .or_else(|| shell_type.session_id().map(ToString::to_string));
+
+        if let Some(ref sid) = session_id
+            && let Some(store) = cx.try_global::<GlobalSessionStore>()
+            && let Some(session) = store.0.read(cx).find_session(sid)
+        {
+            match session.protocol {
+                        SessionProtocol::Local => {
+                            // Local sessions hide the connection badge
+                            return None;
+                        }
+                        SessionProtocol::Serial => {
+                            let port = session
+                                .serial_port
+                                .clone()
+                                .filter(|p| !p.trim().is_empty())
+                                .or_else(|| {
+                                    if let ShellType::Custom { args, .. } = shell_type {
+                                        velowork_terminal::pty_manager::parse_serial_args(args)
+                                            .map(|(p, _, _)| p)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .filter(|p| !p.trim().is_empty())
+                                .unwrap_or_else(|| "Serial".to_string());
+                            let baud = session.serial_baud_rate;
+                            let data_bits = session.serial_data_bits;
+                            let parity = match session.serial_parity.trim().to_lowercase().as_str() {
+                                "odd" => 'O',
+                                "even" => 'E',
+                                "mark" => 'M',
+                                "space" => 'S',
+                                _ => 'N',
+                            };
+                            let stop_bits = session.serial_stop_bits;
+                            let display = format!("{port} {baud} {data_bits}{parity}{stop_bits}");
+                            return Some(TerminalConnectionBadge::Serial {
+                                display,
+                                copy_text: port,
+                            });
+                        }
+                        SessionProtocol::Telnet => {
+                            let host = session
+                                .telnet_host
+                                .clone()
+                                .filter(|h| !h.trim().is_empty())
+                                .or_else(|| {
+                                    if !session.host.trim().is_empty() {
+                                        Some(session.host.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .or_else(|| {
+                                    if let ShellType::Custom { args, .. } = shell_type {
+                                        velowork_terminal::pty_manager::parse_telnet_args(args)
+                                            .map(|(h, _, _)| h)
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .filter(|h| !h.trim().is_empty())
+                                .unwrap_or_else(|| "Telnet".to_string());
+                            let port = if session.telnet_port > 0 {
+                                session.telnet_port
+                            } else {
+                                23
+                            };
+                            let display = if port != 23 {
+                                format!("{host}:{port}")
+                            } else {
+                                host.clone()
+                            };
+                            return Some(TerminalConnectionBadge::Telnet {
+                                display,
+                                copy_text: host,
+                            });
+                        }
+                        SessionProtocol::Ssh => {
+                            let host = if !session.host.trim().is_empty() {
+                                session.host.clone()
+                            } else {
+                                self.parse_ssh_host_from_shell(shell_type)
+                                    .unwrap_or_else(|| "localhost".to_string())
+                            };
+                            return Some(TerminalConnectionBadge::Ssh {
+                                display: host.clone(),
+                                copy_text: host,
+                            });
+                        }
+                    }
+        }
+
+        // 2. Fallback: Parse from custom shell arguments (e.g. ad-hoc / quick connect / CLI)
+        match shell_type {
+            ShellType::Custom { path, args } if path == "serial" => {
+                let (port, baud, _) = velowork_terminal::pty_manager::parse_serial_args(args)
+                    .unwrap_or_else(|| ("Serial".to_string(), 115200, None));
+                let display = format!("{port} {baud} 8N1");
+                Some(TerminalConnectionBadge::Serial {
+                    display,
+                    copy_text: port,
+                })
+            }
+            ShellType::Custom { path, args } if path == "telnet" => {
+                let (host, port, _) = velowork_terminal::pty_manager::parse_telnet_args(args)
+                    .unwrap_or_else(|| ("Telnet".to_string(), 23, None));
+                let display = if port != 23 && port > 0 {
+                    format!("{host}:{port}")
+                } else {
+                    host.clone()
+                };
+                Some(TerminalConnectionBadge::Telnet {
+                    display,
+                    copy_text: host,
+                })
+            }
+            ShellType::Custom { path, .. } if path == "ssh" => {
+                let host = self
+                    .parse_ssh_host_from_shell(shell_type)
+                    .unwrap_or_else(|| "localhost".to_string());
+                Some(TerminalConnectionBadge::Ssh {
+                    display: host.clone(),
+                    copy_text: host,
+                })
+            }
+            // Local shells (Default, Welcome, Cmd, PowerShell, Wsl, or Custom "local")
+            _ => None,
+        }
+    }
+
+    /// Extract the SSH host string if the focused terminal is an SSH session.
+    fn focused_ssh_host(&self, cx: &App) -> Option<String> {
+        match self.focused_connection_badge(cx) {
+            Some(TerminalConnectionBadge::Ssh { display, .. }) => Some(display),
+            _ => None,
+        }
+    }
+
+    /// Parse SSH host from shell arguments.
+    fn parse_ssh_host_from_shell(&self, shell_type: &ShellType) -> Option<String> {
+        let ShellType::Custom { path, args } = shell_type else {
+            return None;
+        };
+        if path != "ssh" {
+            return None;
+        }
+        if let Some((host, _, _, _, _, _)) = velowork_terminal::pty_manager::parse_ssh_args(args)
+            && !host.trim().is_empty()
+        {
+            return Some(host);
+        }
+        let mut host_arg = None;
+        let mut i = 0;
+        while i < args.len() {
+            if (args[i] == "--id" || args[i] == "--session-id" || args[i] == "-p" || args[i] == "-i")
+                && i + 1 < args.len()
+            {
+                i += 2;
+            } else if !args[i].starts_with('-') {
+                host_arg = Some(args[i].clone());
+                i += 1;
+            } else {
+                i += 1;
+            }
+        }
+        host_arg.and_then(|h| {
+            if let Some((_, host)) = h.rsplit_once('@')
+                && !host.trim().is_empty()
+            {
+                return Some(host.to_string());
+            }
+            if !h.trim().is_empty() {
+                Some(h)
+            } else {
+                None
+            }
+        })
     }
 
     /// For the focused terminal, report whether the SFTP toggle button should
@@ -1625,8 +1779,7 @@ impl StatusBar {
     ///
     /// - SSH terminal: `Some(enable_sftp)` — only show when the connection has
     ///   SFTP enabled (so a connection that disabled SFTP hides the button).
-    /// - Local terminal / nothing focused: `None` — caller decides (kept
-    ///   visible to preserve prior behaviour).
+    /// - Non-SSH terminals / nothing focused: `None` — caller decides to hide.
     fn focused_sftp_state(&self, cx: &App) -> Option<bool> {
         let focused = self.focus_manager.read(cx).focused_terminal_state()?;
         let project = self.workspace.read(cx).project(&focused.project_id)?;
@@ -1639,24 +1792,28 @@ impl StatusBar {
             }) => (tid, shell_type),
             _ => return None,
         };
-        // Check if it's an SSH terminal by shell_type or session_id
-        let is_ssh = matches!(shell_type, ShellType::Custom { path, .. } if path == "ssh")
-            || self.backend.get_ssh_session_id(terminal_id).is_some();
-        if !is_ssh {
-            return None;
-        }
 
-        if let Some(session_id) = self.backend.get_ssh_session_id(terminal_id) {
-            if let Some(store) = cx.try_global::<GlobalSessionStore>() {
-                let session_store = store.0.read(cx);
-                if let Some(session) = session_store.find_session(&session_id) {
-                    return Some(session.enable_sftp);
-                }
+        let session_id = self
+            .backend
+            .get_ssh_session_id(terminal_id)
+            .or_else(|| shell_type.session_id().map(ToString::to_string));
+
+        if let Some(session_id) = session_id
+            && let Some(store) = cx.try_global::<GlobalSessionStore>()
+            && let Some(session) = store.0.read(cx).find_session(&session_id)
+        {
+            if session.protocol != SessionProtocol::Ssh {
+                return None;
             }
+            return Some(session.enable_sftp);
         }
 
         // Ad-hoc / quick-connect SSH sessions default to enabled
-        Some(true)
+        if matches!(shell_type, ShellType::Custom { path, .. } if path == "ssh") {
+            Some(true)
+        } else {
+            None
+        }
     }
 
     /// For the focused terminal, report whether the server resource monitor
@@ -1664,6 +1821,7 @@ impl StatusBar {
     /// toggle states for CPU, memory, and disk.
     ///
     /// Returns `(enable_monitor, monitor_cpu, monitor_mem, monitor_disk)`.
+    /// Strictly returns all false for non-SSH sessions.
     fn focused_monitor_config(&self, cx: &App) -> (bool, bool, bool, bool) {
         let Some(focused) = self.focus_manager.read(cx).focused_terminal_state() else {
             return (false, false, false, false);
@@ -1674,55 +1832,61 @@ impl StatusBar {
         let Some(layout) = project.layout.as_ref() else {
             return (false, false, false, false);
         };
-        let terminal_id = match layout.get_at_path(&focused.layout_path) {
+        let (terminal_id, shell_type) = match layout.get_at_path(&focused.layout_path) {
             Some(LayoutNode::Terminal {
                 terminal_id: Some(tid),
+                shell_type,
                 ..
-            }) => tid,
+            }) => (tid, shell_type),
             _ => return (false, false, false, false),
         };
-        // Local terminals have no SSH session id → `None` here means "not
-        // remote"; remote terminals resolve to their session's monitor settings.
-        let Some(session_id) = self.backend.get_ssh_session_id(terminal_id) else {
+        let session_id = self
+            .backend
+            .get_ssh_session_id(terminal_id)
+            .or_else(|| shell_type.session_id().map(ToString::to_string));
+        let Some(session_id) = session_id else {
             return (false, false, false, false);
         };
-        let session_store = cx.global::<GlobalSessionStore>().0.read(cx);
-        session_store
-            .find_session(&session_id)
-            .map_or((false, false, false, false), |s| {
-                (
-                    s.enable_monitor,
-                    s.monitor_cpu,
-                    s.monitor_mem,
-                    s.monitor_disk,
-                )
-            })
+        let Some(store) = cx.try_global::<GlobalSessionStore>() else {
+            return (false, false, false, false);
+        };
+        let session_store = store.0.read(cx);
+        let Some(session) = session_store.find_session(&session_id) else {
+            return (false, false, false, false);
+        };
+        // Strict guard: ONLY SSH sessions support resource monitoring!
+        if session.protocol != SessionProtocol::Ssh {
+            return (false, false, false, false);
+        }
+        (
+            session.enable_monitor,
+            session.monitor_cpu,
+            session.monitor_mem,
+            session.monitor_disk,
+        )
     }
 
     /// Update the metrics engine's target from the focused terminal. Cheap
     /// (Arc pointer compare); the worker promotes it to the active collector
     /// once the focus has settled (debounce). Returns whether monitoring is
-    /// active (remote session with monitoring enabled), which the caller uses
-    /// to gate the status-bar UI.
+    /// active (SSH remote session with monitoring enabled and connected),
+    /// which the caller uses to gate the status-bar UI.
     fn update_monitor_target(&self, cx: &App) -> bool {
         let (enable_monitor, monitor_cpu, monitor_mem, monitor_disk) =
             self.focused_monitor_config(cx);
         let enabled = enable_monitor && (monitor_cpu || monitor_mem || monitor_disk);
-        *self.host_metrics.enabled.lock() = enabled;
-        *self.host_metrics.options.lock() = MonitorOptions {
-            enable_cpu: monitor_cpu,
-            enable_mem: monitor_mem,
-            enable_disk: monitor_disk,
-        };
         let next = if enabled {
             self.focused_ssh_session(cx)
         } else {
             None
         };
-        // Only bump the debounce timer when the desired terminal actually
-        // changes. Frequent re-renders (the 2s refresh tick, focus observers)
-        // must NOT reset it, otherwise the worker would keep deferring the
-        // commit and the monitor would never start.
+        let is_active = enabled && next.is_some();
+        *self.host_metrics.enabled.lock() = is_active;
+        *self.host_metrics.options.lock() = MonitorOptions {
+            enable_cpu: monitor_cpu,
+            enable_mem: monitor_mem,
+            enable_disk: monitor_disk,
+        };
         let mut cur = self.host_metrics.desired.lock();
         let changed = match (cur.as_ref(), next.as_ref()) {
             (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
@@ -1732,11 +1896,15 @@ impl StatusBar {
         if changed {
             *cur = next;
             *self.host_metrics.desired_changed_at.lock() = Some(Instant::now());
+            if !is_active {
+                *self.cache.lock() = SystemStats::default();
+            }
         }
-        enabled
+        is_active
     }
 
     /// Resolve the focused terminal's SSH session ID and live handle.
+    /// Strictly filters to SSH sessions.
     fn focused_ssh_info(&self, cx: &App) -> (Option<String>, Option<SshSessionHandle>) {
         let Some(focused) = self.focus_manager.read(cx).focused_terminal_state() else {
             return (None, None);
@@ -1747,14 +1915,31 @@ impl StatusBar {
         let Some(layout) = project.layout.as_ref() else {
             return (None, None);
         };
-        let terminal_id = match layout.get_at_path(&focused.layout_path) {
+        let (terminal_id, shell_type) = match layout.get_at_path(&focused.layout_path) {
             Some(LayoutNode::Terminal {
                 terminal_id: Some(tid),
+                shell_type,
                 ..
-            }) => tid,
+            }) => (tid, shell_type),
             _ => return (None, None),
         };
-        let session_id = self.backend.get_ssh_session_id(terminal_id);
+        let session_id = self
+            .backend
+            .get_ssh_session_id(terminal_id)
+            .or_else(|| shell_type.session_id().map(ToString::to_string));
+
+        if let Some(ref sid) = session_id {
+            if let Some(store) = cx.try_global::<GlobalSessionStore>() {
+                if let Some(session) = store.0.read(cx).find_session(sid) {
+                    if session.protocol != SessionProtocol::Ssh {
+                        return (None, None);
+                    }
+                }
+            }
+        } else if !matches!(shell_type, ShellType::Custom { path, .. } if path == "ssh") {
+            return (None, None);
+        }
+
         let session_handle = self.backend.get_ssh_session(terminal_id);
         (session_id, session_handle)
     }

@@ -4482,4 +4482,28 @@ mod tests {
         assert!(cfg.preferred.compression.contains(&russh::compression::ZLIB));
         assert_eq!(cfg.limits.rekey_time_limit, std::time::Duration::from_secs(1800));
     }
+
+    #[test]
+    fn test_parse_serial_and_telnet_args_extended() {
+        let serial_args = vec![
+            "--port".to_string(),
+            "COM4".to_string(),
+            "--baud".to_string(),
+            "9600".to_string(),
+        ];
+        let (port, baud, sid) = parse_serial_args(&serial_args).unwrap();
+        assert_eq!(port, "COM4");
+        assert_eq!(baud, 9600);
+        assert_eq!(sid, None);
+
+        let telnet_args = vec![
+            "--host".to_string(),
+            "switch.local".to_string(),
+            "--port".to_string(),
+            "2323".to_string(),
+        ];
+        let (host, port, _) = parse_telnet_args(&telnet_args).unwrap();
+        assert_eq!(host, "switch.local");
+        assert_eq!(port, 2323);
+    }
 }
