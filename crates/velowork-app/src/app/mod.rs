@@ -670,8 +670,16 @@ impl Velowork {
     /// Lock the app (show lock screen overlay).
     pub fn lock_app(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // Without a master password the lock screen can never be unlocked, so
-        // refuse to lock.
+        // refuse to lock and warn the user.
         if !security::is_master_password_set() {
+            log::warn!("[security] Refusing to lock app: no master password configured in database");
+            let msg = velowork_i18n::i18n!(cx, "settings.security.lock_error_no_password");
+            let already_queued = cx.try_global::<ToastManager>()
+                .map(|tm| tm.0.lock().iter().any(|t| t.message == msg && !t.is_expired()))
+                .unwrap_or(false);
+            if !already_queued {
+                ToastManager::warning(msg, cx);
+            }
             return;
         }
         if let Ok(mut svc) = security::current_security_service() {

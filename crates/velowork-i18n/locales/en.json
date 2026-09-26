@@ -251,7 +251,8 @@
       "password_empty": "Password cannot be empty",
       "master_password_set_ok": "Master password set",
       "master_password_removed": "Master password removed, back to Standard",
-      "master_password_changed": "Master password changed"
+      "master_password_changed": "Master password changed",
+      "lock_error_no_password": "Master password is not configured, cannot lock application"
     },
     "sync": {
       "enabled": "Enable Data Sync",

@@ -1713,7 +1713,8 @@ impl Render for WindowView {
 
                                 let is_enhanced_security = {
                                     let s = settings_entity(cx).read(cx).settings.clone();
-                                    s.security.security_mode == "enhanced" || s.security.master_password_set
+                                    (s.security.security_mode == "enhanced" || s.security.master_password_set)
+                                        && velowork_workspace::security::is_master_password_set()
                                 };
 
                                 let palette = SemanticPalette::from_theme(&t);

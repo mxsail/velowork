@@ -25,7 +25,9 @@ static SECURITY_SERVICES: Mutex<Option<HashMap<String, SecurityService>>> = Mute
 /// 优先使用进程级已初始化的数据库句柄；否则回退到直接打开 Profile 的
 /// `velowork.db`（打开时会自动应用迁移，含 security 相关 v4 表）。
 pub fn current_security_service() -> Result<SecurityService> {
-    let profile = profiles::current();
+    let Some(profile) = profiles::try_current() else {
+        anyhow::bail!("no active profile initialized");
+    };
     let mut guard = SECURITY_SERVICES.lock().unwrap_or_else(|e| e.into_inner());
     let map = guard.get_or_insert_with(HashMap::new);
     if let Some(svc) = map.get(&profile.id) {

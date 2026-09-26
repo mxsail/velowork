@@ -1751,7 +1751,8 @@ pub fn load_settings() -> AppSettings {
             settings = migrate_settings(settings);
             sort_quick_command_trees(&mut settings);
             hydrate_and_migrate_ai_keys(&mut settings);
-            if settings.version != old_version {
+            let security_reconciled = reconcile_security_settings(&mut settings);
+            if settings.version != old_version || security_reconciled {
                 log::info!(
                     "[settings] Migrated from v{} to v{}",
                     old_version,
@@ -1778,6 +1779,7 @@ pub fn load_settings() -> AppSettings {
             settings = migrate_settings(settings);
             sort_quick_command_trees(&mut settings);
             hydrate_and_migrate_ai_keys(&mut settings);
+            reconcile_security_settings(&mut settings);
             // Save the recovered settings to fix the file
             if let Err(e) = save_settings(&settings) {
                 log::warn!("[settings] Failed to save recovered settings | error: {:#}", e);
@@ -1789,9 +1791,45 @@ pub fn load_settings() -> AppSettings {
             log::error!("[settings] Using default settings. Your old settings files have been preserved.");
             let mut settings = AppSettings::default();
             hydrate_and_migrate_ai_keys(&mut settings);
+            reconcile_security_settings(&mut settings);
             settings
         }
     }
+}
+
+/// Reconcile cached security settings in `AppSettings` with the database ground truth.
+///
+/// Returns `true` if `settings.security` was modified to match the database state.
+/// If no profile database is active (e.g., in lightweight unit tests), this safely no-ops and returns `false`.
+pub fn reconcile_security_settings(settings: &mut AppSettings) -> bool {
+    let Ok(svc) = crate::security::current_security_service() else {
+        return false;
+    };
+    let has_master_password = svc.is_master_password_set();
+    let effective_mode = if has_master_password { "enhanced" } else { "standard" };
+    let mut modified = false;
+
+    if settings.security.security_mode != effective_mode {
+        log::warn!(
+            "[settings:security] Reconciling security_mode mismatch | settings: '{}' -> db: '{}'",
+            settings.security.security_mode,
+            effective_mode
+        );
+        settings.security.security_mode = effective_mode.to_string();
+        modified = true;
+    }
+
+    if settings.security.master_password_set != has_master_password {
+        log::warn!(
+            "[settings:security] Reconciling master_password_set mismatch | settings: {} -> db: {}",
+            settings.security.master_password_set,
+            has_master_password
+        );
+        settings.security.master_password_set = has_master_password;
+        modified = true;
+    }
+
+    modified
 }
 
 fn hydrate_and_migrate_ai_keys(settings: &mut AppSettings) {
@@ -2127,5 +2165,14 @@ mod tests {
         let json = r#"{"confirm_close_tab": false}"#;
         let recovered = recover_settings_from_json(json).unwrap();
         assert_eq!(recovered.confirm_close_tab, false);
+    }
+
+    #[test]
+    fn test_reconcile_security_settings_no_crash_without_db() {
+        let mut settings = AppSettings::default();
+        settings.security.security_mode = "enhanced".into();
+        settings.security.master_password_set = true;
+        // In standalone unit test without profile DB, it should safely return false without crashing
+        let _ = reconcile_security_settings(&mut settings);
     }
 }

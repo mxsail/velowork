@@ -17,8 +17,11 @@ impl SettingsPanel {
         let t = theme(cx);
         let (is_enhanced, password_timeout_secs) = {
             let guard = settings_entity(cx).read(cx);
+            let has_db_password = velowork_workspace::security::is_master_password_set();
             (
-                guard.settings.security.security_mode == "enhanced",
+                (guard.settings.security.security_mode == "enhanced"
+                    || guard.settings.security.master_password_set)
+                    && has_db_password,
                 guard.settings.security.password_timeout_secs as f32,
             )
         };

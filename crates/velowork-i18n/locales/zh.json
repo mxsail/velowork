@@ -251,7 +251,8 @@
       "password_empty": "密码不能为空",
       "master_password_set_ok": "密码已设置",
       "master_password_removed": "已移除密码，回到标准模式",
-      "master_password_changed": "密码已修改"
+      "master_password_changed": "密码已修改",
+      "lock_error_no_password": "未配置主密码，无法锁定应用"
     },
     "sync": {
       "enabled": "启用数据同步",
