@@ -199,6 +199,7 @@ impl SettingsState {
 
     setting_setter!(set_monitor_popup_width, monitor_popup_width, f32, 400.0, 2000.0);
     setting_setter!(set_monitor_popup_height, monitor_popup_height, f32, 300.0, 2000.0);
+    setting_setter!(set_transfer_popup_height, transfer_popup_height, f32, 200.0, 2000.0);
 
     /// Set both monitor popup dimensions at once and persist.
     pub fn set_monitor_popup_size(&mut self, width: f32, height: f32, cx: &mut Context<Self>) {

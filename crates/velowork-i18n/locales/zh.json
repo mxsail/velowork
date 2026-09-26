@@ -2454,7 +2454,11 @@
     "resume": "继续",
     "remove": "移除",
     "complete": "已完成",
-    "error": "传输失败"
+    "error": "传输失败",
+    "open_file": "打开文件",
+    "open_folder": "打开所在目录",
+    "local_path": "本地路径",
+    "remote_path": "远程路径"
   },
   "workspace": {
     "explorer": "会话管理器",

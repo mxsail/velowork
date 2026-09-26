@@ -2454,7 +2454,11 @@
     "resume": "Resume",
     "remove": "Remove",
     "complete": "Completed",
-    "error": "Transfer Failed"
+    "error": "Transfer Failed",
+    "open_file": "Open File",
+    "open_folder": "Open Containing Folder",
+    "local_path": "Local Path",
+    "remote_path": "Remote Path"
   },
   "workspace": {
     "explorer": "Session Manager",

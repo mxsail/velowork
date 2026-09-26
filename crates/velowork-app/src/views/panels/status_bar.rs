@@ -824,7 +824,17 @@ impl Render for StatusBar {
                     // click-outside backdrop, mutually exclusive with other
                     // overlays.
                     let b = *this.transfer_bounds.borrow();
-                    let anchor = point(b.origin.x + b.size.width - px(6.0), b.origin.y);
+                    let sb_bounds = *this.status_bar_bounds.borrow();
+                    let card_gap = ui_space_card_gap(cx);
+                    let anchor_y = if sb_bounds.size.height > px(0.0) && sb_bounds.origin.y > px(0.0) {
+                        sb_bounds.origin.y - card_gap
+                    } else if b.origin.y > px(0.0) {
+                        b.origin.y - card_gap
+                    } else {
+                        let status_bar_h = ui_height_status_bar(cx);
+                        _w.viewport_size().height - status_bar_h - card_gap
+                    };
+                    let anchor = point(b.origin.x + b.size.width - px(6.0), anchor_y);
                     this.overlay_manager.update(cx, |om, cx| {
                         om.toggle_transfer_popup(anchor, cx);
                     });

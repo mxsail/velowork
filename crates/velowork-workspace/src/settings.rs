@@ -992,6 +992,9 @@ pub struct AppSettings {
     /// Status bar server resource monitor popup height in pixels (default: 520.0)
     #[serde(default = "default_monitor_popup_height")]
     pub monitor_popup_height: f32,
+    /// Status bar file transfer manager popup height in pixels (default: 340.0)
+    #[serde(default = "default_transfer_popup_height")]
+    pub transfer_popup_height: f32,
 
     /// Set of enabled extension IDs (replaces per-extension bool flags).
     #[serde(default)]
@@ -1448,6 +1451,7 @@ impl Default for AppSettings {
             detached_overlay_bounds: None,
             monitor_popup_width: default_monitor_popup_width(),
             monitor_popup_height: default_monitor_popup_height(),
+            transfer_popup_height: default_transfer_popup_height(),
             enabled_extensions: HashSet::new(),
             extension_settings: HashMap::new(),
             idle_timeout_secs: default_idle_timeout_secs(),
@@ -1649,6 +1653,10 @@ pub fn default_monitor_popup_width() -> f32 {
 
 pub fn default_monitor_popup_height() -> f32 {
     520.0
+}
+
+pub fn default_transfer_popup_height() -> f32 {
+    340.0
 }
 
 // New default functions for Phase 1
