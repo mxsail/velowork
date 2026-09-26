@@ -817,7 +817,18 @@ impl Render for TerminalContent {
             .as_ref()
             .map(|s| !s.trim().is_empty())
             .unwrap_or(false);
-        let base_alpha = if image_set { 0.0 } else { bg_opacity(cx) };
+        let opacity = bg_opacity(cx);
+        // Avoid double-applying the same background color when `effective_bg` matches
+        // the underlying window/workspace background `t.bg_primary`.
+        // If they match, `#root`'s `surface_bg(t.bg_primary, cx)` already provides the
+        // backdrop at the exact user-configured opacity. Stacking `effective_bg` with
+        // `base_alpha` on top would compound the opacity into `1 - (1 - opacity)^2`,
+        // making the terminal significantly more opaque than intended.
+        let base_alpha = if image_set || (opacity < 1.0 && (effective_bg & 0xFFFFFF) == (t.bg_primary & 0xFFFFFF)) {
+            0.0
+        } else {
+            opacity
+        };
         let pane_bg = if base_alpha > 0.0 {
             with_alpha(effective_bg, base_alpha)
         } else {

@@ -138,7 +138,16 @@ impl Render for SimpleRoot {
         // window compositor renders smooth alpha-clipped corners without sharp dark tips.
         let opacity = bg_opacity(cx);
         let target_appearance = if opacity < 1.0 {
-            WindowBackgroundAppearance::Blurred
+            if cfg!(target_os = "windows") {
+                // Windows 11 DWM deprecated legacy `ACCENT_ENABLE_ACRYLICBLURBEHIND` (state 4),
+                // which causes `Blurred` to fall back to an opaque solid black/dark background.
+                // Using `Transparent` (state 2) enables DirectComposition premultiplied alpha
+                // to blend directly with the Windows desktop.
+                WindowBackgroundAppearance::Transparent
+            } else {
+                // macOS uses native `NSVisualEffectView`, and Linux Wayland/X11 uses compositor blur protocols.
+                WindowBackgroundAppearance::Blurred
+            }
         } else if has_rounded_corners {
             WindowBackgroundAppearance::Transparent
         } else {

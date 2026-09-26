@@ -988,7 +988,16 @@ pub fn settings(cx: &App) -> AppSettings {
 /// runtime is intentionally omitted here.
 pub fn window_background_appearance(settings: &AppSettings) -> gpui::WindowBackgroundAppearance {
     if settings.bg_opacity < 1.0 {
-        gpui::WindowBackgroundAppearance::Blurred
+        if cfg!(target_os = "windows") {
+            // Windows 11 DWM deprecated legacy `ACCENT_ENABLE_ACRYLICBLURBEHIND` (state 4),
+            // which causes `Blurred` to fall back to an opaque solid black/dark background.
+            // Using `Transparent` (state 2) enables DirectComposition premultiplied alpha
+            // to blend directly with the Windows desktop.
+            gpui::WindowBackgroundAppearance::Transparent
+        } else {
+            // macOS uses native `NSVisualEffectView`, and Linux Wayland/X11 uses compositor blur protocols.
+            gpui::WindowBackgroundAppearance::Blurred
+        }
     } else if settings.titlebar_style == TitlebarStyle::Custom && settings.window_corner_radius > 0.0
     {
         gpui::WindowBackgroundAppearance::Transparent
