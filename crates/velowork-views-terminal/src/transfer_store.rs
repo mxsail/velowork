@@ -5,6 +5,7 @@
 //! transfer button and to render the transfer popup.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use gpui::*;
 
@@ -13,6 +14,22 @@ use gpui::*;
 pub enum TransferDirection {
     Upload,
     Download,
+}
+
+/// Origin location for the transfer flying animation.
+#[derive(Clone, Debug)]
+pub enum TransferFlyOrigin {
+    /// Explicit coordinate in window space (e.g. from SFTP selected row or panel center).
+    Point(Point<Pixels>),
+    /// Center of the active application window/viewport (for OS file dialog collapse).
+    DialogCenter,
+}
+
+/// Event emitted when a transfer starts and a flying ghost animation should play.
+#[derive(Clone, Debug)]
+pub struct TransferFlyEvent {
+    pub origin: TransferFlyOrigin,
+    pub is_multiple: bool,
 }
 
 /// Lifecycle status of a transfer task.
@@ -82,17 +99,33 @@ pub fn next_transfer_id() -> String {
     format!("xfer-{}", n)
 }
 
+pub const TRANSFER_CONTROL_ACTIVE: u8 = 0;
+pub const TRANSFER_CONTROL_PAUSED: u8 = 1;
+pub const TRANSFER_CONTROL_CANCELLED: u8 = 2;
+
 /// Observable store of all in-flight and recently-finished transfers.
 #[derive(Clone, Debug, Default)]
 pub struct TransferStore {
     pub tasks: Vec<TransferTask>,
+    pub controls: std::collections::HashMap<String, Arc<std::sync::atomic::AtomicU8>>,
 }
 
 impl TransferStore {
     pub fn new() -> Self {
         Self {
             tasks: Vec::new(),
+            controls: std::collections::HashMap::new(),
         }
+    }
+
+    /// Register a control handle for in-flight pause/resume/cancellation.
+    pub fn register_control(&mut self, id: &str, control: Arc<std::sync::atomic::AtomicU8>) {
+        self.controls.insert(id.to_string(), control);
+    }
+
+    /// Retrieve the control handle for a transfer task.
+    pub fn get_control(&self, id: &str) -> Option<Arc<std::sync::atomic::AtomicU8>> {
+        self.controls.get(id).cloned()
     }
 
     /// Insert or replace a task by id.
@@ -121,15 +154,34 @@ impl TransferStore {
             t.status = status;
             t.error = error;
         }
+        if let Some(ctrl) = self.controls.get(id) {
+            match status {
+                TransferStatus::Active => ctrl.store(TRANSFER_CONTROL_ACTIVE, Ordering::Relaxed),
+                TransferStatus::Paused => ctrl.store(TRANSFER_CONTROL_PAUSED, Ordering::Relaxed),
+                _ => {}
+            }
+        }
     }
 
     pub fn remove(&mut self, id: &str) {
         self.tasks.retain(|t| t.id != id);
+        if let Some(ctrl) = self.controls.remove(id) {
+            ctrl.store(TRANSFER_CONTROL_CANCELLED, Ordering::Relaxed);
+        }
     }
 
     /// Drop all completed tasks.
     pub fn clear_completed(&mut self) {
+        let completed_ids: Vec<String> = self
+            .tasks
+            .iter()
+            .filter(|t| t.status == TransferStatus::Complete || t.status == TransferStatus::Error)
+            .map(|t| t.id.clone())
+            .collect();
         self.tasks.retain(|t| t.status != TransferStatus::Complete);
+        for id in completed_ids {
+            self.controls.remove(&id);
+        }
     }
 
     /// Pause every active transfer.
@@ -139,6 +191,11 @@ impl TransferStore {
                 t.status = TransferStatus::Paused;
             }
         }
+        for ctrl in self.controls.values() {
+            if ctrl.load(Ordering::Relaxed) == TRANSFER_CONTROL_ACTIVE {
+                ctrl.store(TRANSFER_CONTROL_PAUSED, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Resume every paused transfer.
@@ -146,6 +203,11 @@ impl TransferStore {
         for t in &mut self.tasks {
             if t.status == TransferStatus::Paused {
                 t.status = TransferStatus::Active;
+            }
+        }
+        for ctrl in self.controls.values() {
+            if ctrl.load(Ordering::Relaxed) == TRANSFER_CONTROL_PAUSED {
+                ctrl.store(TRANSFER_CONTROL_ACTIVE, Ordering::Relaxed);
             }
         }
     }
@@ -169,7 +231,22 @@ impl TransferStore {
         }
         Some(TransferStatus::Complete)
     }
+
+    /// Trigger a flying animation towards the status bar transfer icon.
+    pub fn trigger_fly(
+        &mut self,
+        origin: TransferFlyOrigin,
+        is_multiple: bool,
+        cx: &mut Context<Self>,
+    ) {
+        cx.emit(TransferFlyEvent {
+            origin,
+            is_multiple,
+        });
+    }
 }
+
+impl EventEmitter<TransferFlyEvent> for TransferStore {}
 
 /// Global handle to the `TransferStore` entity.
 pub struct GlobalTransferStore(pub Entity<TransferStore>);

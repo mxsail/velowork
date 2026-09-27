@@ -154,9 +154,14 @@ impl TransferPopup {
         let tasks = store.tasks.clone();
         // Whether at least one transfer is currently in-flight (active).
         let has_active = tasks.iter().any(|t| t.status == TransferStatus::Active);
+        let has_paused = tasks.iter().any(|t| t.status == TransferStatus::Paused);
         let title = i18n!(cx, "transfers.label");
         let clear_label = i18n!(cx, "transfers.clear_done");
-        let pause_label = i18n!(cx, "transfers.pause_all");
+        let pause_label = if has_active {
+            i18n!(cx, "transfers.pause_all")
+        } else {
+            i18n!(cx, "transfers.resume")
+        };
         let collapse_label = i18n!(cx, "transfers.collapse");
         let empty_label = i18n!(cx, "transfers.empty");
 
@@ -263,6 +268,12 @@ impl TransferPopup {
                                     .into()
                             });
 
+                        let pause_icon = if has_active {
+                            AppIcon::Pause
+                        } else {
+                            AppIcon::Play
+                        };
+                        let can_toggle = has_active || has_paused;
                         let pause_trigger = div()
                             .id("transfer-pause-all")
                             .w(px(24.0))
@@ -272,19 +283,23 @@ impl TransferPopup {
                             .justify_center()
                             .rounded(RADIUS_STD)
                             .text_color(rgb(t.text_muted))
-                            .when(has_active, |el| {
+                            .when(can_toggle, |el| {
                                 el.cursor_pointer()
                                     .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                                     .on_click(cx.listener(move |_this, _ev, _w, cx| {
                                         store_pause.update(cx, |s, cx| {
-                                            s.pause_all();
+                                            if has_active {
+                                                s.pause_all();
+                                            } else {
+                                                s.resume_all();
+                                            }
                                             cx.notify();
                                         });
                                     }))
                             })
-                            .when(!has_active, |el| el.opacity(0.4).cursor_default())
+                            .when(!can_toggle, |el| el.opacity(0.4).cursor_default())
                             .child(
-                                AppIcon::Pause
+                                pause_icon
                                     .size(px(13.0))
                                     .text_color(rgb(t.text_secondary)),
                             );

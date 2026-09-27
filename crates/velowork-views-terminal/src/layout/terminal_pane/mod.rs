@@ -1225,11 +1225,15 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                         let term = terminal.clone();
                         let store = store.clone();
                         if !pending.is_empty() {
+                            let is_multiple = pending.len() > 1;
                             cx.spawn(async move |_this, cx| {
-                            for p in pending {
+                            for (idx, p) in pending.into_iter().enumerate() {
                                 let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
                                 let file_size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                                 let id = crate::transfer_store::next_transfer_id();
+                                let control = Arc::new(std::sync::atomic::AtomicU8::new(
+                                    crate::transfer_store::TRANSFER_CONTROL_ACTIVE,
+                                ));
                                 let _ = store.update(cx, |s, cx| {
                                     s.add(crate::transfer_store::TransferTask {
                                         id: id.clone(),
@@ -1243,6 +1247,14 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                                         speed_bps: 0.0,
                                         error: None,
                                     });
+                                    s.register_control(&id, control.clone());
+                                    if idx == 0 {
+                                        s.trigger_fly(
+                                            crate::transfer_store::TransferFlyOrigin::DialogCenter,
+                                            is_multiple,
+                                            cx,
+                                        );
+                                    }
                                     cx.notify();
                                 });
 
@@ -1258,7 +1270,11 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                                             if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
                                                 t.transferred_bytes = p.transferred;
                                                 t.total_bytes = if p.total > 0 { p.total } else { file_size };
-                                                t.speed_bps = p.speed_bps;
+                                                if t.status != crate::transfer_store::TransferStatus::Paused {
+                                                    t.speed_bps = p.speed_bps;
+                                                } else {
+                                                    t.speed_bps = 0.0;
+                                                }
                                                 if p.done {
                                                     t.status = p.status;
                                                     t.error = p.error.clone();
@@ -1304,11 +1320,22 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                                 prompt: Some("Select Files for Upload (rz)".into()),
                             });
                             cx.spawn(async move |_this, cx| {
-                            if let Ok(Ok(Some(selected))) = prompt_fut.await {
-                                for p in selected {
+                                let selected_opt = match prompt_fut.await {
+                                    Ok(Ok(Some(selected))) if !selected.is_empty() => Some(selected),
+                                    _ => None,
+                                };
+                                let Some(selected) = selected_opt else {
+                                    term.send_bytes(b"\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08");
+                                    return;
+                                };
+                                let is_multiple = selected.len() > 1;
+                                for (idx, p) in selected.into_iter().enumerate() {
                                     let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
                                     let file_size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
                                     let id = crate::transfer_store::next_transfer_id();
+                                    let control = Arc::new(std::sync::atomic::AtomicU8::new(
+                                        crate::transfer_store::TRANSFER_CONTROL_ACTIVE,
+                                    ));
                                     let _ = store.update(cx, |s, cx| {
                                         s.add(crate::transfer_store::TransferTask {
                                             id: id.clone(),
@@ -1322,6 +1349,14 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                                             speed_bps: 0.0,
                                             error: None,
                                         });
+                                        s.register_control(&id, control.clone());
+                                        if idx == 0 {
+                                            s.trigger_fly(
+                                                crate::transfer_store::TransferFlyOrigin::DialogCenter,
+                                                is_multiple,
+                                                cx,
+                                            );
+                                        }
                                         cx.notify();
                                     });
 
@@ -1337,7 +1372,11 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                                                 if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
                                                     t.transferred_bytes = p.transferred;
                                                     t.total_bytes = if p.total > 0 { p.total } else { file_size };
-                                                    t.speed_bps = p.speed_bps;
+                                                    if t.status != crate::transfer_store::TransferStatus::Paused {
+                                                     t.speed_bps = p.speed_bps;
+                                                 } else {
+                                                     t.speed_bps = 0.0;
+                                                 }
                                                     if p.done {
                                                         t.status = p.status;
                                                         t.error = p.error.clone();
@@ -1372,12 +1411,9 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                                     } else {
                                         crate::transfer_store::TransferStatus::Error
                                     };
-                                    p.error = res.err();
                                 }
-                            } else {
-                                term.send_bytes(b"\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08");
-                            }
-                        }).detach();
+                            })
+                            .detach();
                         }
                     }
                     velowork_terminal::terminal::ZmodemEvent::DownloadRequested => {
@@ -1386,102 +1422,131 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                         let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(200);
                         term.set_zmodem_raw_sender(Some(tx));
 
-                        let download_dir = std::env::var("HOME")
-                            .or_else(|_| std::env::var("USERPROFILE"))
-                            .map(|h| std::path::PathBuf::from(h).join("Downloads"))
-                            .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"));
-
-                        let _ = std::fs::create_dir_all(&download_dir);
-
-                        let id = crate::transfer_store::next_transfer_id();
-                        let _ = store.update(cx, |s, cx| {
-                            s.add(crate::transfer_store::TransferTask {
-                                id: id.clone(),
-                                name: "Download (sz)".to_string(),
-                                direction: crate::transfer_store::TransferDirection::Download,
-                                local_path: download_dir.to_string_lossy().to_string(),
-                                remote_path: "zmodem:remote".to_string(),
-                                total_bytes: 0,
-                                transferred_bytes: 0,
-                                status: crate::transfer_store::TransferStatus::Active,
-                                speed_bps: 0.0,
-                                error: None,
-                            });
-                            cx.notify();
+                        let prompt_fut = cx.prompt_for_paths(gpui::PathPromptOptions {
+                            files: false,
+                            directories: true,
+                            multiple: false,
+                            prompt: Some("Select Destination Folder for Download (sz)".into()),
                         });
 
-                        let progress = Arc::new(Mutex::new(
-                            crate::transfer_store::TransferProgress::default(),
-                        ));
-                        let store_tick = store.clone();
-                        let id_tick = id.clone();
-                        let prog_tick = progress.clone();
+                        let term_cancel = term.clone();
                         cx.spawn(async move |_this, cx| {
-                            loop {
-                                smol::Timer::after(std::time::Duration::from_millis(200)).await;
-                                let p = prog_tick.lock().clone();
-                                let _ = store_tick.update(cx, |s, cx| {
-                                    if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
-                                        t.transferred_bytes = p.transferred;
-                                        if p.total > 0 {
-                                            t.total_bytes = p.total;
-                                        }
-                                        t.speed_bps = p.speed_bps;
-                                        if p.done {
-                                            t.status = p.status;
-                                            t.error = p.error.clone();
-                                        }
-                                    }
-                                    cx.notify();
+                            let selected_opt = match prompt_fut.await {
+                                Ok(Ok(Some(paths))) => paths.into_iter().next(),
+                                _ => None,
+                            };
+
+                            let Some(download_dir) = selected_opt else {
+                                term_cancel.send_bytes(b"\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08");
+                                term_cancel.set_zmodem_raw_sender(None);
+                                return;
+                            };
+
+                            let _ = std::fs::create_dir_all(&download_dir);
+
+                            let id = crate::transfer_store::next_transfer_id();
+                            let control = Arc::new(std::sync::atomic::AtomicU8::new(
+                                crate::transfer_store::TRANSFER_CONTROL_ACTIVE,
+                            ));
+                            let _ = store.update(cx, |s, cx| {
+                                s.add(crate::transfer_store::TransferTask {
+                                    id: id.clone(),
+                                    name: "Download (sz)".to_string(),
+                                    direction: crate::transfer_store::TransferDirection::Download,
+                                    local_path: download_dir.to_string_lossy().to_string(),
+                                    remote_path: "zmodem:remote".to_string(),
+                                    total_bytes: 0,
+                                    transferred_bytes: 0,
+                                    status: crate::transfer_store::TransferStatus::Active,
+                                    speed_bps: 0.0,
+                                    error: None,
                                 });
-                                if p.done {
-                                    break;
-                                }
-                            }
-                        })
-                        .detach();
-
-                        let prog_cb = progress.clone();
-                        let term_cleanup = term.clone();
-                        let store_final = store.clone();
-                        let id_final = id.clone();
-                        cx.spawn(async move |_this, cx| {
-                        let res = velowork_terminal::zmodem::session::receive_zmodem_download_with_progress(
-                            term.clone(),
-                            download_dir,
-                            rx,
-                            move |transferred, total, speed, _path| {
-                                let mut p = prog_cb.lock();
-                                p.transferred = transferred;
-                                p.total = total;
-                                p.speed_bps = speed;
-                            },
-                        ).await;
-
-                        term_cleanup.set_zmodem_raw_sender(None);
-
-                        let mut p = progress.lock();
-                        p.done = true;
-                        p.status = if res.is_ok() {
-                            crate::transfer_store::TransferStatus::Complete
-                        } else {
-                            crate::transfer_store::TransferStatus::Error
-                        };
-                        p.error = res.as_ref().err().cloned();
-
-                        if let Ok(ref saved_path) = res {
-                            let final_name = saved_path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                            let final_local = saved_path.to_string_lossy().to_string();
-                            let _ = store_final.update(cx, |s, cx| {
-                                if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_final) {
-                                    t.name = final_name;
-                                    t.local_path = final_local;
-                                    t.status = crate::transfer_store::TransferStatus::Complete;
-                                }
+                                s.register_control(&id, control.clone());
+                                s.trigger_fly(
+                                    crate::transfer_store::TransferFlyOrigin::DialogCenter,
+                                    false,
+                                    cx,
+                                );
                                 cx.notify();
                             });
-                        }
-                    }).detach();
+
+                            let progress = Arc::new(Mutex::new(
+                                crate::transfer_store::TransferProgress::default(),
+                            ));
+                            let store_tick = store.clone();
+                            let id_tick = id.clone();
+                            let prog_tick = progress.clone();
+                            cx.spawn(async move |_cx| {
+                                loop {
+                                    smol::Timer::after(std::time::Duration::from_millis(200)).await;
+                                    let p = prog_tick.lock().clone();
+                                    let _ = store_tick.update(_cx, |s, cx| {
+                                        if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
+                                            t.transferred_bytes = p.transferred;
+                                            if p.total > 0 {
+                                                t.total_bytes = p.total;
+                                            }
+                                            if t.status == crate::transfer_store::TransferStatus::Paused {
+                                                t.speed_bps = 0.0;
+                                            } else {
+                                                t.speed_bps = p.speed_bps;
+                                            }
+                                            if p.done {
+                                                t.status = p.status;
+                                                t.error = p.error.clone();
+                                            }
+                                        }
+                                        cx.notify();
+                                    });
+                                    if p.done {
+                                        break;
+                                    }
+                                }
+                            })
+                            .detach();
+
+                            let prog_cb = progress.clone();
+                            let term_cleanup = term.clone();
+                            let store_final = store.clone();
+                            let id_final = id.clone();
+                            cx.spawn(async move |cx| {
+                                let res = velowork_terminal::zmodem::session::receive_zmodem_download_with_progress(
+                                    term.clone(),
+                                    download_dir,
+                                    rx,
+                                    move |transferred, total, speed, _path| {
+                                        let mut p = prog_cb.lock();
+                                        p.transferred = transferred;
+                                        p.total = total;
+                                        p.speed_bps = speed;
+                                    },
+                                ).await;
+
+                                term_cleanup.set_zmodem_raw_sender(None);
+
+                                let mut p = progress.lock();
+                                p.done = true;
+                                p.status = if res.is_ok() {
+                                    crate::transfer_store::TransferStatus::Complete
+                                } else {
+                                    crate::transfer_store::TransferStatus::Error
+                                };
+                                p.error = res.as_ref().err().cloned();
+
+                                if let Ok(ref saved_path) = res {
+                                    let final_name = saved_path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                                    let final_local = saved_path.to_string_lossy().to_string();
+                                    let _ = store_final.update(cx, |s, cx| {
+                                        if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_final) {
+                                            t.name = final_name;
+                                            t.local_path = final_local;
+                                            t.status = crate::transfer_store::TransferStatus::Complete;
+                                        }
+                                        cx.notify();
+                                    });
+                                }
+                            }).detach();
+                        }).detach();
                     }
                 }
             }

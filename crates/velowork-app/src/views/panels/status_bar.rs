@@ -271,6 +271,8 @@ pub struct StatusBar {
     /// Bounds of the transfer button, captured via a canvas overlay,
     /// used to anchor the transfer popup above the button.
     transfer_bounds: Rc<RefCell<Bounds<Pixels>>>,
+    /// Start time of the elastic arrival bounce animation on the transfer icon.
+    transfer_bounce_start: Option<Instant>,
     /// Overlay manager owning the transfer popup slot (rendered at
     /// WindowView level, like context menus / color picker).
     overlay_manager: Entity<crate::views::overlays::overlay_manager::OverlayManager>,
@@ -582,6 +584,7 @@ impl StatusBar {
             status_bar_bounds: Rc::new(RefCell::new(Bounds::default())),
             transfer_store,
             transfer_bounds: Rc::new(RefCell::new(Bounds::default())),
+            transfer_bounce_start: None,
             overlay_manager,
             disk_col_widths: Vec::new(),
             disk_col_drag: None,
@@ -651,6 +654,65 @@ impl StatusBar {
             self.right_sidebar_covering = right;
             cx.notify();
         }
+    }
+
+    /// Trigger the arrival elastic bounce animation on the transfer icon.
+    pub fn trigger_transfer_bounce(&mut self, cx: &mut Context<Self>) {
+        self.transfer_bounce_start = Some(Instant::now());
+        cx.notify();
+
+        // Spawn a 220ms ticker to smoothly render the bounce
+        let this = cx.entity().downgrade();
+        cx.spawn(async move |_this, cx| {
+            for _ in 0..14 {
+                smol::Timer::after(Duration::from_millis(16)).await;
+                let done = this.update(cx, |this, cx| {
+                    if let Some(start) = this.transfer_bounce_start {
+                        if start.elapsed() >= Duration::from_millis(220) {
+                            this.transfer_bounce_start = None;
+                            cx.notify();
+                            return true;
+                        }
+                        cx.notify();
+                        false
+                    } else {
+                        true
+                    }
+                }).unwrap_or(true);
+                if done {
+                    break;
+                }
+            }
+        }).detach();
+    }
+
+    /// Returns the target center point for flying transfer animations.
+    /// If the button is already rendered and measured, returns its true center.
+    /// Otherwise, provides an intelligent fallback based on status bar bounds.
+    pub fn transfer_target_center(&self, viewport: Size<Pixels>) -> Point<Pixels> {
+        let b = *self.transfer_bounds.borrow();
+        if b.size.width > px(0.0) && b.size.height > px(0.0) && b.origin.x > px(0.0) {
+            return point(
+                b.origin.x + b.size.width / 2.0,
+                b.origin.y + b.size.height / 2.0,
+            );
+        }
+
+        // Fallback: Status bar is anchored at the bottom right.
+        let sb = *self.status_bar_bounds.borrow();
+        let y = if sb.size.height > px(0.0) && sb.origin.y > px(0.0) {
+            sb.origin.y + sb.size.height / 2.0
+        } else {
+            viewport.height - px(12.0)
+        };
+
+        let x = if sb.size.width > px(0.0) && sb.origin.x > px(0.0) {
+            sb.origin.x + sb.size.width - px(80.0)
+        } else {
+            viewport.width - px(80.0)
+        };
+
+        point(x, y)
     }
 }
 
@@ -839,11 +901,23 @@ impl Render for StatusBar {
                         om.toggle_transfer_popup(anchor, cx);
                     });
                 }))
-                .child(
+                .child({
+                    let bounce_scale = if let Some(start) = self.transfer_bounce_start {
+                        let elapsed = start.elapsed().as_secs_f32();
+                        if elapsed < 0.22 {
+                            let norm = elapsed / 0.22;
+                            // Elastic bounce: starts at 1.0, peaks around 1.18, settles back smoothly
+                            1.0 + 0.18 * (1.0 - norm) * (norm * std::f32::consts::PI * 2.0).sin().abs()
+                        } else {
+                            1.0
+                        }
+                    } else {
+                        1.0
+                    };
                     AppIcon::Transfer
-                        .size(ICON_STD)
-                        .text_color(icon_color),
-                )
+                        .size(px(14.0 * bounce_scale))
+                        .text_color(icon_color)
+                })
                 // Capture this button's bounds to anchor the popup above it.
                 .child(
                     canvas(

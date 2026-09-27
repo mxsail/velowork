@@ -190,6 +190,53 @@ impl WindowView {
         }
     }
 
+    pub(super) fn handle_transfer_fly_event(
+        &mut self,
+        _emitter: Entity<velowork_views_terminal::transfer_store::TransferStore>,
+        event: &velowork_views_terminal::transfer_store::TransferFlyEvent,
+        cx: &mut Context<Self>,
+    ) {
+        self.transfer_fly_manager
+            .add(event.origin.clone(), event.is_multiple);
+        cx.notify();
+        self.ensure_transfer_fly_ticker(cx);
+    }
+
+    fn ensure_transfer_fly_ticker(&mut self, cx: &mut Context<Self>) {
+        if self.transfer_fly_tick_running || !self.transfer_fly_manager.is_active() {
+            return;
+        }
+        self.transfer_fly_tick_running = true;
+        let this = cx.entity().downgrade();
+        cx.spawn(async move |_this, cx| {
+            loop {
+                smol::Timer::after(std::time::Duration::from_millis(16)).await;
+                let (has_active, _has_arrived) = this
+                    .update(cx, |this, cx| {
+                        let (active, arrived) = this.transfer_fly_manager.tick();
+                        if arrived {
+                            this.status_bar.update(cx, |sb, cx| {
+                                sb.trigger_transfer_bounce(cx);
+                            });
+                        }
+                        if active {
+                            cx.notify();
+                        } else {
+                            this.transfer_fly_tick_running = false;
+                            cx.notify();
+                        }
+                        (active, arrived)
+                    })
+                    .unwrap_or((false, false));
+
+                if !has_active {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
     pub(super) fn handle_overlay_manager_event(
         &mut self,
         _: Entity<OverlayManager>,

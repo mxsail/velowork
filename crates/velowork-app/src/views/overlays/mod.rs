@@ -29,6 +29,7 @@ pub mod tab_context_menu;
 pub mod terminal_context_menu;
 pub mod rename_directory_dialog;
 pub mod transfer_popup;
+pub mod transfer_fly_animation;
 pub mod lock_screen;
 pub mod terminal_ai_inline;
 pub use terminal_ai_inline::*;
@@ -39,6 +40,7 @@ pub mod pickers;
 pub mod settings;
 pub mod viewers;
 
+pub use transfer_fly_animation::{TransferFlyAnimationManager, TransferFlyItem};
 pub use transfer_popup::{TransferPopup, TransferPopupEvent};
 pub use shell_selector_overlay::{ShellSelectorOverlay, ShellSelectorOverlayEvent};
 pub use dialogs::log_record_dialog::{LogRecordDialog, LogRecordDialogEvent};

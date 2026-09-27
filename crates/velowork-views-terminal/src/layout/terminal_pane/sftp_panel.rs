@@ -3,13 +3,17 @@ use super::file_row::{
 };
 use super::url_detector::UrlDetector;
 use crate::transfer_store::{
-    GlobalTransferStore, TransferDirection, TransferProgress, TransferStatus, TransferTask,
-    next_transfer_id,
+    next_transfer_id, GlobalTransferStore, TransferDirection, TransferFlyOrigin, TransferProgress,
+    TransferStatus, TransferTask, TRANSFER_CONTROL_ACTIVE, TRANSFER_CONTROL_CANCELLED,
+    TRANSFER_CONTROL_PAUSED,
 };
 use gpui::prelude::*;
 use gpui::*;
 use parking_lot::Mutex;
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use velowork_core::theme::ThemeColors;
@@ -260,6 +264,7 @@ pub struct BottomPanel {
     pub(super) is_collapsed: bool,
     pub(super) is_fullscreen: bool,
     pub(super) is_detached: bool,
+    pub(super) panel_bounds: Rc<RefCell<Bounds<Pixels>>>,
 
     // Connection state (resolved dynamically from the focused terminal's
     // live SSH session — see `bind_active_terminal`).
@@ -419,6 +424,7 @@ impl BottomPanel {
             is_collapsed: false,
             is_fullscreen: false,
             is_detached: false,
+            panel_bounds: Rc::new(RefCell::new(Bounds::default())),
             connection_state: SftpConnectionState::Disconnected,
             selection: ListSelection::new(),
             show_hidden: velowork_app_core::settings::settings(cx).show_hidden_files,
@@ -1147,20 +1153,30 @@ impl BottomPanel {
         self.refresh(cx);
     }
 
-    /// Resolve which file row (1-based, skipping the parent row) is the
+    /// Resolve which file rows (1-based, skipping the parent row) are the
     /// effective selection for actions like download.
-    fn selected_file_row(&self, file_count: usize) -> Option<usize> {
-        if let Some(i) = self.selection.active() {
-            if i != 0 && i <= file_count {
-                return Some(i);
-            }
-        }
-        self.selection
+    fn selected_file_rows(&self, file_count: usize) -> Vec<usize> {
+        let mut rows: Vec<usize> = self
+            .selection
             .selected()
             .iter()
             .copied()
             .filter(|i| *i != 0 && *i <= file_count)
-            .min()
+            .collect();
+        rows.sort_unstable();
+        if rows.is_empty() {
+            if let Some(i) = self.selection.active() {
+                if i != 0 && i <= file_count {
+                    rows.push(i);
+                }
+            }
+        }
+        rows
+    }
+
+    /// Resolve the primary single file row for actions like context menu properties/open.
+    fn selected_file_row(&self, file_count: usize) -> Option<usize> {
+        self.selected_file_rows(file_count).first().copied()
     }
 
     fn go_to_parent_directory(&mut self, cx: &mut Context<Self>) {
@@ -2184,178 +2200,20 @@ impl BottomPanel {
         let paths_future = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: true,
             directories: false,
-            multiple: false,
-            prompt: Some("Select File to Upload".into()),
+            multiple: true,
+            prompt: Some("Select File(s) to Upload".into()),
         });
 
-        // Hoist the transfer-store entity from the outer `Context` so it can be
-        // captured by the `cx.spawn` closure below (`cx.global()` isn't
-        // callable on `&mut AsyncApp` inside async spawns).
-        let store = cx.global::<GlobalTransferStore>().0.clone();
-
-        let (sftp, current_dir) = match &self.connection_state {
-            SftpConnectionState::Connected {
-                conn, current_dir, ..
-            } => (conn.sftp.clone(), current_dir.clone()),
-            _ => return,
-        };
-
         cx.spawn(async move |this: WeakEntity<BottomPanel>, cx| {
-            if let Ok(Ok(Some(selected_paths))) = paths_future.await
-                && let Some(local_path) = selected_paths.first()
-            {
-                let filename = local_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
-                let mut remote_path = current_dir.clone();
-                if !remote_path.ends_with('/') {
-                    remote_path.push('/');
-                }
-                remote_path.push_str(&filename);
-
-                match std::fs::read(local_path) {
-                    Ok(bytes) => {
-                        let total = bytes.len() as u64;
-                        let local_display = local_path.to_string_lossy().to_string();
-                        let id = next_transfer_id();
-                        store.update(cx, |s, cx| {
-                            s.add(TransferTask {
-                                id: id.clone(),
-                                name: filename.clone(),
-                                direction: TransferDirection::Upload,
-                                local_path: local_display,
-                                remote_path: remote_path.clone(),
-                                total_bytes: total,
-                                transferred_bytes: 0,
-                                status: TransferStatus::Active,
-                                speed_bps: 0.0,
-                                error: None,
-                            });
-                            cx.notify();
-                        });
-
-                        // Shared progress published by the SFTP I/O task and
-                        // polled by a GPUI ticker so the list updates live.
-                        let progress = Arc::new(Mutex::new(TransferProgress::default()));
-                        let store_tick = store.clone();
-                        let id_tick = id.clone();
-                        let prog_tick = progress.clone();
-                        cx.spawn(async move |cx| {
-                            loop {
-                                smol::Timer::after(Duration::from_millis(200)).await;
-                                let p = prog_tick.lock().clone();
-                                store_tick.update(cx, |s, cx| {
-                                    if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
-                                        t.transferred_bytes = p.transferred;
-                                        t.total_bytes = p.total;
-                                        t.speed_bps = p.speed_bps;
-                                        if p.done {
-                                            t.status = p.status;
-                                            t.error = p.error.clone();
-                                        }
-                                    }
-                                    cx.notify();
-                                });
-                                if p.done {
-                                    break;
-                                }
-                            }
-                        })
-                        .detach();
-
-                        let remote_path_io = remote_path.clone();
-                        let prog_io = progress.clone();
-                        let res = run_in_tokio(async move {
-                            use russh_sftp::protocol::{FileAttributes, OpenFlags};
-                            use tokio::io::AsyncWriteExt;
-                            let create_res = sftp
-                                .open_with_flags_and_attributes(
-                                    &remote_path_io,
-                                    OpenFlags::WRITE | OpenFlags::CREATE | OpenFlags::TRUNCATE,
-                                    FileAttributes::default(),
-                                )
-                                .await;
-                            let mut done_status = TransferStatus::Complete;
-                            let mut done_error: Option<String> = None;
-                            let ok = match create_res {
-                                Ok(mut file) => {
-                                    let start = Instant::now();
-                                    let chunk = 64 * 1024;
-                                    let len = bytes.len();
-                                    let mut pos = 0usize;
-                                    let mut success = true;
-                                    while pos < len {
-                                        let end = (pos + chunk).min(len);
-                                        match file.write_all(&bytes[pos..end]).await {
-                                            Ok(()) => {
-                                                pos = end;
-                                                let transferred = pos as u64;
-                                                let elapsed =
-                                                    start.elapsed().as_secs_f64().max(0.001);
-                                                let mut p = prog_io.lock();
-                                                p.transferred = transferred;
-                                                p.speed_bps = transferred as f64 / elapsed;
-                                            }
-                                            Err(e) => {
-                                                done_status = TransferStatus::Error;
-                                                done_error = Some(format!("{:?}", e));
-                                                success = false;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    success
-                                }
-                                Err(e) => {
-                                    done_status = TransferStatus::Error;
-                                    done_error = Some(format!("{:?}", e));
-                                    false
-                                }
-                            };
-                            let mut p = prog_io.lock();
-                            p.done = true;
-                            p.status = if ok {
-                                TransferStatus::Complete
-                            } else {
-                                done_status
-                            };
-                            p.error = if ok { None } else { done_error };
-                            ok
-                        })
-                        .await;
-
-                        let _ = this.update(cx, |this, cx| {
-                            if res {
-                                this.refresh(cx);
-                            }
-                        });
-                    }
-                    Err(e) => {
-                        let id = next_transfer_id();
-                        let name = local_path
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .to_string();
-                        let local_display = local_path.to_string_lossy().to_string();
-                        store.update(cx, |s, cx| {
-                            s.add(TransferTask {
-                                id: id.clone(),
-                                name,
-                                direction: TransferDirection::Upload,
-                                local_path: local_display,
-                                remote_path: remote_path.clone(),
-                                total_bytes: 0,
-                                transferred_bytes: 0,
-                                status: TransferStatus::Error,
-                                speed_bps: 0.0,
-                                error: Some(format!("{:?}", e)),
-                            });
-                            cx.notify();
-                        });
-                    }
+            if let Ok(Ok(Some(selected_paths))) = paths_future.await {
+                if !selected_paths.is_empty() {
+                    let _ = this.update(cx, |this, cx| {
+                        this.upload_local_paths_with_origin(
+                            &selected_paths,
+                            crate::transfer_store::TransferFlyOrigin::DialogCenter,
+                            cx,
+                        );
+                    });
                 }
             }
         })
@@ -2363,6 +2221,27 @@ impl BottomPanel {
     }
 
     pub fn upload_local_paths(&mut self, local_paths: &[std::path::PathBuf], cx: &mut Context<Self>) {
+        let origin_point = {
+            let b = *self.panel_bounds.borrow();
+            if b.size.width > px(0.0) && b.size.height > px(0.0) {
+                point(b.origin.x + b.size.width / 2.0, b.origin.y + b.size.height / 2.0)
+            } else {
+                point(px(300.0), px(400.0))
+            }
+        };
+        self.upload_local_paths_with_origin(
+            local_paths,
+            crate::transfer_store::TransferFlyOrigin::Point(origin_point),
+            cx,
+        );
+    }
+
+    pub fn upload_local_paths_with_origin(
+        &mut self,
+        local_paths: &[std::path::PathBuf],
+        origin: crate::transfer_store::TransferFlyOrigin,
+        cx: &mut Context<Self>,
+    ) {
         if local_paths.is_empty() {
             return;
         }
@@ -2377,6 +2256,10 @@ impl BottomPanel {
         };
 
         let paths = local_paths.to_vec();
+        let is_multiple = paths.len() > 1;
+        store.update(cx, |s, cx| {
+            s.trigger_fly(origin, is_multiple, cx);
+        });
 
         cx.spawn(async move |this: WeakEntity<BottomPanel>, cx| {
             for local_path in paths {
@@ -2470,6 +2353,7 @@ impl BottomPanel {
         let total = std::fs::metadata(local_path).map(|m| m.len()).unwrap_or(0);
         let local_display = local_path.to_string_lossy().to_string();
         let id = next_transfer_id();
+        let control = Arc::new(AtomicU8::new(TRANSFER_CONTROL_ACTIVE));
         store.update(cx, |s, cx| {
             s.add(TransferTask {
                 id: id.clone(),
@@ -2483,6 +2367,7 @@ impl BottomPanel {
                 speed_bps: 0.0,
                 error: None,
             });
+            s.register_control(&id, control.clone());
             cx.notify();
         });
 
@@ -2498,7 +2383,11 @@ impl BottomPanel {
                     if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
                         t.transferred_bytes = p.transferred;
                         t.total_bytes = if p.total > 0 { p.total } else { total };
-                        t.speed_bps = p.speed_bps;
+                        if t.status != TransferStatus::Paused {
+                            t.speed_bps = p.speed_bps;
+                        } else {
+                            t.speed_bps = 0.0;
+                        }
                         if p.done {
                             t.status = p.status;
                             t.error = p.error.clone();
@@ -2516,6 +2405,7 @@ impl BottomPanel {
         let local_path_io = local_path.clone();
         let remote_path_io = remote_path.to_string();
         let prog_io = progress.clone();
+        let control_io = control.clone();
         let sftp = sftp.clone();
         let _res = run_in_tokio(async move {
             use russh_sftp::protocol::{FileAttributes, OpenFlags};
@@ -2542,11 +2432,38 @@ impl BottomPanel {
             let mut done_error: Option<String> = None;
             let ok = match create_res {
                 Ok(mut file) => {
-                    let start = Instant::now();
+                    let mut start = Instant::now();
                     let mut buf = vec![0u8; 64 * 1024];
                     let mut transferred = 0u64;
                     let mut success = true;
                     loop {
+                        match control_io.load(Ordering::Relaxed) {
+                            TRANSFER_CONTROL_CANCELLED => {
+                                done_status = TransferStatus::Error;
+                                done_error = Some("Cancelled".to_string());
+                                success = false;
+                                break;
+                            }
+                            TRANSFER_CONTROL_PAUSED => {
+                                let pause_start = Instant::now();
+                                while control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_PAUSED {
+                                    {
+                                        let mut p = prog_io.lock();
+                                        p.speed_bps = 0.0;
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(150)).await;
+                                }
+                                if control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_CANCELLED {
+                                    done_status = TransferStatus::Error;
+                                    done_error = Some("Cancelled".to_string());
+                                    success = false;
+                                    break;
+                                }
+                                start += pause_start.elapsed();
+                            }
+                            _ => {}
+                        }
+
                         match local_file.read(&mut buf) {
                             Ok(0) => break,
                             Ok(n) => {
@@ -2574,6 +2491,9 @@ impl BottomPanel {
                                 break;
                             }
                         }
+                    }
+                    if !success && control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_CANCELLED {
+                        let _ = sftp.remove_file(&remote_path_io).await;
                     }
                     success
                 }
@@ -2636,23 +2556,30 @@ impl BottomPanel {
 
         let store = cx.global::<GlobalTransferStore>().0.clone();
 
-        let row = match self.selected_file_row(filtered.len()) {
-            Some(r) => r,
-            None => return,
-        };
-
-        let file = &filtered[row - 1];
-        if file.is_dir {
+        let rows = self.selected_file_rows(filtered.len());
+        if rows.is_empty() {
             return;
         }
-        let total_size = file.size;
 
-        let filename = file.name.clone();
-        let mut remote_path = current_dir.clone();
-        if !remote_path.ends_with('/') {
-            remote_path.push('/');
+        let selected_items: Vec<SftpFile> = rows
+            .into_iter()
+            .filter_map(|r| filtered.get(r - 1).cloned())
+            .collect();
+        if selected_items.is_empty() {
+            return;
         }
-        remote_path.push_str(&filename);
+        let is_multiple = selected_items.len() > 1;
+
+        let origin_point = if let Some(ref cm) = self.context_menu {
+            cm.position
+        } else {
+            let b = *self.panel_bounds.borrow();
+            if b.size.width > px(0.0) && b.size.height > px(0.0) {
+                point(b.origin.x + b.size.width / 2.0, b.origin.y + b.size.height / 2.0)
+            } else {
+                point(px(300.0), px(400.0))
+            }
+        };
 
         let paths_future = cx.prompt_for_paths(gpui::PathPromptOptions {
             files: false,
@@ -2665,135 +2592,264 @@ impl BottomPanel {
             if let Ok(Ok(Some(selected_paths))) = paths_future.await
                 && let Some(local_dir) = selected_paths.first()
             {
-                let local_path = local_dir.join(&filename);
-                let id = next_transfer_id();
-                let name = filename.clone();
-                let remote = remote_path.clone();
-                let local_display = local_path.to_string_lossy().to_string();
                 store.update(cx, |s, cx| {
-                    s.add(TransferTask {
-                        id: id.clone(),
-                        name,
-                        direction: TransferDirection::Download,
-                        local_path: local_display,
-                        remote_path: remote,
-                        total_bytes: total_size,
-                        transferred_bytes: 0,
-                        status: TransferStatus::Active,
-                        speed_bps: 0.0,
-                        error: None,
-                    });
-                    cx.notify();
+                    s.trigger_fly(TransferFlyOrigin::Point(origin_point), is_multiple, cx);
                 });
 
-                let progress = Arc::new(Mutex::new(TransferProgress::default()));
-                let store_tick = store.clone();
-                let id_tick = id.clone();
-                let prog_tick = progress.clone();
-                cx.spawn(async move |cx| {
-                    loop {
-                        smol::Timer::after(Duration::from_millis(200)).await;
-                        let p = prog_tick.lock().clone();
-                        store_tick.update(cx, |s, cx| {
-                            if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
-                                t.transferred_bytes = p.transferred;
-                                t.total_bytes = p.total;
-                                t.speed_bps = p.speed_bps;
-                                if p.done {
-                                    t.status = p.status;
-                                    t.error = p.error.clone();
-                                }
-                            }
-                            cx.notify();
-                        });
-                        if p.done {
-                            break;
-                        }
+                for item in selected_items {
+                    let filename = item.name.clone();
+                    let mut remote_item_path = current_dir.clone();
+                    if !remote_item_path.ends_with('/') {
+                        remote_item_path.push('/');
                     }
-                })
-                .detach();
+                    remote_item_path.push_str(&filename);
+                    let target_local = local_dir.join(&filename);
 
-                let remote_path_io = remote_path.clone();
-                let local_path_io = local_path.clone();
-                let prog_io = progress.clone();
-                let res = run_in_tokio(async move {
-                    use std::io::Write;
-                    use tokio::io::AsyncReadExt;
-                    let open_res = sftp.open(&remote_path_io).await;
-                    let mut done_status = TransferStatus::Complete;
-                    let mut done_error: Option<String> = None;
-                    let ok = match open_res {
-                        Ok(mut file) => {
-                            let mut local_file = match std::fs::File::create(&local_path_io) {
-                                Ok(f) => f,
-                                Err(e) => {
-                                    let mut p = prog_io.lock();
-                                    p.done = true;
-                                    p.status = TransferStatus::Error;
-                                    p.error = Some(format!("{:?}", e));
-                                    return false;
-                                }
-                            };
-                            // Use the file size we already resolved from the
-                            // SFTP listing (avoids a separate `stat` call).
-                            if total_size > 0 {
-                                let mut p = prog_io.lock();
-                                p.total = total_size;
-                            }
-                            let start = Instant::now();
-                            let mut buf = vec![0u8; 64 * 1024];
-                            let mut transferred = 0u64;
-                            let mut success = true;
-                            loop {
-                                match file.read(&mut buf).await {
-                                    Ok(0) => break,
-                                    Ok(n) => {
-                                        if let Err(e) = local_file.write_all(&buf[..n]) {
-                                            done_status = TransferStatus::Error;
-                                            done_error = Some(format!("{:?}", e));
-                                            success = false;
-                                            break;
-                                        }
-                                        transferred += n as u64;
-                                        let elapsed = start.elapsed().as_secs_f64().max(0.001);
-                                        let mut p = prog_io.lock();
-                                        p.transferred = transferred;
-                                        p.speed_bps = transferred as f64 / elapsed;
+                    if item.is_dir {
+                        let mut stack = vec![(remote_item_path, target_local)];
+                        let mut file_list = Vec::new();
+
+                        while let Some((remote_dir, local_path)) = stack.pop() {
+                            let _ = std::fs::create_dir_all(&local_path);
+                            let sftp_clone = sftp.clone();
+                            let remote_dir_clone = remote_dir.clone();
+                            let entries_res = run_in_tokio(async move {
+                                sftp_clone.read_dir(&remote_dir_clone).await
+                            })
+                            .await;
+
+                            if let Ok(entries) = entries_res {
+                                for entry in entries {
+                                    let name = entry.file_name();
+                                    if name == "." || name == ".." {
+                                        continue;
                                     }
-                                    Err(e) => {
-                                        done_status = TransferStatus::Error;
-                                        done_error = Some(format!("{:?}", e));
-                                        success = false;
-                                        break;
+                                    let child_remote =
+                                        format!("{}/{}", remote_dir.trim_end_matches('/'), name);
+                                    let child_local = local_path.join(&name);
+                                    if entry.metadata().is_dir() {
+                                        stack.push((child_remote, child_local));
+                                    } else {
+                                        let size = entry.metadata().size.unwrap_or(0);
+                                        file_list.push((child_remote, child_local, name, size));
                                     }
                                 }
                             }
-                            let _ = local_file.flush();
-                            success
                         }
-                        Err(e) => {
-                            done_status = TransferStatus::Error;
-                            done_error = Some(format!("{:?}", e));
-                            false
+
+                        for (child_remote, child_local, file_name, file_size) in file_list {
+                            Self::download_single_file_task(
+                                &sftp,
+                                &child_remote,
+                                &child_local,
+                                &file_name,
+                                file_size,
+                                &store,
+                                cx,
+                            )
+                            .await;
                         }
-                    };
-                    let mut p = prog_io.lock();
-                    p.done = true;
-                    p.status = if ok {
-                        TransferStatus::Complete
                     } else {
-                        done_status
-                    };
-                    p.error = done_error;
-                    velowork_core::memory::trim_process_memory();
-                    ok
-                })
-                .await;
-
-                let _ = res;
+                        Self::download_single_file_task(
+                            &sftp,
+                            &remote_item_path,
+                            &target_local,
+                            &filename,
+                            item.size,
+                            &store,
+                            cx,
+                        )
+                        .await;
+                    }
+                }
             }
         })
         .detach();
+    }
+
+    async fn download_single_file_task(
+        sftp: &Arc<russh_sftp::client::SftpSession>,
+        remote_path: &str,
+        local_path: &std::path::PathBuf,
+        filename: &str,
+        total_size: u64,
+        store: &Entity<crate::transfer_store::TransferStore>,
+        cx: &mut AsyncApp,
+    ) {
+        let id = next_transfer_id();
+        let name = filename.to_string();
+        let remote = remote_path.to_string();
+        let local_display = local_path.to_string_lossy().to_string();
+        let control = Arc::new(AtomicU8::new(TRANSFER_CONTROL_ACTIVE));
+        store.update(cx, |s, cx| {
+            s.add(TransferTask {
+                id: id.clone(),
+                name,
+                direction: TransferDirection::Download,
+                local_path: local_display,
+                remote_path: remote,
+                total_bytes: total_size,
+                transferred_bytes: 0,
+                status: TransferStatus::Active,
+                speed_bps: 0.0,
+                error: None,
+            });
+            s.register_control(&id, control.clone());
+            cx.notify();
+        });
+
+        let progress = Arc::new(Mutex::new(TransferProgress::default()));
+        let store_tick = store.clone();
+        let id_tick = id.clone();
+        let prog_tick = progress.clone();
+        cx.spawn(async move |cx| {
+            loop {
+                smol::Timer::after(Duration::from_millis(200)).await;
+                let p = prog_tick.lock().clone();
+                store_tick.update(cx, |s, cx| {
+                    if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
+                        t.transferred_bytes = p.transferred;
+                        t.total_bytes = if p.total > 0 { p.total } else { total_size };
+                        if t.status != TransferStatus::Paused {
+                            t.speed_bps = p.speed_bps;
+                        } else {
+                            t.speed_bps = 0.0;
+                        }
+                        if p.done {
+                            t.status = p.status;
+                            t.error = p.error.clone();
+                        }
+                    }
+                    cx.notify();
+                });
+                if p.done {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        let remote_path_io = remote_path.to_string();
+        let local_path_io = local_path.clone();
+        let prog_io = progress.clone();
+        let control_io = control.clone();
+        let sftp = sftp.clone();
+        let _res = run_in_tokio(async move {
+            use std::io::Write;
+            use tokio::io::AsyncReadExt;
+            let open_res = sftp.open(&remote_path_io).await;
+            let mut done_status = TransferStatus::Complete;
+            let mut done_error: Option<String> = None;
+            let ok = match open_res {
+                Ok(mut file) => {
+                    let mut local_file = match std::fs::File::create(&local_path_io) {
+                        Ok(f) => f,
+                        Err(e) => {
+                            let mut p = prog_io.lock();
+                            p.done = true;
+                            p.status = TransferStatus::Error;
+                            p.error = Some(format!("{:?}", e));
+                            return false;
+                        }
+                    };
+                    if total_size > 0 {
+                        let mut p = prog_io.lock();
+                        p.total = total_size;
+                    }
+                    let mut start = Instant::now();
+                    let mut buf = vec![0u8; 64 * 1024];
+                    let mut transferred = 0u64;
+                    let mut success = true;
+                    loop {
+                        match control_io.load(Ordering::Relaxed) {
+                            TRANSFER_CONTROL_CANCELLED => {
+                                done_status = TransferStatus::Error;
+                                done_error = Some("Cancelled".to_string());
+                                success = false;
+                                break;
+                            }
+                            TRANSFER_CONTROL_PAUSED => {
+                                let pause_start = Instant::now();
+                                while control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_PAUSED {
+                                    {
+                                        let mut p = prog_io.lock();
+                                        p.speed_bps = 0.0;
+                                    }
+                                    tokio::time::sleep(Duration::from_millis(150)).await;
+                                }
+                                if control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_CANCELLED {
+                                    done_status = TransferStatus::Error;
+                                    done_error = Some("Cancelled".to_string());
+                                    success = false;
+                                    break;
+                                }
+                                start += pause_start.elapsed();
+                            }
+                            _ => {}
+                        }
+
+                        match file.read(&mut buf).await {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                if let Err(e) = local_file.write_all(&buf[..n]) {
+                                    done_status = TransferStatus::Error;
+                                    done_error = Some(format!("{:?}", e));
+                                    success = false;
+                                    break;
+                                }
+                                transferred += n as u64;
+                                let elapsed = start.elapsed().as_secs_f64().max(0.001);
+                                let mut p = prog_io.lock();
+                                p.transferred = transferred;
+                                p.total = if total_size > 0 { total_size } else { transferred };
+                                p.speed_bps = transferred as f64 / elapsed;
+                            }
+                            Err(e) => {
+                                done_status = TransferStatus::Error;
+                                done_error = Some(format!("{:?}", e));
+                                success = false;
+                                break;
+                            }
+                        }
+                    }
+                    let _ = local_file.flush();
+                    if !success && control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_CANCELLED {
+                        let _ = std::fs::remove_file(&local_path_io);
+                    }
+                    success
+                }
+                Err(e) => {
+                    done_status = TransferStatus::Error;
+                    done_error = Some(format!("{:?}", e));
+                    false
+                }
+            };
+            let mut p = prog_io.lock();
+            p.done = true;
+            p.transferred = if ok && total_size > 0 { total_size } else { p.transferred };
+            p.total = if total_size > 0 { total_size } else { p.transferred };
+            p.status = if ok {
+                TransferStatus::Complete
+            } else {
+                done_status
+            };
+            p.error = if ok { None } else { done_error };
+            velowork_core::memory::trim_process_memory();
+            ok
+        })
+        .await;
+
+        let p = progress.lock().clone();
+        store.update(cx, |s, cx| {
+            if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id) {
+                t.transferred_bytes = p.transferred;
+                t.total_bytes = p.total;
+                t.speed_bps = p.speed_bps;
+                t.status = p.status;
+                t.error = p.error;
+            }
+            cx.notify();
+        });
     }
 
     /// Download a remote file into a per-connection temp directory and then
@@ -2875,6 +2931,7 @@ impl BottomPanel {
         let name = filename.clone();
         let remote = remote_path.clone();
         let local_for_task = local_display.clone();
+        let control = Arc::new(AtomicU8::new(TRANSFER_CONTROL_ACTIVE));
         store.update(cx, |s, cx| {
             s.add(TransferTask {
                 id: id.clone(),
@@ -2888,6 +2945,7 @@ impl BottomPanel {
                 speed_bps: 0.0,
                 error: None,
             });
+            s.register_control(&id, control.clone());
             cx.notify();
         });
 
@@ -2905,7 +2963,11 @@ impl BottomPanel {
                         if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
                             t.transferred_bytes = p.transferred;
                             t.total_bytes = p.total;
-                            t.speed_bps = p.speed_bps;
+                            if t.status != TransferStatus::Paused {
+                                t.speed_bps = p.speed_bps;
+                            } else {
+                                t.speed_bps = 0.0;
+                            }
                             if p.done {
                                 t.status = p.status;
                                 t.error = p.error.clone();
@@ -2923,6 +2985,7 @@ impl BottomPanel {
             let remote_path_io = remote_path.clone();
             let local_path_io = local_path.clone();
             let prog_io = progress.clone();
+            let control_io = control.clone();
         let opener_io = opener.clone();
         let local_display_io = local_display.clone();
         let sftp_for_watch = sftp.clone();
@@ -2948,11 +3011,38 @@ impl BottomPanel {
                             let mut p = prog_io.lock();
                             p.total = total_size;
                         }
-                        let start = Instant::now();
+                        let mut start = Instant::now();
                         let mut buf = vec![0u8; 64 * 1024];
                         let mut transferred = 0u64;
                         let mut success = true;
                         loop {
+                            match control_io.load(Ordering::Relaxed) {
+                                TRANSFER_CONTROL_CANCELLED => {
+                                    done_status = TransferStatus::Error;
+                                    done_error = Some("Cancelled".to_string());
+                                    success = false;
+                                    break;
+                                }
+                                TRANSFER_CONTROL_PAUSED => {
+                                    let pause_start = Instant::now();
+                                    while control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_PAUSED {
+                                        {
+                                            let mut p = prog_io.lock();
+                                            p.speed_bps = 0.0;
+                                        }
+                                        tokio::time::sleep(Duration::from_millis(150)).await;
+                                    }
+                                    if control_io.load(Ordering::Relaxed) == TRANSFER_CONTROL_CANCELLED {
+                                        done_status = TransferStatus::Error;
+                                        done_error = Some("Cancelled".to_string());
+                                        success = false;
+                                        break;
+                                    }
+                                    start += pause_start.elapsed();
+                                }
+                                _ => {}
+                            }
+
                             match file.read(&mut buf).await {
                                 Ok(0) => break,
                                 Ok(n) => {
@@ -4197,6 +4287,19 @@ impl Render for BottomPanel {
                                 cx.notify();
                             }
                         }))
+                        .child(
+                            canvas(
+                                {
+                                    let b = self.panel_bounds.clone();
+                                    move |bounds, _window, _cx| {
+                                        *b.borrow_mut() = bounds;
+                                    }
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .size_full(),
+                        )
                         .child(
                             h_flex()
                                 .id("sftp-list-body")

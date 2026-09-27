@@ -164,6 +164,10 @@ pub struct WindowView {
     overlay_registry: Entity<OverlayRegistry>,
     /// Toast notification overlay
     toast_overlay: Entity<ToastOverlay>,
+    /// Transfer flying ghost animation manager
+    transfer_fly_manager: crate::views::overlays::TransferFlyAnimationManager,
+    /// Whether the transfer fly 60fps tick loop is currently running
+    transfer_fly_tick_running: bool,
     /// Shared drag state for resize operations
     active_drag: ActiveDrag,
     /// Focus handle for capturing global keybindings
@@ -528,6 +532,15 @@ impl WindowView {
         })
         .detach();
 
+        // Subscribe to TransferStore fly animation events
+        if let Some(transfer_store) = cx
+            .try_global::<velowork_views_terminal::transfer_store::GlobalTransferStore>()
+            .map(|g| g.0.clone())
+        {
+            cx.subscribe(&transfer_store, Self::handle_transfer_fly_event)
+                .detach();
+        }
+
         // Create focus handle for global keybindings
         let focus_handle = cx.focus_handle();
 
@@ -646,6 +659,8 @@ impl WindowView {
             overlay_manager,
             overlay_registry,
             toast_overlay,
+            transfer_fly_manager: crate::views::overlays::TransferFlyAnimationManager::new(),
+            transfer_fly_tick_running: false,
 
             active_drag: new_active_drag(),
             focus_handle,

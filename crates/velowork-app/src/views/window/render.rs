@@ -1873,6 +1873,19 @@ impl Render for WindowView {
                             )
                         },
                     )
+                    // Transfer manager popup (positioned popup above the status bar;
+                    // placed inside content-root so its backdrop never covers Window Chrome / TitleBar)
+                    .when(has_transfer_popup, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .inset_0()
+                                .when(has_rounded_corners, |d| {
+                                    d.rounded(corner_radius).overflow_hidden()
+                                })
+                                .children(self.overlay_manager.read(cx).render_transfer_popup()),
+                        )
+                    })
             ) // end of content-root .child()
             // App menu dropdown (renders on top of everything when custom titlebar menu is open)
             .when(
@@ -1923,21 +1936,21 @@ impl Render for WindowView {
                     d.child(popup)
                 },
             )
-            // Transfer manager popup (positioned popup above the status bar)
-            .when(has_transfer_popup, |d| {
-                d.child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .when(has_rounded_corners, |d| {
-                            d.rounded(corner_radius).overflow_hidden()
-                        })
-                        .children(self.overlay_manager.read(cx).render_transfer_popup()),
-                )
-            })
             // Pane switcher overlay (numbered pane badges)
             .when_some(self.pane_switcher_entity.clone(), |d, entity| {
                 d.child(entity)
+            })
+            // Transfer fly animation overlay
+            .when_some({
+                let p = SemanticPalette::from_context(cx);
+                let target_pos = self
+                    .status_bar
+                    .read(cx)
+                    .transfer_target_center(window.viewport_size());
+                self.transfer_fly_manager
+                    .render(window.viewport_size(), target_pos, p)
+            }, |d, el| {
+                d.child(el)
             })
             // Toast notifications (bottom-right, on top of everything including all deferred overlays)
             .child(self.toast_overlay.clone())

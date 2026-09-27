@@ -782,6 +782,25 @@ impl OverlayManager {
                 self.dismiss_terminal_ai_inline(cx);
             }
         }
+
+        if self.transfer_popup.is_open() {
+            let settings = settings_entity(cx).read(cx).settings.clone();
+            let scale = velowork_ui::tokens::ui_scale_factor(cx);
+            let is_custom_titlebar = if cfg!(target_os = "macos") {
+                settings.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
+            } else {
+                settings.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
+                    || matches!(window.window_decorations(), Decorations::Client { .. })
+            };
+            let titlebar_h = if is_custom_titlebar && (!cfg!(target_os = "macos") || !window.is_fullscreen()) {
+                settings.titlebar_height * scale
+            } else {
+                0.0
+            };
+            if f32::from(point.y) < titlebar_h {
+                self.hide_transfer_popup(cx);
+            }
+        }
     }
 
     // ========================================================================
