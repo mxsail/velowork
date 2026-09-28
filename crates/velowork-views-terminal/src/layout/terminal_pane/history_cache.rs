@@ -20,26 +20,34 @@ pub struct HistoryCache;
 
 impl HistoryCache {
     /// Warm up or fetch cached entries for a project.
-    /// If not yet cached, loads from SQLite on demand.
+    /// If not yet cached, returns empty immediately and loads from SQLite asynchronously
+    /// in the background without blocking the UI thread.
     pub fn get_or_load(project_id: &str) -> Vec<HistoryEntry> {
         let mut map = cache().lock().unwrap();
         if let Some(entries) = map.get(project_id) {
             return entries.clone();
         }
 
-        let loaded = if let Some(db) = velowork_core::storage::database() {
-            let repo = velowork_workspace::repositories::HistoryRepository::new(db);
-            repo.list_by_project(project_id, None, MAX_PROJECT_CACHE_ITEMS)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        // Insert empty marker so concurrent key strokes don't spawn duplicate background loaders
+        map.insert(project_id.to_string(), Vec::new());
 
-        map.insert(project_id.to_string(), loaded.clone());
-        loaded
+        let pid = project_id.to_string();
+        let _ = std::thread::Builder::new()
+            .name("history-cache-loader".into())
+            .spawn(move || {
+                if let Some(db) = velowork_core::storage::database() {
+                    let repo = velowork_workspace::repositories::HistoryRepository::new(db);
+                    if let Ok(entries) = repo.list_by_project(&pid, None, MAX_PROJECT_CACHE_ITEMS) {
+                        let mut map = cache().lock().unwrap();
+                        map.insert(pid, entries);
+                    }
+                }
+            });
+
+        Vec::new()
     }
 
-    /// Record or update a command in the in-memory cache immediately.
+    /// Record or update a command in the in-memory cache immediately (non-blocking).
     pub fn record_command(project_id: &str, cmd: &str) {
         let trimmed = cmd.trim();
         if trimmed.is_empty() {
@@ -47,15 +55,7 @@ impl HistoryCache {
         }
 
         let mut map = cache().lock().unwrap();
-        let list = map.entry(project_id.to_string()).or_insert_with(|| {
-            if let Some(db) = velowork_core::storage::database() {
-                let repo = velowork_workspace::repositories::HistoryRepository::new(db);
-                repo.list_by_project(project_id, None, MAX_PROJECT_CACHE_ITEMS)
-                    .unwrap_or_default()
-            } else {
-                Vec::new()
-            }
-        });
+        let list = map.entry(project_id.to_string()).or_default();
 
         let ts = velowork_workspace::repositories::now_iso8601();
         if let Some(pos) = list.iter().position(|e| e.command == trimmed) {

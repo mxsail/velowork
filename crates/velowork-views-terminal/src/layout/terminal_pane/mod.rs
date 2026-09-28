@@ -15,6 +15,9 @@ pub mod sftp_panel;
 pub mod url_detector;
 mod zoom;
 
+use std::path::PathBuf;
+use velowork_i18n::i18n;
+
 use search_bar::{SearchBar, SearchBarEvent};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::icon::AppIcon;
@@ -28,7 +31,6 @@ use velowork_ui::tokens::{
 use velowork_ui::tooltip::Tooltip;
 
 pub use content::{TerminalContent, TerminalContentEvent, render_line_numbers_gutter};
-use parking_lot::Mutex;
 
 use crate::ActionDispatch;
 use crate::terminal_view_settings;
@@ -101,6 +103,12 @@ pub struct TerminalPane<D: ActionDispatch> {
 
     // Reconnection state
     is_reconnecting: bool,
+
+    // ZMODEM in-pane transfer state
+    pub(super) zmodem_cancel_flag: Option<Arc<std::sync::atomic::AtomicBool>>,
+    pub(super) is_zmodem_prompt_open: bool,
+    pub(super) last_zmodem_close_time: Option<std::time::Instant>,
+    pub(super) zmodem_aborted_notified: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
@@ -207,6 +215,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             history_popup_open: false,
             welcome_selected_index: None,
             is_reconnecting: false,
+            zmodem_cancel_flag: None,
+            is_zmodem_prompt_open: false,
+            last_zmodem_close_time: None,
+            zmodem_aborted_notified: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         };
 
         let conn_store = cx
@@ -256,6 +268,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         pane.start_cursor_blink_loop(cx);
         pane.start_idle_check_loop(cx);
         pane.start_connection_watch(cx);
+        cx.observe(&pane.content, |this, _, cx| this.process_zmodem_events(cx)).detach();
         // Observe the shared terminal background cache so this pane re-renders
         // (for the fade-in) the moment the single global decode completes.
         if let Some(cache) = crate::terminal_background_cache(cx) {
@@ -1211,347 +1224,508 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         }
     }
 
-    pub fn process_zmodem_events(&self, cx: &mut Context<Self>) {
-        if let Some(ref terminal) = self.terminal {
-            let events = terminal.take_zmodem_events();
-            let store = cx
-                .global::<crate::transfer_store::GlobalTransferStore>()
-                .0
-                .clone();
-            for ev in events {
-                match ev {
-                    velowork_terminal::terminal::ZmodemEvent::UploadRequested => {
-                        let pending = terminal.take_pending_upload_files();
-                        let term = terminal.clone();
-                        let store = store.clone();
-                        if !pending.is_empty() {
-                            let is_multiple = pending.len() > 1;
-                            cx.spawn(async move |_this, cx| {
-                            for (idx, p) in pending.into_iter().enumerate() {
-                                let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                                let file_size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                                let id = crate::transfer_store::next_transfer_id();
-                                let control = Arc::new(std::sync::atomic::AtomicU8::new(
-                                    crate::transfer_store::TRANSFER_CONTROL_ACTIVE,
-                                ));
-                                let _ = store.update(cx, |s, cx| {
-                                    s.add(crate::transfer_store::TransferTask {
-                                        id: id.clone(),
-                                        name: filename.clone(),
-                                        direction: crate::transfer_store::TransferDirection::Upload,
-                                        local_path: p.to_string_lossy().to_string(),
-                                        remote_path: format!("zmodem:{}", filename),
-                                        total_bytes: file_size,
-                                        transferred_bytes: 0,
-                                        status: crate::transfer_store::TransferStatus::Active,
-                                        speed_bps: 0.0,
-                                        error: None,
-                                    });
-                                    s.register_control(&id, control.clone());
-                                    if idx == 0 {
-                                        s.trigger_fly(
-                                            crate::transfer_store::TransferFlyOrigin::DialogCenter,
-                                            is_multiple,
-                                            cx,
-                                        );
-                                    }
-                                    cx.notify();
-                                });
+    /// Explicitly clear any ZMODEM cooldown and suppression (e.g. when user submits a new command).
+    pub fn clear_zmodem_cooldown(&mut self) {
+        if self.last_zmodem_close_time.take().is_some() {
+            log::info!("[ZMODEM-PANE] clear_zmodem_cooldown triggered: reset last_zmodem_close_time");
+        }
+        if let Some(ref term) = self.terminal {
+            term.clear_zmodem_suppression();
+        }
+    }
 
-                                let progress = Arc::new(Mutex::new(crate::transfer_store::TransferProgress::default()));
-                                let store_tick = store.clone();
-                                let id_tick = id.clone();
-                                let prog_tick = progress.clone();
-                                cx.spawn(async move |cx| {
-                                    loop {
-                                        smol::Timer::after(std::time::Duration::from_millis(200)).await;
-                                        let p = prog_tick.lock().clone();
-                                        let _ = store_tick.update(cx, |s, cx| {
-                                            if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
-                                                t.transferred_bytes = p.transferred;
-                                                t.total_bytes = if p.total > 0 { p.total } else { file_size };
-                                                if t.status != crate::transfer_store::TransferStatus::Paused {
-                                                    t.speed_bps = p.speed_bps;
-                                                } else {
-                                                    t.speed_bps = 0.0;
-                                                }
-                                                if p.done {
-                                                    t.status = p.status;
-                                                    t.error = p.error.clone();
-                                                }
-                                            }
-                                            cx.notify();
-                                        });
-                                        if p.done {
-                                            break;
-                                        }
-                                    }
-                                }).detach();
+    pub fn is_zmodem_active(&self) -> bool {
+        self.zmodem_cancel_flag.is_some()
+            || self.is_zmodem_prompt_open
+            || self.terminal.as_ref().is_some_and(|t| t.is_zmodem_active())
+    }
 
-                                let prog_cb = progress.clone();
-                                let res = velowork_terminal::zmodem::session::send_zmodem_upload_with_progress(
-                                    term.clone(),
-                                    p,
-                                    move |transferred, total, speed| {
-                                        let mut p = prog_cb.lock();
-                                        p.transferred = transferred;
-                                        p.total = total;
-                                        p.speed_bps = speed;
-                                    },
-                                ).await;
-
-                                let mut p = progress.lock();
-                                p.done = true;
-                                p.transferred = file_size;
-                                p.total = file_size;
-                                p.status = if res.is_ok() {
-                                    crate::transfer_store::TransferStatus::Complete
-                                } else {
-                                    crate::transfer_store::TransferStatus::Error
-                                };
-                                p.error = res.err();
-                            }
-                        }).detach();
-                        } else {
-                            let prompt_fut = cx.prompt_for_paths(gpui::PathPromptOptions {
-                                files: true,
-                                directories: false,
-                                multiple: true,
-                                prompt: Some("Select Files for Upload (rz)".into()),
-                            });
-                            cx.spawn(async move |_this, cx| {
-                                let selected_opt = match prompt_fut.await {
-                                    Ok(Ok(Some(selected))) if !selected.is_empty() => Some(selected),
-                                    _ => None,
-                                };
-                                let Some(selected) = selected_opt else {
-                                    term.send_bytes(b"\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08");
-                                    return;
-                                };
-                                let is_multiple = selected.len() > 1;
-                                for (idx, p) in selected.into_iter().enumerate() {
-                                    let filename = p.file_name().unwrap_or_default().to_string_lossy().to_string();
-                                    let file_size = std::fs::metadata(&p).map(|m| m.len()).unwrap_or(0);
-                                    let id = crate::transfer_store::next_transfer_id();
-                                    let control = Arc::new(std::sync::atomic::AtomicU8::new(
-                                        crate::transfer_store::TRANSFER_CONTROL_ACTIVE,
-                                    ));
-                                    let _ = store.update(cx, |s, cx| {
-                                        s.add(crate::transfer_store::TransferTask {
-                                            id: id.clone(),
-                                            name: filename.clone(),
-                                            direction: crate::transfer_store::TransferDirection::Upload,
-                                            local_path: p.to_string_lossy().to_string(),
-                                            remote_path: format!("zmodem:{}", filename),
-                                            total_bytes: file_size,
-                                            transferred_bytes: 0,
-                                            status: crate::transfer_store::TransferStatus::Active,
-                                            speed_bps: 0.0,
-                                            error: None,
-                                        });
-                                        s.register_control(&id, control.clone());
-                                        if idx == 0 {
-                                            s.trigger_fly(
-                                                crate::transfer_store::TransferFlyOrigin::DialogCenter,
-                                                is_multiple,
-                                                cx,
-                                            );
-                                        }
-                                        cx.notify();
-                                    });
-
-                                    let progress = Arc::new(Mutex::new(crate::transfer_store::TransferProgress::default()));
-                                    let store_tick = store.clone();
-                                    let id_tick = id.clone();
-                                    let prog_tick = progress.clone();
-                                    cx.spawn(async move |cx| {
-                                        loop {
-                                            smol::Timer::after(std::time::Duration::from_millis(200)).await;
-                                            let p = prog_tick.lock().clone();
-                                            let _ = store_tick.update(cx, |s, cx| {
-                                                if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
-                                                    t.transferred_bytes = p.transferred;
-                                                    t.total_bytes = if p.total > 0 { p.total } else { file_size };
-                                                    if t.status != crate::transfer_store::TransferStatus::Paused {
-                                                     t.speed_bps = p.speed_bps;
-                                                 } else {
-                                                     t.speed_bps = 0.0;
-                                                 }
-                                                    if p.done {
-                                                        t.status = p.status;
-                                                        t.error = p.error.clone();
-                                                    }
-                                                }
-                                                cx.notify();
-                                            });
-                                            if p.done {
-                                                break;
-                                            }
-                                        }
-                                    }).detach();
-
-                                    let prog_cb = progress.clone();
-                                    let res = velowork_terminal::zmodem::session::send_zmodem_upload_with_progress(
-                                        term.clone(),
-                                        p,
-                                        move |transferred, total, speed| {
-                                            let mut p = prog_cb.lock();
-                                            p.transferred = transferred;
-                                            p.total = total;
-                                            p.speed_bps = speed;
-                                        },
-                                    ).await;
-
-                                    let mut p = progress.lock();
-                                    p.done = true;
-                                    p.transferred = file_size;
-                                    p.total = file_size;
-                                    p.status = if res.is_ok() {
-                                        crate::transfer_store::TransferStatus::Complete
-                                    } else {
-                                        crate::transfer_store::TransferStatus::Error
-                                    };
-                                }
-                            })
-                            .detach();
-                        }
-                    }
-                    velowork_terminal::terminal::ZmodemEvent::DownloadRequested => {
-                        let term = terminal.clone();
-                        let store = store.clone();
-                        let (tx, rx) = tokio::sync::mpsc::channel::<Vec<u8>>(200);
-                        term.set_zmodem_raw_sender(Some(tx));
-
-                        let prompt_fut = cx.prompt_for_paths(gpui::PathPromptOptions {
-                            files: false,
-                            directories: true,
-                            multiple: false,
-                            prompt: Some("Select Destination Folder for Download (sz)".into()),
-                        });
-
-                        let term_cancel = term.clone();
-                        cx.spawn(async move |_this, cx| {
-                            let selected_opt = match prompt_fut.await {
-                                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                                _ => None,
-                            };
-
-                            let Some(download_dir) = selected_opt else {
-                                term_cancel.send_bytes(b"\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08");
-                                term_cancel.set_zmodem_raw_sender(None);
-                                return;
-                            };
-
-                            let _ = std::fs::create_dir_all(&download_dir);
-
-                            let id = crate::transfer_store::next_transfer_id();
-                            let control = Arc::new(std::sync::atomic::AtomicU8::new(
-                                crate::transfer_store::TRANSFER_CONTROL_ACTIVE,
-                            ));
-                            let _ = store.update(cx, |s, cx| {
-                                s.add(crate::transfer_store::TransferTask {
-                                    id: id.clone(),
-                                    name: "Download (sz)".to_string(),
-                                    direction: crate::transfer_store::TransferDirection::Download,
-                                    local_path: download_dir.to_string_lossy().to_string(),
-                                    remote_path: "zmodem:remote".to_string(),
-                                    total_bytes: 0,
-                                    transferred_bytes: 0,
-                                    status: crate::transfer_store::TransferStatus::Active,
-                                    speed_bps: 0.0,
-                                    error: None,
-                                });
-                                s.register_control(&id, control.clone());
-                                s.trigger_fly(
-                                    crate::transfer_store::TransferFlyOrigin::DialogCenter,
-                                    false,
-                                    cx,
-                                );
-                                cx.notify();
-                            });
-
-                            let progress = Arc::new(Mutex::new(
-                                crate::transfer_store::TransferProgress::default(),
-                            ));
-                            let store_tick = store.clone();
-                            let id_tick = id.clone();
-                            let prog_tick = progress.clone();
-                            cx.spawn(async move |_cx| {
-                                loop {
-                                    smol::Timer::after(std::time::Duration::from_millis(200)).await;
-                                    let p = prog_tick.lock().clone();
-                                    let _ = store_tick.update(_cx, |s, cx| {
-                                        if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_tick) {
-                                            t.transferred_bytes = p.transferred;
-                                            if p.total > 0 {
-                                                t.total_bytes = p.total;
-                                            }
-                                            if t.status == crate::transfer_store::TransferStatus::Paused {
-                                                t.speed_bps = 0.0;
-                                            } else {
-                                                t.speed_bps = p.speed_bps;
-                                            }
-                                            if p.done {
-                                                t.status = p.status;
-                                                t.error = p.error.clone();
-                                            }
-                                        }
-                                        cx.notify();
-                                    });
-                                    if p.done {
-                                        break;
-                                    }
-                                }
-                            })
-                            .detach();
-
-                            let prog_cb = progress.clone();
-                            let term_cleanup = term.clone();
-                            let store_final = store.clone();
-                            let id_final = id.clone();
-                            cx.spawn(async move |cx| {
-                                let res = velowork_terminal::zmodem::session::receive_zmodem_download_with_progress(
-                                    term.clone(),
-                                    download_dir,
-                                    rx,
-                                    move |transferred, total, speed, _path| {
-                                        let mut p = prog_cb.lock();
-                                        p.transferred = transferred;
-                                        p.total = total;
-                                        p.speed_bps = speed;
-                                    },
-                                ).await;
-
-                                term_cleanup.set_zmodem_raw_sender(None);
-
-                                let mut p = progress.lock();
-                                p.done = true;
-                                p.status = if res.is_ok() {
-                                    crate::transfer_store::TransferStatus::Complete
-                                } else {
-                                    crate::transfer_store::TransferStatus::Error
-                                };
-                                p.error = res.as_ref().err().cloned();
-
-                                if let Ok(ref saved_path) = res {
-                                    let final_name = saved_path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                                    let final_local = saved_path.to_string_lossy().to_string();
-                                    let _ = store_final.update(cx, |s, cx| {
-                                        if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id_final) {
-                                            t.name = final_name;
-                                            t.local_path = final_local;
-                                            t.status = crate::transfer_store::TransferStatus::Complete;
-                                        }
-                                        cx.notify();
-                                    });
-                                }
-                            }).detach();
-                        }).detach();
-                    }
+    pub fn process_zmodem_events(&mut self, cx: &mut Context<Self>) {
+        let Some(ref terminal) = self.terminal else {
+            return;
+        };
+        // If a transfer is active or a file prompt is open, ignore events
+        if self.zmodem_cancel_flag.is_some() || self.is_zmodem_prompt_open {
+            terminal.take_zmodem_events();
+            return;
+        }
+        // Cooldown guard: discard trailing packets for 1.5 seconds after closing/cancelling
+        if let Some(last_close) = self.last_zmodem_close_time
+            && last_close.elapsed() < std::time::Duration::from_millis(1500)
+        {
+            terminal.take_zmodem_events();
+            return;
+        }
+        if terminal.is_zmodem_suppressed() {
+            terminal.take_zmodem_events();
+            return;
+        }
+        let events = terminal.take_zmodem_events();
+        for ev in events {
+            match ev {
+                velowork_terminal::terminal::ZmodemEvent::UploadRequested => {
+                    self.handle_zmodem_upload_requested(cx);
+                }
+                velowork_terminal::terminal::ZmodemEvent::DownloadRequested => {
+                    self.handle_zmodem_download_requested(cx);
                 }
             }
         }
     }
+
+    pub fn handle_zmodem_upload_requested(&mut self, cx: &mut Context<Self>) {
+        log::info!("[ZMODEM] Upload requested by remote");
+        if self.is_zmodem_prompt_open {
+            return;
+        }
+        let Some(terminal) = self.terminal.clone() else {
+            return;
+        };
+        let pending = terminal.take_pending_upload_files();
+        if !pending.is_empty() {
+            self.start_zmodem_upload(pending, cx);
+        } else {
+            self.is_zmodem_prompt_open = true;
+            let prompt_fut = cx.prompt_for_paths(gpui::PathPromptOptions {
+                files: true,
+                directories: false,
+                multiple: true,
+                prompt: Some(i18n!(cx, "terminal.zmodem.select_files").into()),
+            });
+            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                let selected_opt = match prompt_fut.await {
+                    Ok(Ok(Some(selected))) if !selected.is_empty() => Some(selected),
+                    _ => None,
+                };
+                let _ = this.update(cx, |pane, cx| {
+                    pane.is_zmodem_prompt_open = false;
+                    let Some(selected) = selected_opt else {
+                        log::info!("[ZMODEM] File chooser cancelled by user");
+                        pane.zmodem_aborted_notified.store(true, std::sync::atomic::Ordering::SeqCst);
+                        if let Some(ref term) = pane.terminal {
+                            term.write_to_screen(b"\r\nTransfer cancelled.\r\n");
+                        }
+                        pane.cancel_zmodem(cx);
+                        return;
+                    };
+                    pane.start_zmodem_upload(selected, cx);
+                });
+            })
+            .detach();
+        }
+    }
+
+    pub fn start_zmodem_upload(&mut self, files: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let Some(terminal) = self.terminal.clone() else {
+            return;
+        };
+        if files.is_empty() {
+            terminal.cancel_zmodem();
+            return;
+        }
+
+        let first_name = files
+            .first()
+            .and_then(|f| f.file_name())
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        terminal.write_to_screen(format!("\r\nSending: {}\r\n", first_name).as_bytes());
+
+        let _total_files = files.len();
+        let total_bytes: u64 = files
+            .iter()
+            .filter_map(|p| std::fs::metadata(p).ok())
+            .map(|m| m.len())
+            .sum();
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.zmodem_cancel_flag = Some(cancel_flag.clone());
+        self.zmodem_aborted_notified.store(false, std::sync::atomic::Ordering::SeqCst);
+
+        let overwrite = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.zmodem_upload_overwrite)
+            .unwrap_or(false);
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        terminal.register_zmodem_raw_sender(tx);
+
+        let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let event_tx_upload = event_tx.clone();
+        let cancel_flag_prog = cancel_flag.clone();
+        let upload_fut = velowork_terminal::zmodem::session::send_zmodem_upload_with_progress(
+            terminal.clone(),
+            files,
+            overwrite,
+            rx,
+            cancel_flag,
+            move |event| {
+                let _ = event_tx_upload.send(event);
+            },
+        );
+
+        let term_for_prog = terminal.clone();
+        let mut last_render = std::time::Instant::now();
+        let mut current_fname = first_name;
+        let transfer_start = std::time::Instant::now();
+
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            while let Some(event) = event_rx.recv().await {
+                if cancel_flag_prog.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                match event {
+                    velowork_terminal::zmodem::ZmodemUploadEvent::Progress {
+                        transferred,
+                        total,
+                        speed,
+                        filename,
+                        ..
+                    } => {
+                        if filename != current_fname {
+                            term_for_prog.write_to_screen(format!("\r\nSending: {}\r\n", filename).as_bytes());
+                            current_fname = filename;
+                        }
+                        let percent = (transferred * 100).checked_div(total).unwrap_or(0);
+                        let elapsed = transfer_start.elapsed().as_secs();
+                        if last_render.elapsed() >= std::time::Duration::from_millis(50) {
+                            let line = format_zmodem_progress_bar(percent, elapsed, speed, total, false);
+                            term_for_prog.write_to_screen(line.as_bytes());
+                            last_render = std::time::Instant::now();
+                        }
+                    }
+                    velowork_terminal::zmodem::ZmodemUploadEvent::FileSkipped { filename, reason } => {
+                        let text = this.update(cx, |_, cx| {
+                            match reason {
+                                velowork_terminal::zmodem::ZmodemSkipReason::Protected => {
+                                    i18n!(cx, "terminal.zmodem.skipped_protected").replace("{}", &filename)
+                                }
+                                velowork_terminal::zmodem::ZmodemSkipReason::FileExists => {
+                                    i18n!(cx, "terminal.zmodem.skipped_exists").replace("{}", &filename)
+                                }
+                            }
+                        }).unwrap_or_else(|_| {
+                            match reason {
+                                velowork_terminal::zmodem::ZmodemSkipReason::Protected => {
+                                    format!("Rejected: {} (protected / permission denied)", filename)
+                                }
+                                velowork_terminal::zmodem::ZmodemSkipReason::FileExists => {
+                                    format!("Skipped: {} (already exists)", filename)
+                                }
+                            }
+                        });
+                        term_for_prog.write_to_screen(format!("\r\x1b[2K[ZMODEM] {}\r\n", text).as_bytes());
+                    }
+                }
+            }
+        })
+        .detach();
+
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let term_for_unreg = terminal.clone();
+        velowork_terminal::get_tokio_runtime().spawn(async move {
+            let res = upload_fut.await;
+            drop(event_tx);
+            term_for_unreg.unregister_zmodem_raw_sender();
+            let is_err = res.is_err();
+            let _ = result_tx.send(res);
+            if is_err {
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                term_for_unreg.send_bytes(b"\r");
+            }
+        });
+
+        let term_for_res = terminal.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let res = match result_rx.await {
+                Ok(r) => r,
+                Err(_) => Err("Upload task terminated".to_string()),
+            };
+
+            let _ = this.update(cx, |pane, cx| {
+                pane.zmodem_cancel_flag = None;
+                pane.last_zmodem_close_time = Some(std::time::Instant::now());
+                match res {
+                    Ok(summary) => {
+                        if summary.transferred_files > 0 {
+                            let final_line = format_zmodem_progress_bar(
+                                100,
+                                transfer_start.elapsed().as_secs(),
+                                0.0,
+                                summary.transferred_bytes,
+                                true,
+                            );
+                            term_for_res.write_to_screen(final_line.as_bytes());
+                        } else if !summary.skipped_files.is_empty() {
+                            let msg = format!(
+                                "\r\x1b[2K[ZMODEM] {}\r\n\r\n",
+                                i18n!(cx, "terminal.zmodem.all_skipped_or_protected")
+                            );
+                            term_for_res.write_to_screen(msg.as_bytes());
+                        } else {
+                            let final_line = format_zmodem_progress_bar(
+                                100,
+                                transfer_start.elapsed().as_secs(),
+                                0.0,
+                                total_bytes,
+                                true,
+                            );
+                            term_for_res.write_to_screen(final_line.as_bytes());
+                        }
+                    }
+                    Err(err) => {
+                        if err.contains("cancelled") || err.contains("aborted") {
+                            if pane
+                                .zmodem_aborted_notified
+                                .compare_exchange(
+                                    false,
+                                    true,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                )
+                                .is_ok()
+                            {
+                                term_for_res.write_to_screen(b"\r\x1b[2KTransfer aborted.\r\n\x1b[0m\x0f");
+                            }
+                        } else {
+                            pane.zmodem_aborted_notified.store(true, std::sync::atomic::Ordering::SeqCst);
+                            term_for_res.write_to_screen(
+                                format!("\r\x1b[2KError: {}\r\nTransfer aborted.\r\n", err).as_bytes(),
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn handle_zmodem_download_requested(&mut self, cx: &mut Context<Self>) {
+        log::info!("[ZMODEM] Download requested by remote");
+        if self.terminal.is_none() {
+            return;
+        }
+
+        let app_settings = cx
+            .try_global::<velowork_app_core::settings::GlobalSettings>()
+            .map(|g| g.0.read(cx).settings.clone());
+        let auto_download = app_settings
+            .as_ref()
+            .map(|s| s.zmodem_auto_download)
+            .unwrap_or(true);
+        let default_dir = app_settings
+            .as_ref()
+            .and_then(|s| s.zmodem_download_directory.as_ref())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                dirs::download_dir().unwrap_or_else(std::env::temp_dir)
+            });
+
+        if auto_download {
+            self.start_zmodem_download(default_dir, cx);
+        } else {
+            if self.is_zmodem_prompt_open {
+                return;
+            }
+            self.is_zmodem_prompt_open = true;
+            let prompt_fut = cx.prompt_for_paths(gpui::PathPromptOptions {
+                files: false,
+                directories: true,
+                multiple: false,
+                prompt: Some(i18n!(cx, "terminal.zmodem.select_download_dir").into()),
+            });
+            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                let chosen_dir_opt = match prompt_fut.await {
+                    Ok(Ok(Some(mut dirs))) if !dirs.is_empty() => Some(dirs.remove(0)),
+                    _ => None,
+                };
+                let _ = this.update(cx, |pane, cx| {
+                    pane.is_zmodem_prompt_open = false;
+                    let Some(chosen_dir) = chosen_dir_opt else {
+                        log::info!("[ZMODEM] Download dir chooser cancelled by user");
+                        pane.zmodem_aborted_notified.store(true, std::sync::atomic::Ordering::SeqCst);
+                        if let Some(ref term) = pane.terminal {
+                            term.write_to_screen(b"\r\nTransfer cancelled.\r\n");
+                        }
+                        pane.cancel_zmodem(cx);
+                        return;
+                    };
+                    pane.start_zmodem_download(chosen_dir, cx);
+                });
+            })
+            .detach();
+        }
+    }
+
+    pub fn start_zmodem_download(&mut self, target_dir: PathBuf, cx: &mut Context<Self>) {
+        let Some(terminal) = self.terminal.clone() else {
+            return;
+        };
+
+        let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.zmodem_cancel_flag = Some(cancel_flag.clone());
+        self.zmodem_aborted_notified.store(false, std::sync::atomic::Ordering::SeqCst);
+
+        terminal.write_to_screen(b"\r\nReceiving file...\r\n");
+
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        terminal.register_zmodem_raw_sender(tx);
+
+        let (prog_tx, mut prog_rx) = tokio::sync::mpsc::unbounded_channel();
+        let prog_tx_dl = prog_tx.clone();
+        let cancel_flag_prog = cancel_flag.clone();
+        let dl_fut = velowork_terminal::zmodem::session::receive_zmodem_download_with_progress(
+            terminal.clone(),
+            target_dir,
+            rx,
+            cancel_flag,
+            move |transferred, total, speed, filename, file_idx, total_files| {
+                let _ = prog_tx_dl.send((
+                    transferred,
+                    total,
+                    speed,
+                    filename.to_string(),
+                    file_idx,
+                    total_files,
+                ));
+            },
+        );
+
+        let term_for_prog = terminal.clone();
+        let mut last_render = std::time::Instant::now();
+        let mut current_fname = String::new();
+        let transfer_start = std::time::Instant::now();
+
+        cx.spawn(async move |_this: WeakEntity<Self>, _cx| {
+            while let Some((transferred, total, speed, filename, _file_idx, _total_files)) =
+                prog_rx.recv().await
+            {
+                if cancel_flag_prog.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                if !filename.is_empty() && filename != current_fname {
+                    term_for_prog.write_to_screen(format!("\r\x1b[2KReceiving: {}\r\n", filename).as_bytes());
+                    current_fname = filename;
+                }
+                let percent = (transferred * 100).checked_div(total).unwrap_or(0);
+                let elapsed = transfer_start.elapsed().as_secs();
+                if last_render.elapsed() >= std::time::Duration::from_millis(50) {
+                    let line = format_zmodem_progress_bar(percent, elapsed, speed, total, false);
+                    term_for_prog.write_to_screen(line.as_bytes());
+                    last_render = std::time::Instant::now();
+                }
+            }
+        })
+        .detach();
+
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        let term_for_unreg = terminal.clone();
+        velowork_terminal::get_tokio_runtime().spawn(async move {
+            let res = dl_fut.await;
+            drop(prog_tx);
+            term_for_unreg.unregister_zmodem_raw_sender();
+            let is_err = res.is_err();
+            let _ = result_tx.send(res);
+            if is_err {
+                tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+                term_for_unreg.send_bytes(b"\r");
+            }
+        });
+
+        let term_for_res = terminal.clone();
+        cx.spawn(async move |this: WeakEntity<Self>, cx| {
+            let res = match result_rx.await {
+                Ok(r) => r,
+                Err(_) => Err("Download task terminated".to_string()),
+            };
+
+            let _ = this.update(cx, |pane, cx| {
+                pane.zmodem_cancel_flag = None;
+                pane.last_zmodem_close_time = Some(std::time::Instant::now());
+                match res {
+                    Ok(saved_path) => {
+                        let final_line = format!(
+                            "\r\x1b[2K 100% [{}] {:02}:{:02}:{:02}\r\nSaved to: {}\r\n\r\n",
+                            "=".repeat(20),
+                            transfer_start.elapsed().as_secs() / 3600,
+                            (transfer_start.elapsed().as_secs() % 3600) / 60,
+                            transfer_start.elapsed().as_secs() % 60,
+                            saved_path.display()
+                        );
+                        term_for_res.write_to_screen(final_line.as_bytes());
+                    }
+                    Err(err) => {
+                        if err.contains("cancelled") || err.contains("aborted") || err.contains("terminated") {
+                            if pane
+                                .zmodem_aborted_notified
+                                .compare_exchange(
+                                    false,
+                                    true,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                    std::sync::atomic::Ordering::SeqCst,
+                                )
+                                .is_ok()
+                            {
+                                term_for_res.write_to_screen(b"\r\x1b[2KTransfer aborted.\r\n\x1b[0m\x0f");
+                            }
+                        } else if pane
+                            .zmodem_aborted_notified
+                            .compare_exchange(
+                                false,
+                                true,
+                                std::sync::atomic::Ordering::SeqCst,
+                                std::sync::atomic::Ordering::SeqCst,
+                            )
+                            .is_ok()
+                        {
+                            term_for_res.write_to_screen(
+                                format!("\r\x1b[2KError: {}\r\nTransfer aborted.\r\n\x1b[0m\x0f", err).as_bytes(),
+                            );
+                        }
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn cancel_zmodem(&mut self, cx: &mut Context<Self>) {
+        log::info!("[ZMODEM-PANE] cancel_zmodem called: cancelling transfer and resetting state");
+        let had_task = self.zmodem_cancel_flag.is_some();
+        let was_active = had_task || self.is_zmodem_prompt_open;
+        if let Some(ref flag) = self.zmodem_cancel_flag.take() {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        self.is_zmodem_prompt_open = false;
+        self.input_line_buffer.clear();
+        self.last_zmodem_close_time = Some(std::time::Instant::now());
+        if let Some(ref terminal) = self.terminal {
+            if was_active
+                && self
+                    .zmodem_aborted_notified
+                    .compare_exchange(
+                        false,
+                        true,
+                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::SeqCst,
+                    )
+                    .is_ok()
+            {
+                terminal.write_to_screen(b"\r\x1b[2KTransfer aborted.\r\n\x1b[0m\x0f");
+            }
+            // CRITICAL: If a background transfer task is active, flag.store(true) will trigger
+            // abort_and_drain_stream in that task, which drains in-flight binary bytes via raw_rx
+            // before unregistering zmodem_raw_sender. Calling terminal.cancel_zmodem() now would
+            // prematurely destroy zmodem_raw_sender and spill in-flight binary packets to the screen!
+            if !had_task {
+                terminal.cancel_zmodem();
+            }
+        }
+        cx.notify();
+    }
+
 
     pub fn set_minimized(&mut self, minimized: bool, cx: &mut Context<Self>) {
         if self.minimized != minimized {
@@ -1586,6 +1760,11 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
 impl<D: ActionDispatch> Drop for TerminalPane<D> {
     fn drop(&mut self) {
+        if let Some(ref terminal) = self.terminal
+            && terminal.is_zmodem_active()
+        {
+            terminal.cancel_zmodem();
+        }
         // Remove this pane from the spatial navigation map so stale entries
         // don't linger after a terminal is closed.
         crate::layout::navigation::deregister_pane_bounds(
@@ -1601,3 +1780,43 @@ impl<D: ActionDispatch + Send + Sync> gpui::Focusable for TerminalPane<D> {
         self.focus_handle.clone()
     }
 }
+
+fn format_zmodem_progress_bar(
+    percent: u64,
+    elapsed_secs: u64,
+    speed_bps: f64,
+    total_bytes: u64,
+    is_complete: bool,
+) -> String {
+    let hrs = elapsed_secs / 3600;
+    let mins = (elapsed_secs % 3600) / 60;
+    let secs = elapsed_secs % 60;
+    let time_str = format!("{:02}:{:02}:{:02}", hrs, mins, secs);
+
+    if is_complete {
+        let bar = "=".repeat(20);
+        format!("\r\x1b[2K 100% [{}] {} {} bytes\r\n\r\n", bar, time_str, total_bytes)
+    } else {
+        let bar = if percent >= 100 {
+            "=".repeat(20)
+        } else {
+            let filled = ((percent * 20) / 100).min(19) as usize;
+            if filled == 0 {
+                format!(">{}", " ".repeat(19))
+            } else {
+                format!("{}>{}", "=".repeat(filled), " ".repeat(19 - filled))
+            }
+        };
+
+        let speed_str = if speed_bps >= 1024.0 * 1024.0 {
+            format!("{:.2} MB/s", speed_bps / (1024.0 * 1024.0))
+        } else if speed_bps >= 1024.0 {
+            format!("{:.2} KB/s", speed_bps / 1024.0)
+        } else {
+            format!("{:.0} B/s", speed_bps)
+        };
+
+        format!("\r\x1b[2K{:3}% [{}] {}  {}", percent, bar, time_str, speed_str)
+    }
+}
+

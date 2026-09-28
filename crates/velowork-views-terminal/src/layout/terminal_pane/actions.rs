@@ -113,6 +113,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                     self.record_terminal_history(trimmed, cx);
                 }
             }
+            if text.contains('\n') || text.contains('\r') {
+                log::debug!("[ZMODEM-ACTION] clear_zmodem_cooldown on paste with newline");
+                self.clear_zmodem_cooldown();
+            }
             terminal.send_paste(&text);
             return;
         }
@@ -207,6 +211,12 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
         let dropped_paths = paths.paths().to_vec();
         if dropped_paths.is_empty() {
+            return;
+        }
+
+        // If ZMODEM is active (e.g. user ran rz or waiting for upload), start upload directly
+        if terminal.is_zmodem_active() {
+            self.start_zmodem_upload(dropped_paths, cx);
             return;
         }
 

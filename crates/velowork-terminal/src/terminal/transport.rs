@@ -1,3 +1,10 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalSignal {
+    Int,
+    Term,
+    Kill,
+}
+
 /// Transport trait for terminal I/O operations.
 /// Implemented by PtyManager (local) and RemoteTransport (remote).
 pub trait TerminalTransport: Send + Sync {
@@ -8,4 +15,6 @@ pub trait TerminalTransport: Send + Sync {
     /// Local PTY uses 16ms (just enough to batch rapid resizes).
     /// Remote uses longer interval to avoid flooding the network.
     fn resize_debounce_ms(&self) -> u64 { 16 }
+    /// Send an out-of-band OS/SSH signal to the terminal's foreground process.
+    fn send_signal(&self, _terminal_id: &str, _signal: TerminalSignal) {}
 }

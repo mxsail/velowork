@@ -41,7 +41,7 @@ pub use preview::{TerminalPreviewLine, TerminalPreviewSnapshot, TerminalPreviewS
 pub use resize_authority::{
     claim_resize_authority_local, claim_resize_authority_remote, is_resize_authority_local,
 };
-pub use transport::TerminalTransport;
+pub use transport::{TerminalSignal, TerminalTransport};
 pub use types::{
     AppCursorShape, DetectedLink, PromptMark, PromptMarkKind, ResizeState, SelectionState,
     TerminalSize,
@@ -313,10 +313,14 @@ pub struct Terminal {
     pub log_recording_start_instant: Arc<Mutex<Option<std::time::Instant>>>,
     /// Accumulated seconds when paused
     pub log_recording_accumulated_secs: Arc<std::sync::atomic::AtomicU64>,
+    pub(super) zmodem_active: Arc<std::sync::atomic::AtomicBool>,
     pub(super) zmodem_detector: Mutex<crate::zmodem::ZmodemDetector>,
     pub(super) pending_upload_files: Arc<Mutex<Vec<std::path::PathBuf>>>,
     pub(super) pending_zmodem_events: Mutex<Vec<ZmodemEvent>>,
-    pub(super) zmodem_raw_sender: Arc<Mutex<Option<tokio::sync::mpsc::Sender<Vec<u8>>>>>,
+    pub(super) zmodem_raw_sender: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>>>,
+    pub(super) zmodem_early_buffer: Arc<Mutex<Vec<u8>>>,
+    pub(super) zmodem_swallow_until: Arc<Mutex<Option<std::time::Instant>>>,
+    pub(super) zmodem_suppress_until: Arc<Mutex<Option<std::time::Instant>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -326,6 +330,16 @@ pub enum ZmodemEvent {
 }
 
 impl Terminal {
+    /// Check if an active ZMODEM session or handshake is currently in progress
+    pub fn is_zmodem_active(&self) -> bool {
+        self.zmodem_active.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Set or clear ZMODEM active state
+    pub fn set_zmodem_active(&self, active: bool) {
+        self.zmodem_active.store(active, std::sync::atomic::Ordering::Relaxed);
+    }
+
     /// Start recording terminal output to the given file path
     pub fn start_log_recording(&self, path: std::path::PathBuf, append_mode: bool) -> std::io::Result<()> {
         let file = std::fs::OpenOptions::new()
@@ -341,15 +355,110 @@ impl Terminal {
         Ok(())
     }
 
-    /// Set or clear the raw byte stream channel for an active ZMODEM session
-    pub fn set_zmodem_raw_sender(&self, sender: Option<tokio::sync::mpsc::Sender<Vec<u8>>>) {
-        *self.zmodem_raw_sender.lock() = sender;
+    /// Register the raw byte stream sender for an active ZMODEM session,
+    /// atomically flushing any pre-buffered early bytes into it first.
+    pub fn register_zmodem_raw_sender(&self, sender: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) {
+        let early_bytes = std::mem::take(&mut *self.zmodem_early_buffer.lock());
+        if !early_bytes.is_empty() {
+            let _ = sender.send(early_bytes);
+        }
+        *self.zmodem_raw_sender.lock() = Some(sender);
     }
 
-    /// Abort an in-progress ZMODEM file transfer by sending 5x CAN + 5x BS
+    /// Unregister the raw byte stream sender and reset ZMODEM active state
+    pub fn unregister_zmodem_raw_sender(&self) {
+        *self.zmodem_raw_sender.lock() = None;
+        self.zmodem_early_buffer.lock().clear();
+        self.set_zmodem_active(false);
+    }
+
+    /// Set or clear the raw byte stream channel for an active ZMODEM session
+    pub fn set_zmodem_raw_sender(&self, sender: Option<tokio::sync::mpsc::UnboundedSender<Vec<u8>>>) {
+        if let Some(s) = sender {
+            self.register_zmodem_raw_sender(s);
+        } else {
+            self.unregister_zmodem_raw_sender();
+        }
+    }
+
+    /// Suppress ZMODEM trigger detection for a specified duration (e.g. during cancellation cooldown).
+    pub fn suppress_zmodem_temporarily(&self, duration: std::time::Duration) {
+        *self.zmodem_suppress_until.lock() = Some(std::time::Instant::now() + duration);
+    }
+
+    /// Clear early pre-buffered ZMODEM bytes
+    pub fn clear_zmodem_early_buffer(&self) {
+        self.zmodem_early_buffer.lock().clear();
+    }
+
+    /// Check if ZMODEM detection is temporarily suppressed (e.g. during cancellation cooldown).
+    pub fn is_zmodem_suppressed(&self) -> bool {
+        self.zmodem_suppress_until
+            .lock()
+            .map_or(false, |until| std::time::Instant::now() < until)
+    }
+
+    /// Explicitly clear any ZMODEM suppression cooldown and swallow window (e.g. when user submits a new command).
+    pub fn clear_zmodem_suppression(&self) {
+        let had_suppression = self.zmodem_suppress_until.lock().take().is_some();
+        let had_swallow = self.zmodem_swallow_until.lock().take().is_some();
+        if had_suppression || had_swallow {
+            log::info!(
+                "[ZMODEM-SUPPRESS] Cooldown suppression and swallow cleared | terminal_id={}",
+                self.terminal_id
+            );
+        }
+    }
+
+    /// Inspect terminal term state without draining pending output (fast path for key handlers).
+    pub fn inspect_term<R>(
+        &self,
+        f: impl FnOnce(&alacritty_terminal::term::Term<self::event_listener::ZedEventListener>) -> R,
+    ) -> R {
+        let term = self.term.lock();
+        f(&term)
+    }
+
+    /// Abort an in-progress ZMODEM file transfer cleanly:
+    /// 1. Suppress new ZMODEM triggers for 1.5 seconds to absorb trailing in-flight packets from slow links.
+    /// 2. Activate a 500ms swallow quiet window to drop all in-flight binary packets so no garbled text leaks to screen.
+    /// 3. Clear early buffer, raw sender, and detector state.
+    /// 4. Immediately send standard ZMODEM cancel sequence (10x CAN + 10x BS) + \r\n + 2x Ctrl+C + \r\n.
+    ///    - 10x CAN + 10x BS breaks out of remote rz/sz immediately and cleans tty input.
+    ///    - \r\n isolates prompt from "rz waiting to receive." on a brand new line.
+    ///    - \x03\x03 discards shell partial input line.
+    ///    - \r\n triggers remote shell to print fresh pristine prompt.
+    /// 5. Follow up after 550ms (right after swallow window ends) with newline fallback to ensure high-latency links render prompt.
     pub fn cancel_zmodem(&self) {
-        self.set_zmodem_raw_sender(None);
-        self.send_bytes(b"\x18\x18\x18\x18\x18\x08\x08\x08\x08\x08");
+        log::info!(
+            "[ZMODEM-CANCEL] cancel_zmodem initiated | terminal_id={}",
+            self.terminal_id
+        );
+        *self.zmodem_suppress_until.lock() =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
+        *self.zmodem_swallow_until.lock() =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(600));
+        self.unregister_zmodem_raw_sender();
+        self.set_zmodem_active(false);
+        self.clear_zmodem_early_buffer();
+        self.zmodem_detector.lock().reset();
+        self.pending_zmodem_events.lock().clear();
+
+        let mut abort_bytes = Vec::with_capacity(40);
+        // 10x CAN + 10x BS: standard ZMODEM protocol abort sequence recognized by lrzsz
+        abort_bytes.extend_from_slice(crate::zmodem::session::ZMODEM_CANCEL_SEQUENCE);
+        abort_bytes.extend_from_slice(b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08");
+        // Clear terminal line buffer with Ctrl+C and request pristine prompt with newline
+        abort_bytes.extend_from_slice(b"\r\n\x03\x03\r\n");
+        self.send_bytes(&abort_bytes);
+
+        // Follow up after swallow window ends (650ms) to ensure remote shell prints a pristine prompt
+        let transport = self.transport.clone();
+        let terminal_id = self.terminal_id.clone();
+        crate::pty_manager::get_tokio_runtime().spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(650)).await;
+            transport.send_input(&terminal_id, b"\r");
+        });
     }
 
     /// Stop recording terminal output and return the path of the saved log file
@@ -525,10 +634,14 @@ impl Terminal {
             log_recording_paused: Arc::new(AtomicBool::new(false)),
             log_recording_start_instant: Arc::new(Mutex::new(None)),
             log_recording_accumulated_secs: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            zmodem_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             zmodem_detector: Mutex::new(crate::zmodem::ZmodemDetector::new()),
             pending_upload_files: Arc::new(Mutex::new(Vec::new())),
             pending_zmodem_events: Mutex::new(Vec::new()),
             zmodem_raw_sender: Arc::new(Mutex::new(None)),
+            zmodem_early_buffer: Arc::new(Mutex::new(Vec::new())),
+            zmodem_swallow_until: Arc::new(Mutex::new(None)),
+            zmodem_suppress_until: Arc::new(Mutex::new(None)),
         }
     }
 

@@ -278,7 +278,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             return false;
         };
 
-        terminal.with_content(|term| {
+        terminal.inspect_term(|term| {
             if term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
                 return false;
             }
@@ -323,7 +323,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         let terminal = self.terminal.as_ref()?;
         let input_buf_trimmed = self.input_line_buffer.trim().to_string();
 
-        terminal.with_content(|term| {
+        terminal.inspect_term(|term| {
             if term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
                 return None;
             }
@@ -452,6 +452,17 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         // Defense-in-depth: never feed keystrokes to the PTY unless this pane
         // is the actually-focused element.
         if !self.focus_handle.is_focused(window) {
+            return;
+        }
+
+        // ZMODEM stream protection: intercept Ctrl+C/Esc while ZMODEM is active, and swallow other keystrokes
+        if self.is_zmodem_active() {
+            if (event.keystroke.key == "c" && event.keystroke.modifiers.control)
+                || event.keystroke.key == "escape"
+            {
+                log::info!("[ZMODEM-NAV] Ctrl+C / Escape intercepted during active ZMODEM session, cancelling");
+                self.cancel_zmodem(cx);
+            }
             return;
         }
 
@@ -585,6 +596,8 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
             // 维护输入缓冲与触发历史命令记录
             if event.keystroke.key == "enter" {
+                log::debug!("[ZMODEM-NAV] clear_zmodem_cooldown on Enter key");
+                self.clear_zmodem_cooldown();
                 let is_auth = self.is_cursor_at_auth_prompt();
                 if is_auth {
                     self.input_line_buffer.clear();
@@ -631,6 +644,8 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             } else if (event.keystroke.key == "c" || event.keystroke.key == "u")
                 && event.keystroke.modifiers.control
             {
+                log::debug!("[ZMODEM-NAV] clear_zmodem_cooldown on Ctrl+{}", event.keystroke.key);
+                self.clear_zmodem_cooldown();
                 self.input_line_buffer.clear();
                 self.command_accumulator.clear();
                 self.history_popup_open = false;

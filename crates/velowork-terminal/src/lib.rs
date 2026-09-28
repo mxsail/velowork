@@ -24,7 +24,7 @@ pub mod tunnel_engine;
 pub mod x11;
 pub mod zmodem;
 
-pub use pty_manager::{build_russh_client_config, GlobalProxySettings, PtyEvent, PtyManager};
+pub use pty_manager::{build_russh_client_config, get_tokio_runtime, GlobalProxySettings, PtyEvent, PtyManager};
 pub use resolved_config::{resolve_effective_terminal_config, ResolvedTerminalConfig, TerminalDefaults};
 pub use serial_session::{list_available_serial_ports, SerialConfig, SerialPortDescription};
 pub use telnet_session::TelnetConfig;

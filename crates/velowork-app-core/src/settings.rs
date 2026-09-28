@@ -240,6 +240,16 @@ impl SettingsState {
         terminal_right_click_paste,
         bool
     );
+    setting_setter!(set_zmodem_auto_download, zmodem_auto_download, bool);
+    setting_setter!(set_zmodem_upload_overwrite, zmodem_upload_overwrite, bool);
+
+    pub fn set_zmodem_download_directory(&mut self, value: Option<String>, cx: &mut Context<Self>) {
+        if self.settings.zmodem_download_directory == value {
+            return;
+        }
+        self.settings.zmodem_download_directory = value;
+        self.save_and_notify(cx);
+    }
 
     /// Master switch for native desktop notifications (opt-in).
     pub fn set_notifications_enabled(&mut self, value: bool, cx: &mut Context<Self>) {

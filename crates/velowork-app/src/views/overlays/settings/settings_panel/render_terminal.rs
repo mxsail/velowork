@@ -4,6 +4,7 @@ use crate::ui::tokens::{
     ICON_STD, SELECT_WIDTH_MD, SPACE_2XS,
     SPACE_SM, SPACE_XL, SPACE_XS, ui_text_xs,
 };
+use velowork_ui::tokens::RADIUS_MD;
 use crate::workspace::settings::CursorShape;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
@@ -339,6 +340,33 @@ impl SettingsPanel {
                                 window,
                                 cx,
                             )),
+                    ),
+            )
+            // 5. ZMODEM 文件传输 (rz / sz)
+            .child(
+                div()
+                    .child(section_header(&i18n!(cx, "settings.terminal.section_zmodem"), &t, cx))
+                    .child(
+                        section_container(&t)
+                            .child(self.render_toggle_with_desc(
+                                "zmodem-auto-download",
+                                &i18n!(cx, "settings.terminal.zmodem_auto_download"),
+                                &i18n!(cx, "settings.terminal.zmodem_auto_download_desc"),
+                                s.zmodem_auto_download,
+                                false,
+                                |state, val, cx| state.set_zmodem_auto_download(val, cx),
+                                cx,
+                            ))
+                            .child(self.render_toggle_with_desc(
+                                "zmodem-upload-overwrite",
+                                &i18n!(cx, "settings.terminal.zmodem_upload_overwrite"),
+                                &i18n!(cx, "settings.terminal.zmodem_upload_overwrite_desc"),
+                                s.zmodem_upload_overwrite,
+                                false,
+                                |state, val, cx| state.set_zmodem_upload_overwrite(val, cx),
+                                cx,
+                            ))
+                            .child(self.render_zmodem_download_dir_row(s.zmodem_download_directory.as_deref(), &t, cx)),
                     ),
             )
     }
@@ -680,6 +708,94 @@ impl SettingsPanel {
                             state.set_terminal_background_image(Some(p), cx);
                         });
                     });
+            }
+        })
+        .detach();
+    }
+
+    fn render_zmodem_download_dir_row(
+        &mut self,
+        current_dir: Option<&str>,
+        t: &ThemeColors,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let p = SemanticPalette::from_context(cx);
+        let label = i18n!(cx, "settings.terminal.zmodem_download_dir");
+        let desc = i18n!(cx, "settings.terminal.zmodem_download_dir_desc");
+        let default_text = i18n!(cx, "settings.terminal.zmodem_default_downloads");
+        let browse_tooltip = i18n!(cx, "settings.terminal.zmodem_browse");
+
+        let display_path = current_dir.unwrap_or(&default_text);
+        let is_custom = current_dir.is_some();
+
+        let browse_fh = self.get_or_create_button_focus_handle("zmodem-dir-browse-btn", cx);
+        let clear_fh = self.get_or_create_button_focus_handle("zmodem-dir-clear-btn", cx);
+
+        settings_row_with_desc("zmodem-download-dir".to_string(), &label, &desc, t, cx, true).child(
+            h_flex()
+                .items_center()
+                .gap(SPACE_SM)
+                .child(
+                    div()
+                        .px(SPACE_SM)
+                        .py(SPACE_XS)
+                        .rounded(RADIUS_MD)
+                        .border_1()
+                        .border_color(p.border_subtle)
+                        .bg(p.surface_card)
+                        .max_w(px(280.0))
+                        .overflow_hidden()
+                        .child(
+                            div()
+                                .text_size(ui_text_xs(cx))
+                                .text_color(if is_custom { p.text_primary } else { p.text_muted })
+                                .truncate()
+                                .child(display_path.to_string()),
+                        ),
+                )
+                .child(
+                    Button::new("zmodem-dir-browse-btn", t)
+                        .icon_left(AppIcon::FolderOpen)
+                        .tooltip(browse_tooltip)
+                        .focus_handle(&browse_fh)
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.open_zmodem_dir_picker(window, cx);
+                        })),
+                )
+                .when(is_custom, |this| {
+                    this.child(
+                        Button::new("zmodem-dir-clear-btn", t)
+                            .icon_left(AppIcon::Close)
+                            .tooltip(i18n!(cx, "common.action.reset"))
+                            .focus_handle(&clear_fh)
+                            .on_click(cx.listener(|_, _, _, cx| {
+                                settings_entity(cx).update(cx, |state, cx| {
+                                    state.set_zmodem_download_directory(None, cx);
+                                });
+                            })),
+                    )
+                }),
+        )
+    }
+
+    fn open_zmodem_dir_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let prompt = i18n!(cx, "settings.terminal.zmodem_browse");
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some(prompt.into()),
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(selected))) = paths.await
+                && let Some(path) = selected.first().cloned()
+            {
+                let p = path.to_string_lossy().to_string();
+                let _ = this.update(cx, |_this, cx| {
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_zmodem_download_directory(Some(p), cx);
+                    });
+                });
             }
         })
         .detach();

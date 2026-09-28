@@ -270,9 +270,24 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
-/// Build the human "X MB/s" throughput string.
+/// Build the human-friendly throughput speed string with adaptive units.
 pub fn format_speed(bps: f64) -> String {
-    format!("{:.1} MB/s", bps / 1_048_576.0)
+    if bps <= 0.0 {
+        return "--".to_string();
+    }
+    const KB: f64 = 1024.0;
+    const MB: f64 = KB * 1024.0;
+    const GB: f64 = MB * 1024.0;
+
+    if bps >= GB {
+        format!("{:.2} GB/s", bps / GB)
+    } else if bps >= MB {
+        format!("{:.2} MB/s", bps / MB)
+    } else if bps >= KB {
+        format!("{:.1} KB/s", bps / KB)
+    } else {
+        format!("{:.0} B/s", bps)
+    }
 }
 
 /// Build the `transferred / total` label shown under the progress bar.

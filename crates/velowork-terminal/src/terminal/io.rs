@@ -9,9 +9,31 @@ use super::prompt_marks::advance_with_prompt_marks;
 impl Terminal {
     /// Process output from PTY
     pub fn process_output(&self, data: &[u8]) {
+        // If cancellation quiet window is active, swallow all in-flight binary bytes completely,
+        // but if remote sends ZCAN (5x ZDLE), remote has acknowledged cancel; end early.
+        if let Some(until) = *self.zmodem_swallow_until.lock() {
+            if Instant::now() < until {
+                if data.windows(5).any(|w| w == [crate::zmodem::ZDLE; 5]) {
+                    *self.zmodem_swallow_until.lock() = None;
+                    self.set_zmodem_active(false);
+                    self.zmodem_detector.lock().reset();
+                } else {
+                    return;
+                }
+            } else {
+                *self.zmodem_swallow_until.lock() = None;
+            }
+        }
+
         // If an active ZMODEM file transfer is running, route raw binary bytes directly to it
         if let Some(ref tx) = *self.zmodem_raw_sender.lock() {
-            let _ = tx.try_send(data.to_vec());
+            let _ = tx.send(data.to_vec());
+            return;
+        }
+
+        // If ZMODEM is active (e.g. user in file picker or preparing session), buffer incoming packets so none are lost
+        if self.is_zmodem_active() {
+            self.zmodem_early_buffer.lock().extend_from_slice(data);
             return;
         }
 
@@ -31,6 +53,72 @@ impl Terminal {
             "Terminal::process_output",
             format!("{} bytes", data.len()),
         );
+
+        let mut screen_data = data;
+        let is_suppressed = self.zmodem_suppress_until.lock().map_or(false, |until| {
+            Instant::now() < until
+        });
+
+        let (clean_bytes, frames) = crate::zmodem::strip_all_zmodem_frames(data);
+
+        let mut trigger_frame = None;
+        if !is_suppressed {
+            for frame in &frames {
+                match &frame.header_type {
+                    crate::zmodem::ZmodemHeaderType::Zrinit => {
+                        self.pending_zmodem_events.lock().push(super::ZmodemEvent::UploadRequested);
+                        trigger_frame = Some(frame.clone());
+                        break;
+                    }
+                    crate::zmodem::ZmodemHeaderType::Zfile | crate::zmodem::ZmodemHeaderType::Zrqinit => {
+                        self.pending_zmodem_events.lock().push(super::ZmodemEvent::DownloadRequested);
+                        trigger_frame = Some(frame.clone());
+                        break;
+                    }
+                    crate::zmodem::ZmodemHeaderType::Zcan => {
+                        self.set_zmodem_active(false);
+                        self.zmodem_detector.lock().reset();
+                        *self.zmodem_swallow_until.lock() = None;
+                    }
+                    _ => {}
+                }
+            }
+        } else {
+            for frame in &frames {
+                log::info!(
+                    "[ZMODEM-SUPPRESS] Stripped ZMODEM frame during cooldown: {:?}, start={}, len={}, terminal_id={}",
+                    frame.header_type,
+                    frame.original_start,
+                    frame.original_len,
+                    self.terminal_id
+                );
+            }
+        }
+
+        let spliced_buffer: Vec<u8>;
+        if let Some(trigger) = trigger_frame {
+            log::info!(
+                "[ZMODEM-DETECT] Trigger frame detected: {:?}, start={}, len={}, terminal_id={}",
+                trigger.header_type,
+                trigger.original_start,
+                trigger.original_len,
+                self.terminal_id
+            );
+            self.set_zmodem_active(true);
+            let tail = &data[trigger.original_start..];
+            if !tail.is_empty() {
+                self.zmodem_early_buffer.lock().extend_from_slice(tail);
+            }
+            screen_data = &data[..trigger.original_start];
+        } else if !frames.is_empty() {
+            spliced_buffer = clean_bytes;
+            screen_data = &spliced_buffer;
+        }
+
+        if screen_data.is_empty() {
+            return;
+        }
+
         let mut term = self.term.lock();
         let mut processor = self.processor.lock();
         let mut sidecar = self.osc_sidecar.lock();
@@ -41,19 +129,7 @@ impl Terminal {
 
         // OSC 7 / OSC 9 / XTVERSION observer runs on the full chunk in one
         // pass — it never needs cursor-accurate positioning.
-        sidecar.advance(data);
-
-        if let Some(ztype) = self.zmodem_detector.lock().inspect(data) {
-            match ztype {
-                crate::zmodem::ZmodemHeaderType::Zrinit => {
-                    self.pending_zmodem_events.lock().push(super::ZmodemEvent::UploadRequested);
-                }
-                crate::zmodem::ZmodemHeaderType::Zfile | crate::zmodem::ZmodemHeaderType::Zrqinit => {
-                    self.pending_zmodem_events.lock().push(super::ZmodemEvent::DownloadRequested);
-                }
-                _ => {}
-            }
-        }
+        sidecar.advance(screen_data);
 
         // OSC 133 requires the main processor and the prompt sidecar to
         // advance in lockstep so we can snapshot the cursor at the exact
@@ -69,7 +145,7 @@ impl Terminal {
             &mut prompt_tracker,
             &mut block_tracker,
             cwd,
-            data,
+            screen_data,
         );
         if command_finished {
             self.command_finished_pending.store(true, Ordering::Relaxed);
@@ -94,6 +170,48 @@ impl Terminal {
         self.dirty.store(true, Ordering::Relaxed);
         self.content_generation.fetch_add(1, Ordering::Relaxed);
         *self.last_output_time.lock() = Instant::now();
+    }
+
+    /// Write directly to the terminal screen grid (bypassing any ZMODEM session interception).
+    /// Used for local terminal feedback like inline ZMODEM progress bars, status messages, etc.
+    pub fn write_to_screen(&self, data: &[u8]) {
+        if data.is_empty() {
+            return;
+        }
+        let mut term = self.term.lock();
+        let mut processor = self.processor.lock();
+        let mut sidecar = self.osc_sidecar.lock();
+        let mut prompt_sidecar = self.prompt_sidecar.lock();
+        let mut prompt_tracker = self.prompt_tracker.lock();
+        let mut block_tracker = self.block_tracker.lock();
+        let cwd = self.reported_cwd.lock().clone();
+
+        let history_before = term.grid().history_size();
+        sidecar.advance(data);
+        let _ = advance_with_prompt_marks(
+            &mut *term,
+            &mut processor,
+            &mut prompt_sidecar,
+            &mut prompt_tracker,
+            &mut block_tracker,
+            cwd,
+            data,
+        );
+        let history_after = term.grid().history_size();
+        let delta = history_after.saturating_sub(history_before);
+        prompt_tracker.on_history_changed(
+            history_before,
+            history_after,
+            term.grid().topmost_line().0,
+        );
+        block_tracker.on_history_changed(delta, term.grid().topmost_line().0);
+        *self.prompt_jump_index.lock() = None;
+
+        self.dirty.store(true, Ordering::Relaxed);
+        self.content_generation.fetch_add(1, Ordering::Relaxed);
+        *self.last_output_time.lock() = Instant::now();
+        drop(term);
+        self.scroll_to_bottom();
     }
 
     /// Enqueue output data for deferred processing.

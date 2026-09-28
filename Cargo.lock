@@ -9174,6 +9174,7 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "async-trait",
+ "dirs 5.0.1",
  "gpui",
  "image",
  "log",

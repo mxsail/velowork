@@ -240,6 +240,7 @@ struct PtyHandle {
     ssh_session_id: Option<String>,
     ssh_channel_id: Option<russh::ChannelId>,
     ssh_resize_tx: Option<tokio::sync::mpsc::Sender<(u16, u16)>>,
+    pub(crate) ssh_signal_tx: Option<tokio::sync::mpsc::Sender<russh::Sig>>,
     tokio_input_tx: Option<tokio::sync::mpsc::Sender<Vec<u8>>>,
     tokio_resize_tx: Option<tokio::sync::mpsc::Sender<(u16, u16)>>,
     serial_config: Option<crate::serial_session::SerialConfig>,
@@ -276,6 +277,7 @@ impl Drop for PtyHandle {
         drop(self.tokio_input_tx.take());
         drop(self.tokio_resize_tx.take());
         drop(self.ssh_resize_tx.take());
+        drop(self.ssh_signal_tx.take());
         if let Some(session) = self.ssh_session.take() {
             get_tokio_runtime().spawn(async move {
                 let _ = session.disconnect(
@@ -519,6 +521,7 @@ impl PtyManager {
             ssh_session_id: None,
             ssh_channel_id: None,
             ssh_resize_tx: None,
+            ssh_signal_tx: None,
             serial_config: Some(config),
             telnet_config: None,
             exit_signal: Some(exit_signal),
@@ -563,6 +566,7 @@ impl PtyManager {
             ssh_session_id: None,
             ssh_channel_id: None,
             ssh_resize_tx: None,
+            ssh_signal_tx: None,
             serial_config: None,
             telnet_config: Some(config),
             exit_signal: Some(exit_signal),
@@ -711,6 +715,7 @@ impl PtyManager {
                 ssh_session_id: session_id,
                 ssh_channel_id: None,
                 ssh_resize_tx: None,
+                ssh_signal_tx: None,
                 serial_config: Some(serial_config),
                 telnet_config: None,
                 exit_signal: Some(exit_signal),
@@ -825,6 +830,7 @@ impl PtyManager {
                 ssh_session_id: session_id,
                 ssh_channel_id: None,
                 ssh_resize_tx: None,
+                ssh_signal_tx: None,
                 serial_config: None,
                 telnet_config: Some(telnet_config),
                 exit_signal: Some(exit_signal),
@@ -928,6 +934,7 @@ impl PtyManager {
                 ssh_session_id: None,
                 ssh_channel_id: None,
                 ssh_resize_tx: None,
+                ssh_signal_tx: None,
                 serial_config: None,
                 telnet_config: None,
                 exit_signal: None,
@@ -1193,6 +1200,7 @@ impl PtyManager {
                 ssh_session_id: local_session_id,
                 ssh_channel_id: None,
                 ssh_resize_tx: None,
+                ssh_signal_tx: None,
                 serial_config: None,
                 telnet_config: None,
                 exit_signal: None,
@@ -1519,6 +1527,7 @@ impl PtyManager {
     /// Kill a terminal
     /// Also kills the underlying tmux/screen session if applicable
     pub fn kill(&self, terminal_id: &str) {
+        log::info!("[pty:kill] kill called | terminal_id={}", terminal_id);
         // Remove handle from map immediately (fast, non-blocking).
         // `handle` may be `None` if `cleanup_exited` already took it on PTY EOF
         // (the double-fire). In that case the enqueued job does ONLY the session
@@ -1586,6 +1595,7 @@ impl PtyManager {
         drop(handle.tokio_input_tx.take());
         drop(handle.tokio_resize_tx.take());
         drop(handle.ssh_resize_tx.take());
+        drop(handle.ssh_signal_tx.take());
 
         // 4. Disconnect SSH session if present
         if let Some(session) = handle.ssh_session.take() {
@@ -1966,6 +1976,7 @@ impl PtyManager {
     /// Clean up a PtyHandle after the process exited naturally (reader got EOF).
     /// Removes the handle from the internal map and joins threads in the background.
     pub fn cleanup_exited(&self, terminal_id: &str) {
+        log::info!("[pty:cleanup] cleanup_exited called | terminal_id={}", terminal_id);
         let handle = self.terminals.lock().remove(terminal_id);
         if let Some(handle) = handle {
             // Process already EOF'd — only reap the reader/writer threads. The later
@@ -1977,6 +1988,45 @@ impl PtyManager {
             });
         }
     }
+
+    /// Send an out-of-band or kernel signal to a terminal process/session
+    pub fn send_signal(&self, terminal_id: &str, signal: crate::terminal::TerminalSignal) {
+        log::info!("[pty:signal] send_signal called: {:?} | terminal_id={}", signal, terminal_id);
+        let (ssh_signal_tx, child_pid) = {
+            let map = self.terminals.lock();
+            if let Some(handle) = map.get(terminal_id) {
+                let tx = handle.ssh_signal_tx.clone();
+                let pid = handle.child.as_ref().and_then(|c| c.process_id());
+                (tx, pid)
+            } else {
+                (None, None)
+            }
+        };
+
+        if let Some(tx) = ssh_signal_tx {
+            let russh_sig = match signal {
+                crate::terminal::TerminalSignal::Int => russh::Sig::INT,
+                crate::terminal::TerminalSignal::Term => russh::Sig::TERM,
+                crate::terminal::TerminalSignal::Kill => russh::Sig::KILL,
+            };
+            let _ = tx.try_send(russh_sig);
+        } else if let Some(pid) = child_pid {
+            #[cfg(unix)]
+            {
+                let sig = match signal {
+                    crate::terminal::TerminalSignal::Int => libc::SIGINT,
+                    crate::terminal::TerminalSignal::Term => libc::SIGTERM,
+                    crate::terminal::TerminalSignal::Kill => libc::SIGKILL,
+                };
+                log::info!("[pty:signal] Sending signal {} to process group -{} | terminal_id={}", sig, pid, terminal_id);
+                unsafe {
+                    if libc::kill(-(pid as i32), sig) != 0 {
+                        libc::kill(pid as i32, sig);
+                    }
+                }
+            }
+        }
+    }
 }
 
 impl crate::terminal::TerminalTransport for PtyManager {
@@ -1986,6 +2036,10 @@ impl crate::terminal::TerminalTransport for PtyManager {
 
     fn resize(&self, terminal_id: &str, cols: u16, rows: u16) {
         self.resize(terminal_id, cols, rows)
+    }
+
+    fn send_signal(&self, terminal_id: &str, signal: crate::terminal::TerminalSignal) {
+        self.send_signal(terminal_id, signal);
     }
 
     fn uses_mouse_backend(&self) -> bool {
@@ -3987,6 +4041,7 @@ async fn run_ssh_connection(
     }
 
     let (resize_tx, mut resize_rx) = tokio::sync::mpsc::channel::<(u16, u16)>(10);
+    let (signal_tx, mut signal_rx) = tokio::sync::mpsc::channel::<russh::Sig>(10);
 
     let handle = session.clone();
     let channel_id = channel.id();
@@ -3998,6 +4053,7 @@ async fn run_ssh_connection(
         }
         t_handle.ssh_channel_id = Some(channel_id);
         t_handle.ssh_resize_tx = Some(resize_tx.clone());
+        t_handle.ssh_signal_tx = Some(signal_tx.clone());
         t_handle.last_size
     } else {
         None
@@ -4060,8 +4116,24 @@ async fn run_ssh_connection(
                         }
                         Some(russh::ChannelMsg::WindowAdjusted { .. }) => {}
                         Some(russh::ChannelMsg::Success) => {}
-                        Some(russh::ChannelMsg::Failure) => {}
-                        Some(russh::ChannelMsg::Eof) | Some(russh::ChannelMsg::Close) | None => {
+                        Some(russh::ChannelMsg::Eof) => {
+                            log::info!("[pty:ssh] Channel EOF received from remote | terminal_id={}", terminal_id_c);
+                            let _ = event_tx_c.send(PtyEvent::Exit {
+                                terminal_id: terminal_id_c.clone(),
+                                exit_code: Some(0),
+                            }).await;
+                            break;
+                        }
+                        Some(russh::ChannelMsg::Close) => {
+                            log::info!("[pty:ssh] Channel Close received from remote | terminal_id={}", terminal_id_c);
+                            let _ = event_tx_c.send(PtyEvent::Exit {
+                                terminal_id: terminal_id_c.clone(),
+                                exit_code: Some(0),
+                            }).await;
+                            break;
+                        }
+                        None => {
+                            log::warn!("[pty:ssh] Channel wait stream ended (None) | terminal_id={}", terminal_id_c);
                             let _ = event_tx_c.send(PtyEvent::Exit {
                                 terminal_id: terminal_id_c.clone(),
                                 exit_code: Some(0),
@@ -4086,6 +4158,12 @@ async fn run_ssh_connection(
                 resize_opt = resize_rx.recv() => {
                     if let Some((cols, rows)) = resize_opt {
                         let _ = channel.window_change(cols as u32, rows as u32, 0, 0).await;
+                    }
+                }
+                signal_opt = signal_rx.recv() => {
+                    if let Some(sig) = signal_opt {
+                        log::info!("[pty:ssh] Sending out-of-band signal {:?} to remote channel | terminal_id={}", sig, terminal_id_c);
+                        let _ = channel.signal(sig).await;
                     }
                 }
             }

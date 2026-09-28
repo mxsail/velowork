@@ -948,6 +948,17 @@ pub struct AppSettings {
     #[serde(default)]
     pub terminal_right_click_paste: bool,
 
+    // ZMODEM (rz/sz) settings
+    /// Default download directory for ZMODEM (sz). None means system Downloads directory.
+    #[serde(default)]
+    pub zmodem_download_directory: Option<String>,
+    /// Whether to automatically save downloads to the default download directory (default: true).
+    #[serde(default = "default_true")]
+    pub zmodem_auto_download: bool,
+    /// Whether to automatically overwrite existing files on upload (default: false).
+    #[serde(default)]
+    pub zmodem_upload_overwrite: bool,
+
     // Shell settings
     /// Default shell type for new terminals
     #[serde(default)]
@@ -1441,6 +1452,9 @@ impl Default for AppSettings {
             word_selection_delimiters: default_word_selection_delimiters(),
             terminal_copy_on_select: false,
             terminal_right_click_paste: false,
+            zmodem_download_directory: None,
+            zmodem_auto_download: true,
+            zmodem_upload_overwrite: false,
             default_shell: ShellType::default(),
             show_shell_selector: false,
             session_backend: SessionBackend::default(),
