@@ -1,4 +1,4 @@
-#![recursion_limit = "512"]
+#![recursion_limit = "1024"]
 #![cfg_attr(not(test), warn(clippy::unwrap_used, clippy::expect_used))]
 
 //! Velowork terminal views crate.

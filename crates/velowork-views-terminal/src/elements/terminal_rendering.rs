@@ -1,5 +1,29 @@
 use alacritty_terminal::vte::ansi::{Color, NamedColor};
 use gpui::*;
+use unicode_bidi::{bidi_class, BidiClass};
+
+/// Check if a character has Right-to-Left (RTL) or directional override properties.
+///
+/// In terminal grid rendering, RTL characters must be rendered in isolated, single-cell
+/// runs. If batched with adjacent LTR or neutral characters (e.g. single quotes, dollar signs),
+/// HarfBuzz triggers bidirectional reordering and GPUI's force-width advance breaks,
+/// causing the remainder of the line to shift backwards and overlap with earlier characters.
+#[inline]
+pub fn is_rtl_or_bidi(c: char) -> bool {
+    matches!(
+        bidi_class(c),
+        BidiClass::R
+            | BidiClass::AL
+            | BidiClass::AN
+            | BidiClass::RLE
+            | BidiClass::RLO
+            | BidiClass::RLI
+            | BidiClass::LRO
+            | BidiClass::PDF
+            | BidiClass::FSI
+            | BidiClass::PDI
+    )
+}
 
 /// A batched text run that combines multiple adjacent cells with the same style (like Zed)
 #[derive(Debug)]
@@ -10,6 +34,7 @@ pub(crate) struct BatchedTextRun {
     pub cell_count: usize,
     pub style: TextRun,
     pub is_wide: bool,
+    pub is_isolated: bool,
 }
 
 impl BatchedTextRun {
@@ -23,11 +48,12 @@ impl BatchedTextRun {
             cell_count: 1,
             style,
             is_wide: false,
+            is_isolated: false,
         }
     }
 
     pub fn new_wide(start_line: i32, start_col: i32, c: char, style: TextRun) -> Self {
-        let mut text = String::with_capacity(4);
+        let mut text = String::with_capacity(8);
         text.push(c);
         BatchedTextRun {
             start_line,
@@ -36,11 +62,27 @@ impl BatchedTextRun {
             cell_count: 2,
             style,
             is_wide: true,
+            is_isolated: true,
+        }
+    }
+
+    pub fn new_isolated(start_line: i32, start_col: i32, c: char, style: TextRun) -> Self {
+        let mut text = String::with_capacity(8);
+        text.push(c);
+        BatchedTextRun {
+            start_line,
+            start_col,
+            text,
+            cell_count: 1,
+            style,
+            is_wide: false,
+            is_isolated: true,
         }
     }
 
     pub fn can_append(&self, other_style: &TextRun, line: i32, col: i32) -> bool {
         !self.is_wide
+            && !self.is_isolated
             && self.start_line == line
             && self.start_col + self.cell_count as i32 == col
             && self.style.font == other_style.font
@@ -54,6 +96,13 @@ impl BatchedTextRun {
         self.text.push(c);
         self.cell_count += 1;
         self.style.len += c.len_utf8();
+    }
+
+    pub fn append_zero_width_chars(&mut self, chars: &[char]) {
+        for &c in chars {
+            self.text.push(c);
+            self.style.len += c.len_utf8();
+        }
     }
 
     pub fn paint(

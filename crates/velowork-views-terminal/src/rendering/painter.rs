@@ -10,7 +10,7 @@ use velowork_workspace::settings::CursorShape;
 use super::geometry::TerminalRenderGeometry;
 use super::model::TerminalRenderModel;
 use super::options::TerminalPaintOptions;
-use crate::elements::terminal_rendering::{is_default_bg, BatchedTextRun, LayoutRect};
+use crate::elements::terminal_rendering::{is_default_bg, is_rtl_or_bidi, BatchedTextRun, LayoutRect};
 
 /// Shared Terminal Scene Painter responsible for rendering terminal cells, backgrounds, and cursor.
 pub struct TerminalPainter<'a> {
@@ -217,16 +217,36 @@ impl<'a> TerminalPainter<'a> {
                     },
                 };
 
+                let zero_width_chars = cell.zerowidth();
+
                 if cell.flags.contains(Flags::WIDE_CHAR) {
                     if let Some(prev) = current_batch.take() {
                         batched_runs.push(prev);
                     }
-                    batched_runs.push(BatchedTextRun::new_wide(
+                    let mut run = BatchedTextRun::new_wide(
                         visual_line,
                         col_i32,
                         cell.c,
                         text_style,
-                    ));
+                    );
+                    if let Some(chars) = zero_width_chars {
+                        run.append_zero_width_chars(chars);
+                    }
+                    batched_runs.push(run);
+                } else if is_rtl_or_bidi(cell.c) {
+                    if let Some(prev) = current_batch.take() {
+                        batched_runs.push(prev);
+                    }
+                    let mut run = BatchedTextRun::new_isolated(
+                        visual_line,
+                        col_i32,
+                        cell.c,
+                        text_style,
+                    );
+                    if let Some(chars) = zero_width_chars {
+                        run.append_zero_width_chars(chars);
+                    }
+                    batched_runs.push(run);
                 } else {
                     let can_append = current_batch.as_ref().is_some_and(|batch| {
                         batch.can_append(&text_style, visual_line, col_i32)
@@ -234,17 +254,24 @@ impl<'a> TerminalPainter<'a> {
                     if can_append {
                         if let Some(batch) = current_batch.as_mut() {
                             batch.append_char(cell.c);
+                            if let Some(chars) = zero_width_chars {
+                                batch.append_zero_width_chars(chars);
+                            }
                         }
                     } else {
                         if let Some(prev) = current_batch.take() {
                             batched_runs.push(prev);
                         }
-                        current_batch = Some(BatchedTextRun::new(
+                        let mut new_batch = BatchedTextRun::new(
                             visual_line,
                             col_i32,
                             cell.c,
                             text_style,
-                        ));
+                        );
+                        if let Some(chars) = zero_width_chars {
+                            new_batch.append_zero_width_chars(chars);
+                        }
+                        current_batch = Some(new_batch);
                     }
                 }
             }
