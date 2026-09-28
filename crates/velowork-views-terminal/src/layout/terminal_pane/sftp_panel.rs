@@ -1702,25 +1702,48 @@ impl BottomPanel {
     /// Perform the actual removal of `path` (already resolved, not an index, so
     /// it stays valid even if the listing changes while the confirm dialog is
     /// open). `is_dir` selects recursive-dir vs single-file removal.
-    fn delete_path(&mut self, path: String, is_dir: bool, cx: &mut Context<Self>) {
+    fn delete_path(&mut self, path: String, is_dir: bool, name: String, cx: &mut Context<Self>) {
         let sftp = match &self.connection_state {
             SftpConnectionState::Connected { conn, .. } => conn.sftp.clone(),
             _ => return,
         };
         cx.spawn(async move |this: WeakEntity<BottomPanel>, cx| {
-            let res = run_in_tokio(async move {
-                if is_dir {
-                    sftp.remove_dir(path).await
-                } else {
-                    sftp.remove_file(path).await
+            let res = run_in_tokio({
+                let path = path.clone();
+                async move {
+                    if is_dir {
+                        sftp.remove_dir(path).await
+                    } else {
+                        sftp.remove_file(path).await
+                    }
                 }
             })
             .await;
             let _ = this.update(cx, |this, cx| {
-                if res.is_ok() {
-                    this.modal = None;
-                    this.context_menu = None;
-                    this.refresh(cx);
+                match res {
+                    Ok(_) => {
+                        this.modal = None;
+                        this.context_menu = None;
+                        this.refresh(cx);
+                    }
+                    Err(e) => {
+                        log::warn!(
+                            "[SFTP] Failed to remove path '{}' (name: '{}'): {:?}",
+                            path,
+                            name,
+                            e
+                        );
+                        this.modal = None;
+                        this.context_menu = None;
+                        let msg = if path.contains('\u{FFFD}') || name.contains('\u{FFFD}') {
+                            i18n!(cx, "sftp.delete_failed_invalid_utf8")
+                        } else {
+                            i18n!(cx, "sftp.delete_failed")
+                                .replace("{name}", &name)
+                                .replace("{error}", &e.to_string())
+                        };
+                        velowork_workspace::toast::ToastManager::error(msg, cx);
+                    }
                 }
             });
         })
@@ -1768,10 +1791,11 @@ impl BottomPanel {
 
         cx.subscribe(&dialog, {
             let path = path.clone();
+            let name = name.clone();
             move |this, _dialog, event, cx| {
                 if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
-                    let (path, is_dir) = (path.clone(), is_dir);
-                    this.delete_path(path, is_dir, cx);
+                    let (path, is_dir, name) = (path.clone(), is_dir, name.clone());
+                    this.delete_path(path, is_dir, name, cx);
                 }
                 this.confirm_dialog = None;
                 cx.notify();

@@ -1282,6 +1282,8 @@
     "delete_confirm_title": "删除文件",
     "delete_confirm": "确定要删除「{name}」吗？此操作不可撤销。",
     "delete_confirm_dir": "确定要删除目录「{name}」及其全部内容吗？此操作不可撤销。",
+    "delete_failed": "删除「{name}」失败：{error}",
+    "delete_failed_invalid_utf8": "删除失败：文件名包含非 UTF-8 编码字节，SFTP 无法匹配原始文件，请在终端中使用 rm 删除",
     "upload_confirm_title": "上传更改",
     "upload_confirm": "本地临时副本「{name}」已修改，是否将其上传回远程服务器？\n远程路径：{path}",
     "menu": {

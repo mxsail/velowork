@@ -1282,6 +1282,8 @@
     "delete_confirm_title": "Delete File",
     "delete_confirm": "Are you sure you want to delete \"{name}\"? This cannot be undone.",
     "delete_confirm_dir": "Are you sure you want to delete the directory \"{name}\" and all its contents? This cannot be undone.",
+    "delete_failed": "Failed to delete \"{name}\": {error}",
+    "delete_failed_invalid_utf8": "Delete failed: filename contains invalid UTF-8 bytes that cannot be matched by SFTP. Please delete it via terminal rm.",
     "upload_confirm_title": "Upload Changes",
     "upload_confirm": "The local copy \"{name}\" has been modified. Upload it back to the remote server?\nRemote path: {path}",
     "menu": {
