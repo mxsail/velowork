@@ -6,6 +6,7 @@ use velowork_ui::h_flex;
 use velowork_ui::input::Input;
 use velowork_ui::theme::{theme, surface_bg_t, with_alpha};
 use velowork_ui::tokens::{ui_text, ui_text_md, SPACE_SM, SPACE_MD, SPACE_LG, SPACE_XS, RADIUS_STD};
+use velowork_ui::tooltip::Tooltip;
 use velowork_ui::{
     ControlAppearance, ControlSize, ControlVariant, HoverBehavior, SemanticPalette,
     StatefulElementBehaviorExt,
@@ -142,6 +143,7 @@ pub fn parent_row(
                 )
                 .child(
                     div()
+                        .truncate()
                         .text_size(file_text_size(cx))
                         .text_color(p.text_secondary)
                         .child("../"),
@@ -215,6 +217,7 @@ pub fn file_row(
             })
         })
         .child(render_name_cell(
+            row_idx,
             display,
             cols.name,
             inline_rename,
@@ -226,7 +229,7 @@ pub fn file_row(
         .child(
             div()
                 .w(px(cols.perm))
-                .overflow_hidden()
+                .truncate()
                 .text_size(file_text_size(cx))
                 .text_color(p.text_muted)
                 .child(display.perm_text.clone()),
@@ -234,17 +237,22 @@ pub fn file_row(
         .child(col_spacer())
         .child(
             div()
+                .id(ElementId::NamedInteger("sftp-row-owner".into(), row_idx as u64))
                 .w(px(cols.owner))
-                .overflow_hidden()
+                .truncate()
                 .text_size(file_text_size(cx))
                 .text_color(p.text_muted)
+                .tooltip({
+                    let tip = display.owner_text.to_string();
+                    move |_, cx| cx.new(|_| Tooltip::new(tip.clone())).into()
+                })
                 .child(display.owner_text.clone()),
         )
         .child(col_spacer())
         .child(
             div()
                 .w(px(cols.size))
-                .overflow_hidden()
+                .truncate()
                 .text_right()
                 .text_size(file_text_size(cx))
                 .text_color(p.text_muted)
@@ -255,7 +263,7 @@ pub fn file_row(
             div()
                 .flex_1()
                 .min_w(px(cols.mtime))
-                .overflow_hidden()
+                .truncate()
                 .text_size(file_text_size(cx))
                 .text_color(p.text_muted)
                 .child(display.date_text.clone()),
@@ -264,6 +272,7 @@ pub fn file_row(
 }
 
 fn render_name_cell(
+    row_idx: usize,
     display: &DisplayFile,
     name_w: f32,
     inline_rename: Option<&InlineRenameState>,
@@ -336,8 +345,15 @@ fn render_name_cell(
                 )
             .child(
                 div()
+                    .id(ElementId::NamedInteger("sftp-row-name".into(), row_idx as u64))
+                    .flex_1()
+                    .truncate()
                     .text_size(file_text_size(cx))
                     .text_color(p.text_primary)
+                    .tooltip({
+                        let tip = display.file.name.clone();
+                        move |_, cx| cx.new(|_| Tooltip::new(tip.clone())).into()
+                    })
                     .child(display.file.name.clone()),
             )
             .into_any_element()

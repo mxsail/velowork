@@ -4851,7 +4851,20 @@ impl Render for BottomPanel {
                 el.child(sftp_window_overlay(self.render_modal(&m, cx), window))
             })
             .when_some(self.confirm_dialog.clone(), |el, dialog| {
-                el.child(sftp_window_overlay(dialog, window))
+                let backdrop = modal_backdrop("sftp-confirm-backdrop", &t, cx)
+                    .items_center()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _, window, cx| {
+                            if let Some(d) = this.confirm_dialog.as_ref() {
+                                d.update(cx, |d, cx| {
+                                    d.cancel(window, cx);
+                                });
+                            }
+                        }),
+                    )
+                    .child(dialog);
+                el.child(sftp_window_overlay(backdrop, window))
             })
             .into_any_element()
     }

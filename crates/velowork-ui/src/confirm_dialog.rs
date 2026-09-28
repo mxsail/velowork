@@ -304,14 +304,14 @@ impl ConfirmDialog {
     }
 
     /// Dismiss without touching the registry immediately.
-    fn dismiss(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
+    pub fn dismiss(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
         if let Some(w) = window {
             self.restore_previous_focus(Some(w), cx);
         }
         self.finish_close(ConfirmDialogEvent::Cancelled, None, cx);
     }
 
-    fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.finish_close(
             ConfirmDialogEvent::Confirmed {
                 checkbox_checked: self.checkbox_checked,
@@ -321,7 +321,7 @@ impl ConfirmDialog {
         );
     }
 
-    fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.dismiss(Some(window), cx);
     }
 }
