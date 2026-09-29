@@ -2799,6 +2799,24 @@ pub fn detect_system_proxy() -> Option<(velowork_state::ProxyType, String, u16, 
     None
 }
 
+/// Apply network performance options (TCP_NODELAY and TCP KeepAlive) to a stream.
+/// Disables Nagle's algorithm to eliminate 40-200ms interactive buffering latency on keystrokes.
+pub fn apply_tcp_socket_options(stream: &tokio::net::TcpStream, nodelay: bool) {
+    if let Err(e) = stream.set_nodelay(nodelay) {
+        log::warn!("[pty:network] set_nodelay({}) failed: {:#}", nodelay, e);
+    } else {
+        log::debug!("[pty:network] set_nodelay({}) applied to socket", nodelay);
+    }
+
+    let sock = socket2::SockRef::from(stream);
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(std::time::Duration::from_secs(30))
+        .with_interval(std::time::Duration::from_secs(10));
+    if let Err(e) = sock.set_tcp_keepalive(&keepalive) {
+        log::debug!("[pty:network] set_tcp_keepalive failed (non-fatal): {:#}", e);
+    }
+}
+
 pub async fn connect_socks5_proxy_stream(
     ph: &str,
     pp: u16,
@@ -2806,13 +2824,16 @@ pub async fn connect_socks5_proxy_stream(
     pass: Option<&str>,
     host: &str,
     port: u16,
+    nodelay: bool,
 ) -> Result<Box<dyn AsyncReadWrite>, anyhow::Error> {
     let socks_conn = if let (Some(u), Some(p)) = (user, pass) {
         tokio_socks::tcp::Socks5Stream::connect_with_password((ph, pp), (host, port), u, p).await?
     } else {
         tokio_socks::tcp::Socks5Stream::connect((ph, pp), (host, port)).await?
     };
-    Ok(Box::new(socks_conn.into_inner()))
+    let stream = socks_conn.into_inner();
+    apply_tcp_socket_options(&stream, nodelay);
+    Ok(Box::new(stream))
 }
 
 pub async fn connect_http_proxy_stream(
@@ -2822,8 +2843,10 @@ pub async fn connect_http_proxy_stream(
     pass: Option<&str>,
     host: &str,
     port: u16,
+    nodelay: bool,
 ) -> Result<Box<dyn AsyncReadWrite>, anyhow::Error> {
     let mut stream = tokio::net::TcpStream::connect((ph, pp)).await?;
+    apply_tcp_socket_options(&stream, nodelay);
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let req_hdr = if let (Some(u), Some(p)) = (user, pass) {
@@ -2860,6 +2883,7 @@ pub async fn connect_tcp_or_proxy_stream(
 ) -> Result<Box<dyn AsyncReadWrite>, anyhow::Error> {
     use velowork_state::ProxyType;
     let proxy_type = session_config.map(|s| s.proxy_type).unwrap_or(ProxyType::None);
+    let tcp_nodelay = session_config.map(|s| s.tcp_nodelay).unwrap_or(true);
 
     match proxy_type {
         ProxyType::Socks5 => {
@@ -2872,7 +2896,7 @@ pub async fn connect_tcp_or_proxy_stream(
                 .unwrap_or(1080);
             let user = session_config.and_then(|s| s.proxy_username.as_deref());
             let pass = session_config.and_then(|s| s.proxy_password.as_deref());
-            connect_socks5_proxy_stream(ph, pp, user, pass, host, port).await
+            connect_socks5_proxy_stream(ph, pp, user, pass, host, port, tcp_nodelay).await
         }
         ProxyType::Http => {
             let ph = session_config
@@ -2884,27 +2908,29 @@ pub async fn connect_tcp_or_proxy_stream(
                 .unwrap_or(8080);
             let user = session_config.and_then(|s| s.proxy_username.as_deref());
             let pass = session_config.and_then(|s| s.proxy_password.as_deref());
-            connect_http_proxy_stream(ph, pp, user, pass, host, port).await
+            connect_http_proxy_stream(ph, pp, user, pass, host, port, tcp_nodelay).await
         }
         // Jump is handled by the caller via connect_jump_stream
         _ => {
             let global = GLOBAL_PROXY.read().clone();
             if global.mode.eq_ignore_ascii_case("http") && !global.host.trim().is_empty() {
                 log::debug!("[pty:network] Cascading connection to global HTTP proxy {}:{}", global.host, global.port);
-                connect_http_proxy_stream(&global.host, global.port, None, None, host, port).await
+                connect_http_proxy_stream(&global.host, global.port, None, None, host, port, tcp_nodelay).await
             } else if global.mode.eq_ignore_ascii_case("system") {
                 if let Some((pt, ph, pp, user, pass)) = detect_system_proxy() {
                     log::debug!("[pty:network] Cascading connection to system proxy {:?} {}:{}", pt, ph, pp);
                     match pt {
-                        ProxyType::Socks5 => connect_socks5_proxy_stream(&ph, pp, user.as_deref(), pass.as_deref(), host, port).await,
-                        _ => connect_http_proxy_stream(&ph, pp, user.as_deref(), pass.as_deref(), host, port).await,
+                        ProxyType::Socks5 => connect_socks5_proxy_stream(&ph, pp, user.as_deref(), pass.as_deref(), host, port, tcp_nodelay).await,
+                        _ => connect_http_proxy_stream(&ph, pp, user.as_deref(), pass.as_deref(), host, port, tcp_nodelay).await,
                     }
                 } else {
                     let stream = tokio::net::TcpStream::connect((host, port)).await?;
+                    apply_tcp_socket_options(&stream, tcp_nodelay);
                     Ok(Box::new(stream))
                 }
             } else {
                 let stream = tokio::net::TcpStream::connect((host, port)).await?;
+                apply_tcp_socket_options(&stream, tcp_nodelay);
                 Ok(Box::new(stream))
             }
         }
@@ -3255,7 +3281,10 @@ async fn run_ssh_connection(
         .name("ssh-input-bridge".into())
         .stack_size(128 * 1024)
         .spawn(move || {
-            while let Ok(bytes) = input_rx.recv() {
+            while let Ok(mut bytes) = input_rx.recv() {
+                while let Ok(more) = input_rx.try_recv() {
+                    bytes.extend(more);
+                }
                 if tokio_input_tx.blocking_send(bytes).is_err() {
                     break;
                 }
@@ -4144,7 +4173,10 @@ async fn run_ssh_connection(
                     }
                 }
                 bytes_opt = tokio_input_rx.recv() => {
-                    if let Some(bytes) = bytes_opt {
+                    if let Some(mut bytes) = bytes_opt {
+                        while let Ok(more) = tokio_input_rx.try_recv() {
+                            bytes.extend(more);
+                        }
                         let target_bytes = transcode_from_utf8(&bytes, &charset_c);
                         if let Err(e) = channel.data(&target_bytes[..]).await {
                             log::warn!("[pty:ssh] channel.data failed: {:?} | terminal_id={}", e, terminal_id_c);

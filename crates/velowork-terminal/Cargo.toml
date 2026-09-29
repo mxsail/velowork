@@ -22,6 +22,7 @@ portable-pty = "0.9"
 async-channel = "2.3"
 parking_lot = "0.12"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "sync", "time", "io-util"] }
+socket2 = "0.6"
 russh = "0.62.2"
 tokio-socks = "0.5"
 ssh-key = { version = "0.7.0-rc.11", features = ["ed25519", "p256", "p384", "p521", "encryption", "ppk", "sha1"] }
@@ -45,6 +46,7 @@ regex = "1.10"
 # Decoding base64 payloads in the OSC 99 (kitty) notification protocol.
 base64 = "0.22"
 encoding_rs = "0.8"
+unicode-width = "0.2"
 
 # macOS process introspection via libproc syscalls, replacing fork+exec of
 # `pgrep` / `lsof` (slow on macOS). Linux uses /proc directly instead.

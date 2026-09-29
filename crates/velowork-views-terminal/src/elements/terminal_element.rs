@@ -496,8 +496,14 @@ impl Element for TerminalElement {
 
         // Calculate cursor position for IME candidate window placement
         let cursor_bounds = self.terminal.with_content(|term| {
-            let cursor_point = term.grid().cursor.point;
             let display_offset = term.grid().display_offset() as i32;
+            let cursor_point = if display_offset == 0 {
+                self.terminal
+                    .predicted_cursor_point_with_cols(term.grid().columns())
+                    .unwrap_or(term.grid().cursor.point)
+            } else {
+                term.grid().cursor.point
+            };
             let cursor_visual_line = cursor_point.line.0 + display_offset;
             if cursor_visual_line >= 0 {
                 let cursor_x = px((f32::from(bounds.origin.x)
@@ -610,6 +616,9 @@ impl Element for TerminalElement {
             TerminalPaintOptions::full(cursor_visible)
         };
 
+        let predictions = self.terminal.get_predictions();
+        let predicted_cursor = self.terminal.predicted_cursor_point();
+
         self.terminal.with_content(|term| {
             let grid = term.grid();
             let screen_lines = grid.screen_lines();
@@ -620,7 +629,11 @@ impl Element for TerminalElement {
                 cols: grid.columns(),
                 screen_lines,
                 display_offset,
-                cursor_point: Some(term.grid().cursor.point),
+                cursor_point: if display_offset == 0 {
+                    predicted_cursor.or(Some(term.grid().cursor.point))
+                } else {
+                    Some(term.grid().cursor.point)
+                },
                 cursor_shape: cursor_style,
                 cursor_visible,
                 selection,
@@ -628,6 +641,7 @@ impl Element for TerminalElement {
                 current_match_index: self.current_match_index,
                 url_matches: &self.url_matches,
                 hovered_url_group: self.hovered_url_group,
+                predictions: &predictions,
             };
 
             let painter = TerminalPainter {

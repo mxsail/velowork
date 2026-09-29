@@ -183,6 +183,9 @@ impl Terminal {
         );
         block_tracker.on_history_changed(delta, term.grid().topmost_line().0);
 
+        let real_cursor = term.grid().cursor.point;
+        self.predictive_echo.lock().on_remote_output(real_cursor);
+
         // New output disengages the prompt-jump walker so the next
         // Above jump starts from the newest prompt again.
         *self.prompt_jump_index.lock() = None;
@@ -326,6 +329,8 @@ impl Terminal {
             term.grid().topmost_line().0,
         );
         block_tracker.on_history_changed(delta, term.grid().topmost_line().0);
+        let real_cursor = term.grid().cursor.point;
+        self.predictive_echo.lock().on_remote_output(real_cursor);
         self.content_generation.fetch_add(1, Ordering::Relaxed);
     }
 

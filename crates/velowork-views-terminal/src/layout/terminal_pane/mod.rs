@@ -1196,6 +1196,15 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
     }
 
     fn update_child_terminals(&mut self, terminal: Arc<Terminal>, cx: &mut Context<Self>) {
+        let is_remote = self.shell_type.is_remote()
+            || self.backend.is_remote()
+            || self
+                .workspace
+                .read(cx)
+                .project(&self.project_id)
+                .map_or(false, |p| p.is_remote);
+        terminal.set_remote(is_remote);
+
         crate::register_content_pane(terminal.terminal_id.clone(), self.content.downgrade());
 
         self.content.update(cx, |content, cx| {

@@ -95,7 +95,10 @@ pub async fn run_telnet_session(
 ) -> Result<()> {
     let addr = format!("{}:{}", config.host, config.port);
     let stream = match TcpStream::connect(&addr).await {
-        Ok(s) => s,
+        Ok(s) => {
+            crate::pty_manager::apply_tcp_socket_options(&s, true);
+            s
+        }
         Err(e) => {
             let msg = format!("\r\n\x1b[31m[Failed to connect to Telnet host '{addr}': {e}]\x1b[0m\r\n");
             let _ = event_tx.send(PtyEvent::Data {
@@ -275,7 +278,10 @@ pub async fn run_telnet_session_with_stream(
             // 从终端接收键盘输入并写入网络
             input_opt = input_rx.recv() => {
                 match input_opt {
-                    Some(data) => {
+                    Some(mut data) => {
+                        while let Ok(more) = input_rx.try_recv() {
+                            data.extend(more);
+                        }
                         let target_bytes = crate::pty_manager::transcode_from_utf8(&data, &config.encoding);
                         // 如果包含 0xFF，进行转义 (0xFF -> 0xFF 0xFF)
                         let mut encoded = Vec::with_capacity(target_bytes.len());

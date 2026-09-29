@@ -38,6 +38,7 @@ impl TerminalInputHandler {
 
         // Fast path: no control characters, send entire string at once
         if !filtered.chars().any(|c| matches!(c, '\n' | '\r' | '\u{8}')) {
+            self.terminal.predict_input(&filtered);
             self.terminal.send_input(&filtered);
             return;
         }
@@ -45,11 +46,18 @@ impl TerminalInputHandler {
         // Slow path: handle control characters individually
         for c in filtered.chars() {
             match c {
-                '\u{8}' => self.terminal.send_bytes(&[DEL]),
-                '\n' | '\r' => self.terminal.send_bytes(b"\r"),
+                '\u{8}' => {
+                    self.terminal.predict_backspace();
+                    self.terminal.send_bytes(&[DEL]);
+                }
+                '\n' | '\r' => {
+                    self.terminal.clear_predictions();
+                    self.terminal.send_bytes(b"\r");
+                }
                 _ => {
                     let mut buf = [0u8; 4];
                     let s = c.encode_utf8(&mut buf);
+                    self.terminal.predict_input(s);
                     self.terminal.send_input(s);
                 }
             }

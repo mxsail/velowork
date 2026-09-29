@@ -69,6 +69,9 @@ impl DetachedTerminalView {
 
         // Get or create terminal from registry
         let terminal = get_or_create_terminal(&terminal_id, &transport, &terminals, &project_path);
+        let is_remote = workspace.read(cx).project(&project_id).map_or(false, |p| p.is_remote)
+            || terminal_id.starts_with("remote:");
+        terminal.set_remote(is_remote);
 
         // Create terminal content view
         let content = create_terminal_content(

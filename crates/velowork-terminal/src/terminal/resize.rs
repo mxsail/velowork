@@ -18,6 +18,7 @@ impl Terminal {
     /// 150ms for remote connections. A trailing-edge timer ensures the final
     /// resize is always sent even when resize events stop mid-debounce.
     pub fn resize(&self, new_size: TerminalSize) {
+        self.clear_predictions();
         let debounce_ms = self.transport.resize_debounce_ms();
 
         // Clamp to at least 1 col/row - alacritty_terminal panics on zero dimensions

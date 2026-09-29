@@ -94,8 +94,29 @@ pub fn create_terminal_content<V: 'static>(
 /// Converts the key event to terminal bytes and sends them to the terminal.
 /// Returns true if input was sent.
 pub fn handle_terminal_key_input(terminal: &Terminal, event: &KeyDownEvent) -> bool {
+    let key_str = event.keystroke.key.as_str();
+    let is_ctrl = event.keystroke.modifiers.control;
+    if key_str == "backspace" {
+        terminal.predict_backspace();
+    } else if key_str == "enter"
+        || key_str == "escape"
+        || key_str == "tab"
+        || matches!(key_str, "up" | "down" | "left" | "right" | "home" | "end" | "pageup" | "pagedown")
+        || is_ctrl
+    {
+        terminal.clear_predictions();
+    }
+
     let app_cursor_mode = terminal.is_app_cursor_mode();
     if let Some(input) = gpui_key_to_bytes(event, app_cursor_mode) {
+        if !is_ctrl
+            && !event.keystroke.modifiers.alt
+            && !event.keystroke.modifiers.platform
+            && event.keystroke.key_char.is_none()
+            && key_str.len() == 1
+        {
+            terminal.predict_input(key_str);
+        }
         terminal.send_bytes(&input);
         true
     } else {

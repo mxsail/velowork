@@ -546,6 +546,7 @@ impl TerminalContent {
             return;
         };
         terminal.clear_selection();
+        terminal.clear_predictions();
         cx.emit(TerminalContentEvent::DismissAiFloatingToolbar);
 
         match click_count {

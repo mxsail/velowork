@@ -163,14 +163,36 @@ impl<'a> TerminalPainter<'a> {
                     rects.push(rect);
                 }
 
-                if cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
-                    continue;
-                }
-                if cell.c == ' ' && !cell.flags.intersects(Flags::UNDERLINE | Flags::STRIKEOUT) {
+                let pred = if display_offset == 0 && !self.model.predictions.is_empty() {
+                    self.model
+                        .predictions
+                        .iter()
+                        .find(|p| p.point.line.0 == buffer_line && p.point.column.0 == col)
+                } else {
+                    None
+                };
+
+                let is_predicted_spacer = display_offset == 0
+                    && col > 0
+                    && self.model.predictions.iter().any(|p| {
+                        p.point.line.0 == buffer_line && p.width == 2 && p.point.column.0 + 1 == col
+                    });
+                if is_predicted_spacer {
                     continue;
                 }
 
-                let mut fg_color = if is_selected {
+                let is_predicted = pred.is_some();
+                let char_to_render = pred.map(|p| p.ch).unwrap_or(cell.c);
+                let is_wide = cell.flags.contains(Flags::WIDE_CHAR) || pred.is_some_and(|p| p.width == 2);
+
+                if !is_predicted && cell.flags.contains(Flags::WIDE_CHAR_SPACER) {
+                    continue;
+                }
+                if char_to_render == ' ' && !cell.flags.intersects(Flags::UNDERLINE | Flags::STRIKEOUT) {
+                    continue;
+                }
+
+                let mut fg_color = if is_predicted || is_selected {
                     rgb(self.palette.foreground).into()
                 } else {
                     ansi_to_hsla_palette(self.palette, &fg)
@@ -190,7 +212,7 @@ impl<'a> TerminalPainter<'a> {
                 };
 
                 let text_style = TextRun {
-                    len: cell.c.len_utf8(),
+                    len: char_to_render.len_utf8(),
                     font,
                     color: fg_color,
                     background_color: None,
@@ -219,28 +241,28 @@ impl<'a> TerminalPainter<'a> {
 
                 let zero_width_chars = cell.zerowidth();
 
-                if cell.flags.contains(Flags::WIDE_CHAR) {
+                if is_wide {
                     if let Some(prev) = current_batch.take() {
                         batched_runs.push(prev);
                     }
                     let mut run = BatchedTextRun::new_wide(
                         visual_line,
                         col_i32,
-                        cell.c,
+                        char_to_render,
                         text_style,
                     );
                     if let Some(chars) = zero_width_chars {
                         run.append_zero_width_chars(chars);
                     }
                     batched_runs.push(run);
-                } else if is_rtl_or_bidi(cell.c) {
+                } else if is_rtl_or_bidi(char_to_render) {
                     if let Some(prev) = current_batch.take() {
                         batched_runs.push(prev);
                     }
                     let mut run = BatchedTextRun::new_isolated(
                         visual_line,
                         col_i32,
-                        cell.c,
+                        char_to_render,
                         text_style,
                     );
                     if let Some(chars) = zero_width_chars {
@@ -253,7 +275,7 @@ impl<'a> TerminalPainter<'a> {
                     });
                     if can_append {
                         if let Some(batch) = current_batch.as_mut() {
-                            batch.append_char(cell.c);
+                            batch.append_char(char_to_render);
                             if let Some(chars) = zero_width_chars {
                                 batch.append_zero_width_chars(chars);
                             }
@@ -265,7 +287,7 @@ impl<'a> TerminalPainter<'a> {
                         let mut new_batch = BatchedTextRun::new(
                             visual_line,
                             col_i32,
-                            cell.c,
+                            char_to_render,
                             text_style,
                         );
                         if let Some(chars) = zero_width_chars {

@@ -19,4 +19,5 @@ pub struct TerminalRenderModel<'a> {
     pub current_match_index: Option<usize>,
     pub url_matches: &'a [URLMatch],
     pub hovered_url_group: Option<usize>,
+    pub predictions: &'a [velowork_terminal::terminal::PredictedChar],
 }

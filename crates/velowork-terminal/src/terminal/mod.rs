@@ -1,3 +1,4 @@
+use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::{CursorShape as VteCursorShape, CursorStyle as VteCursorStyle, Processor};
@@ -22,6 +23,7 @@ mod osc_sidecar;
 mod preview;
 mod prompt_jump;
 mod prompt_marks;
+pub mod predictive_echo;
 mod render;
 mod resize;
 mod resize_authority;
@@ -49,6 +51,7 @@ pub use types::{
 
 pub use blocks::{BlockTracker, CommandCaptureError, TerminalBlock};
 pub use osc_sidecar::TerminalNotification;
+pub use predictive_echo::{is_auth_prompt_line, PredictedChar, PredictiveEchoTracker};
 
 use event_listener::ZedEventListener;
 use osc_sidecar::OscSidecar;
@@ -321,6 +324,7 @@ pub struct Terminal {
     pub(super) zmodem_early_buffer: Arc<Mutex<Vec<u8>>>,
     pub(super) zmodem_swallow_until: Arc<Mutex<Option<std::time::Instant>>>,
     pub(super) zmodem_suppress_until: Arc<Mutex<Option<std::time::Instant>>>,
+    pub(crate) predictive_echo: Arc<Mutex<PredictiveEchoTracker>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -642,6 +646,7 @@ impl Terminal {
             zmodem_early_buffer: Arc::new(Mutex::new(Vec::new())),
             zmodem_swallow_until: Arc::new(Mutex::new(None)),
             zmodem_suppress_until: Arc::new(Mutex::new(None)),
+            predictive_echo: Arc::new(Mutex::new(PredictiveEchoTracker::new())),
         }
     }
 
@@ -738,6 +743,121 @@ impl Terminal {
         &self,
     ) -> tokio::sync::broadcast::Receiver<Arc<blocks::TerminalBlock>> {
         self.command_finish_tx.subscribe()
+    }
+
+    /// Mark whether this terminal is a remote session (SSH / Telnet).
+    pub fn set_remote(&self, is_remote: bool) {
+        self.predictive_echo.lock().set_remote(is_remote);
+    }
+
+    /// Whether this terminal is a remote session.
+    pub fn is_remote(&self) -> bool {
+        self.predictive_echo.lock().is_remote()
+    }
+
+    /// Get all current active predictions.
+    pub fn get_predictions(&self) -> Vec<predictive_echo::PredictedChar> {
+        self.predictive_echo.lock().predictions().to_vec()
+    }
+
+    /// Compute the predicted cursor point, or `None` if no predictions are pending.
+    pub fn predicted_cursor_point(&self) -> Option<alacritty_terminal::index::Point> {
+        let cols = self.term.lock().grid().columns();
+        self.predictive_echo.lock().predicted_cursor(cols)
+    }
+
+    /// Compute the predicted cursor point given a known column count (avoids re-locking term mutex).
+    pub fn predicted_cursor_point_with_cols(&self, cols: usize) -> Option<alacritty_terminal::index::Point> {
+        self.predictive_echo.lock().predicted_cursor(cols)
+    }
+
+    /// Check if the active cursor line appears to be an interactive auth/password prompt.
+    pub fn is_cursor_at_auth_prompt(&self) -> bool {
+        if let Some(line) = self.get_active_line() {
+            predictive_echo::is_auth_prompt_line(&line)
+        } else {
+            false
+        }
+    }
+
+    /// Speculatively predict typed input locally without waiting for remote echo.
+    /// Returns `true` if any characters were predicted.
+    pub fn predict_input(&self, text: &str) -> bool {
+        if !self.is_remote() {
+            return false;
+        }
+
+        if self.is_zmodem_active() {
+            self.clear_predictions();
+            return false;
+        }
+
+        let term = self.term.lock();
+        let mode = term.mode();
+        if mode.contains(alacritty_terminal::term::TermMode::ALT_SCREEN)
+            || mode.intersects(alacritty_terminal::term::TermMode::MOUSE_MODE)
+            || mode.contains(alacritty_terminal::term::TermMode::APP_CURSOR)
+        {
+            drop(term);
+            self.clear_predictions();
+            return false;
+        }
+
+        let real_cursor = term.grid().cursor.point;
+        let cols = term.grid().columns();
+
+        // Check auth prompt directly using the already-locked term
+        let mut line_str = String::new();
+        for col in 0..cols {
+            let cell = &term.grid()[alacritty_terminal::index::Point::new(real_cursor.line, alacritty_terminal::index::Column(col))];
+            if !cell.flags.contains(alacritty_terminal::term::cell::Flags::WIDE_CHAR_SPACER) {
+                line_str.push(cell.c);
+            }
+        }
+        let trimmed = line_str.trim_end();
+        if !trimmed.is_empty() && predictive_echo::is_auth_prompt_line(trimmed) {
+            drop(term);
+            self.clear_predictions();
+            return false;
+        }
+
+        // Safety guard: only predict in append mode at the end of the line.
+        // If the user moved the cursor backward and there are non-blank characters to the right,
+        // do not predict locally, avoiding any character clobbering before server redraw.
+        let rest_is_blank = (real_cursor.column.0..cols).all(|c| {
+            term.grid()[real_cursor.line][alacritty_terminal::index::Column(c)].c == ' '
+        });
+        if !rest_is_blank {
+            return false;
+        }
+        drop(term);
+
+        let changed = self.predictive_echo.lock().predict_input(text, real_cursor, cols);
+        if changed {
+            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.content_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        changed
+    }
+
+    /// Speculatively retreat predictive cursor on Backspace.
+    pub fn predict_backspace(&self) -> bool {
+        let changed = self.predictive_echo.lock().predict_backspace();
+        if changed {
+            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.content_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        changed
+    }
+
+    /// Clear all pending predictions.
+    pub fn clear_predictions(&self) {
+        let mut tracker = self.predictive_echo.lock();
+        if tracker.has_predictions() {
+            tracker.clear();
+            self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.content_generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 }
 

@@ -61,6 +61,7 @@ pub fn render_terminal_thumbnail(
             current_match_index: None,
             url_matches: &[],
             hovered_url_group: None,
+            predictions: &[],
         };
 
         // 1. Fill container background

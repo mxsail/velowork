@@ -670,6 +670,19 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                 }
             }
 
+            let key_str = event.keystroke.key.as_str();
+            let is_ctrl = event.keystroke.modifiers.control;
+            if key_str == "backspace" {
+                terminal.predict_backspace();
+            } else if key_str == "enter"
+                || key_str == "escape"
+                || key_str == "tab"
+                || matches!(key_str, "up" | "down" | "left" | "right" | "home" | "end" | "pageup" | "pagedown")
+                || is_ctrl
+            {
+                terminal.clear_predictions();
+            }
+
             let app_cursor_mode = terminal.is_app_cursor_mode();
             let key_event = KeyEvent {
                 key: event.keystroke.key.clone(),
@@ -682,74 +695,22 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                 },
             };
             if let Some(input) = key_to_bytes(&key_event, app_cursor_mode) {
+                // If this is a fallback single-character key not handled by InputHandler
+                if !is_ctrl
+                    && !event.keystroke.modifiers.alt
+                    && !event.keystroke.modifiers.platform
+                    && key_event.key_char.is_none()
+                    && key_str.len() == 1
+                {
+                    terminal.predict_input(key_str);
+                }
                 terminal.send_bytes(&input);
             }
         }
     }
 }
 
-/// Determines if a trimmed terminal text line represents an interactive password / authentication prompt.
-///
-/// Typical prompts:
-/// - SSH / sudo / su / login: `user@host's password:`, `[sudo] password for user:`, `Password:`, `Enter password:`
-/// - Database / tools: `Enter password:`, `Password for 'https://github.com':`, `Enter passphrase for key ...:`
-/// - 2FA / OTP / Token: `Verification code:`, `OTP:`, `2FA Token:`, `Enter PIN:`
-/// - Chinese prompts: `密码:`, `密码：`, `口令:`, `口令：`, `请输入密码：`, `请输入口令：`, `验证码：`, `动态口令:`
-pub fn is_auth_prompt_line(line: &str) -> bool {
-    let lower = line.trim().to_lowercase();
-    if lower.is_empty() {
-        return false;
-    }
-
-    // If the line has standard shell prompt markers (e.g. `$ `, `# `, `% `, `> `, `❯ `)
-    // where the prefix before the marker is NOT a password prompt, it's a normal shell command line.
-    let has_shell_marker = lower.contains("$ ")
-        || lower.contains("# ")
-        || lower.contains("% ")
-        || lower.contains("❯ ")
-        || lower.contains("➜ ")
-        || lower.contains("» ");
-
-    // Check for password / passphrase / passcode keywords
-    let has_password_keyword = lower.contains("password")
-        || lower.contains("passphrase")
-        || lower.contains("passcode")
-        || lower.contains("密码")
-        || lower.contains("口令");
-
-    // Check for 2FA / OTP / Token keywords
-    let has_2fa_keyword = lower.contains("verification code")
-        || lower.contains("authenticator")
-        || lower.contains("otp")
-        || lower.contains("totp")
-        || lower.contains("2fa")
-        || lower.contains("mfa")
-        || lower.contains("security code")
-        || lower.contains("动态码")
-        || lower.contains("动态口令")
-        || lower.contains("验证码")
-        || lower.contains("一次性口令")
-        || lower.contains("两步验证")
-        || lower.starts_with("pin:")
-        || lower.contains("enter pin")
-        || lower.contains("pin for");
-
-    if !has_password_keyword && !has_2fa_keyword {
-        return false;
-    }
-
-    // If it has a shell marker like `user@host:~$ echo password`, check if the prompt prefix before marker is an auth prompt
-    if has_shell_marker {
-        if let Some(marker_pos) = lower.find("$ ").or_else(|| lower.find("# ")).or_else(|| lower.find("% ")).or_else(|| lower.find("❯ ")).or_else(|| lower.find("➜ ")) {
-            let prefix = &lower[..marker_pos];
-            if !prefix.contains("password") && !prefix.contains("密码") && !prefix.contains("口令") && !prefix.contains("passphrase") {
-                return false;
-            }
-        }
-    }
-
-    true
-}
+pub use velowork_terminal::terminal::is_auth_prompt_line;
 
 /// Strip common shell prompt prefixes (e.g. `user@host:path$ `, `user@host:path# `, `[user@host ~]$ `, `PS C:\> `, `❯ `, `➜ `, `» `)
 fn strip_shell_prompt(line: &str) -> Option<&str> {
