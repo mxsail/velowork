@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.12] - 2026-09-29
+
+### Added / 新增
+- **终端弱网输入零延迟与智能预测性本地回显 (Predictive Local Echo & Network Latency Optimization)**：
+  - **TCP_NODELAY 即时传输**：在 SSH 通信信道全面开启 `TCP_NODELAY`，禁用 Nagle 算法的微小等待延迟，让击键数据即时入网。
+  - **预测性本地回显 (Predictive Echo)**：针对高延迟网络环境引入打字预测引擎，常规按键本地零延迟即时上屏，远端返回数据时平滑校对与消除，极大提升跨地域弱网打字手感。
+  *(Predictive local echo for low-latency terminal typing, alongside TCP_NODELAY SSH stream optimization).*
+- **ZMODEM 传输协议深度增强与文件交互完善 (ZMODEM Hardening & Transfer Upgrades)**：
+  - **流式大文件传输与控制字符转义**：实现 ZMODEM 完整协议流控，支持 `ESCCTL` 深度控制字符转义、`ZRINIT` 预协商及 `ZNAK` 自动重试机制。
+  - **拖拽文件命令自适应与取消排空循环**：支持拖拽文件直接自适应触发远程 `rz` 命令与双向取消排空循环（Drain Loop），避免脏数据残留导致终端输出错乱。
+  *(Comprehensive ZMODEM streaming, ESCCTL escape handling, ZRINIT pre-negotiation, and drag-and-drop rz command adaptation).*
+
+### Improved / 优化
+- **断开连接悬浮提示与终端界面细节精进 (Centered Disconnect Banner & UI Polishing)**：
+  - **断开连接浮窗顶部居中**：将会话断开连接的警告提示浮窗移至终端面板顶部水平居中，并采用 `RADIUS_LG` 圆角与 `shadow_lg` 物理光影，视觉更具层次与秩序。
+  - **传输管理器体验提升**：传输管理器弹出层支持自适应高度拉伸、文件操作悬浮快捷菜单与文件传输完成飞入微动效。
+  *(Center disconnect banner at top with rounded corners and refined shadow, plus transfer popup height resize).*
+
+### Fixed / 修复
+- **会话列表指示条与标签页生命周期对齐 (Session Indicator & Tab Lifecycle)**：
+  - 修复双击未连通会话关闭对应标签页后，会话列表左侧颜色指示条未正确消失的问题；指示条严格基于“标签页是否存在”驱动，会话图标独立体现连接网络状态。
+  *(Ensure session tree indicator strictly tracks tab existence and clears cleanly on tab close).*
+- **终端双向文本 (RTL) 与特殊排版防护 (RTL Isolation & Combining Marks Fix)**：
+  - 双向字符隔离支持（如阿拉伯语/希伯来语），防止上下文视觉反向错乱；正确合并并排版零宽连字符（Combining Characters），彻底消除终端文本重叠。
+  *(Isolate RTL characters and support zero-width combining marks to eliminate terminal text overlap).*
+- **系统与安全体验加固 (Security & Platform Stability)**：
+  - 修复安全模式切换时的持久化校验与解锁失败诊断提示；解决 Windows 11 DWM 下纯黑背景及多重透明度叠加异常。
+  *(Reconcile security mode persistence and fix Windows 11 DWM solid black background).*
+
 ## [0.1.0-beta.11] - 2026-09-25
 
 ### Improved / 优化
