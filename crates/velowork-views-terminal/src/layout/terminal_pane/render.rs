@@ -16,7 +16,7 @@ use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::icon::AppIcon;
 use velowork_ui::tooltip::Tooltip;
 use velowork_ui::tokens::{
-    SPACE_XS, SPACE_SM, SPACE_MD, RADIUS_CARD, RADIUS_STD, RADIUS_XS, ICON_SM, ui_text_md,
+    SPACE_XS, SPACE_SM, SPACE_MD, RADIUS_CARD, RADIUS_LG, RADIUS_STD, ICON_SM, ui_text_md,
 };
 use crate::layout::navigation::NavigationDirection;
 use velowork_workspace::state::{LayoutNode, SplitDirection};
@@ -451,19 +451,27 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                             div()
                                 .absolute()
                                 .top(SPACE_SM)
-                                .right(SPACE_MD)
+                                .left_0()
+                                .right_0()
                                 .flex()
-                                .items_center()
-                                .gap(SPACE_MD)
-                                .pl(SPACE_MD)
-                                .pr(px(4.0))
-                                .py(px(4.0))
-                                .rounded(RADIUS_STD)
-                                .bg(p.surface_overlay)
-                                .border_1()
-                                .border_color(banner_border)
-                                .shadow_sm()
+                                .justify_center()
                                 .child(
+                                    div()
+                                        .occlude()
+                                        .flex()
+                                        .items_center()
+                                        .gap(SPACE_MD)
+                                        .pl(SPACE_MD)
+                                        .pr(px(4.0))
+                                        .py(px(4.0))
+                                        .rounded(RADIUS_LG)
+                                        .bg(p.surface_overlay)
+                                        .border_1()
+                                        .border_color(banner_border)
+                                        .shadow_lg()
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                                        .child(
                                     div()
                                         .flex()
                                         .items_center()
@@ -491,7 +499,7 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                                         .gap(SPACE_XS)
                                         .px(SPACE_SM)
                                         .py(px(4.0))
-                                        .rounded(RADIUS_XS)
+                                        .rounded(RADIUS_STD)
                                         .bg(button_bg)
                                         .when(!is_reconnecting, |s| {
                                             s.hover(|h| h.opacity(0.9))
@@ -539,10 +547,11 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                                                     .into_any_element()
                                             }
                                         )
-                                        .child(reconnect_text)
+                                        .child(reconnect_text),
                                 )
                         )
-                    })
+                    )
+                })
                     .when(show_border, |el| {
                         el.child(
                             div()
