@@ -728,7 +728,15 @@ impl SessionPanel {
                                     .global::<velowork_workspace::stores::GlobalConnectionStore>()
                                     .0
                                     .read(cx);
-                                let is_connected = connection_store.is_connected(&session.id);
+                                let raw_connected = connection_store.is_connected(&session.id);
+                                if !has_tab && raw_connected {
+                                    let conn_store = cx
+                                        .global::<velowork_workspace::stores::GlobalConnectionStore>()
+                                        .0
+                                        .clone();
+                                    conn_store.update(cx, |c, cx| c.mark_disconnected(&session.id, cx));
+                                }
+                                let is_connected = has_tab && raw_connected;
                                 let icon_color = if has_tab {
                                     if is_connected {
                                         Some(t_color.success)
@@ -742,7 +750,7 @@ impl SessionPanel {
                                     tree_ctx.depth,
                                     session_icon(session),
                                     icon_color,
-                                    is_connected,
+                                    has_tab,
                                     &t_color,
                                     window,
                                     cx,
@@ -940,9 +948,9 @@ impl SessionPanel {
         icon: AppIcon,
         // Connection-derived icon colour, identical to the normal session row.
         icon_color: Option<u32>,
-        // Whether the session is connected — drives the left-edge accent bar,
+        // Whether the session has an open tab in the workspace — drives the left-edge accent bar,
         // matching the normal session row's `is_open` flag.
-        is_connected: bool,
+        has_tab: bool,
         t: &ThemeColors,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -992,7 +1000,7 @@ impl SessionPanel {
                     .h(ap.height)
                     .pl(indent + ui_space_sm(cx))
                     .pr(ui_space_lg(cx))
-                    .when(is_connected, |d| {
+                    .when(has_tab, |d| {
                         d.child(
                             div()
                                 .absolute()
@@ -1222,7 +1230,15 @@ impl SessionPanel {
             .global::<velowork_workspace::stores::GlobalConnectionStore>()
             .0
             .read(cx);
-        let is_connected = connection_store.is_connected(&session.id);
+        let raw_connected = connection_store.is_connected(&session.id);
+        if !has_tab && raw_connected {
+            let conn_store = cx
+                .global::<velowork_workspace::stores::GlobalConnectionStore>()
+                .0
+                .clone();
+            conn_store.update(cx, |c, cx| c.mark_disconnected(&session.id, cx));
+        }
+        let is_connected = has_tab && raw_connected;
         // Icon color follows the session's tab connection state:
         // * has tabs and at least one connected → green (success)
         // * has tabs but all dropped / failed   → red (error)
@@ -1260,7 +1276,7 @@ impl SessionPanel {
                 None,
                 Some(session_icon(session)),
                 icon_color,
-                is_connected,
+                has_tab,
                 is_selected,
                 t,
                 cx,

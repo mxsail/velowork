@@ -296,6 +296,7 @@ impl Drop for PtyHandle {
 /// Manages all PTY processes
 pub struct PtyManager {
     terminals: Arc<Mutex<HashMap<String, PtyHandle>>>,
+    terminal_session_ids: Arc<Mutex<HashMap<String, String>>>,
     event_tx: Sender<PtyEvent>,
     /// Session backend for persistence (tmux/screen/none)
     session_backend: ResolvedBackend,
@@ -400,6 +401,7 @@ impl PtyManager {
         (
             Self {
                 terminals: Arc::new(Mutex::new(HashMap::new())),
+                terminal_session_ids: Arc::new(Mutex::new(HashMap::new())),
                 event_tx: tx,
                 session_backend,
                 #[cfg(windows)]
@@ -712,7 +714,7 @@ impl PtyManager {
                 #[cfg(windows)]
                 wsl_backend: None,
                 ssh_session: None,
-                ssh_session_id: session_id,
+                ssh_session_id: session_id.clone(),
                 ssh_channel_id: None,
                 ssh_resize_tx: None,
                 ssh_signal_tx: None,
@@ -721,6 +723,10 @@ impl PtyManager {
                 exit_signal: Some(exit_signal),
                 last_size: None,
             };
+
+            if let Some(ref sid) = session_id {
+                self.terminal_session_ids.lock().insert(terminal_id.to_string(), sid.clone());
+            }
 
             self.terminals.lock().insert(terminal_id.to_string(), handle);
             return Ok(());
@@ -827,7 +833,7 @@ impl PtyManager {
                 #[cfg(windows)]
                 wsl_backend: None,
                 ssh_session: None,
-                ssh_session_id: session_id,
+                ssh_session_id: session_id.clone(),
                 ssh_channel_id: None,
                 ssh_resize_tx: None,
                 ssh_signal_tx: None,
@@ -836,6 +842,10 @@ impl PtyManager {
                 exit_signal: Some(exit_signal),
                 last_size: None,
             };
+
+            if let Some(ref sid) = session_id {
+                self.terminal_session_ids.lock().insert(terminal_id.to_string(), sid.clone());
+            }
 
             self.terminals.lock().insert(terminal_id.to_string(), handle);
             return Ok(());
@@ -950,6 +960,7 @@ impl PtyManager {
             // velowork-app) revert the session-tree icon even for failed connections
             // when the tab is later closed or the terminal exits.
             if let Some(ref sid) = session_id {
+                self.terminal_session_ids.lock().insert(terminal_id_str.clone(), sid.clone());
                 if let Some(h) = self.terminals.lock().get_mut(&terminal_id_str) {
                     h.ssh_session_id = Some(sid.clone());
                 }
@@ -982,7 +993,6 @@ impl PtyManager {
                             data: format!("\r\nConnection error: {}\r\n", e).into_bytes(),
                         }).await;
                     }
-                    terminals.lock().remove(&terminal_id_str);
                     let _ = event_tx.send(PtyEvent::Exit {
                         terminal_id: terminal_id_str,
                         exit_code: Some(1),
@@ -1179,6 +1189,10 @@ impl PtyManager {
             Some(ShellType::Custom { path, args }) if path == "local" => parse_local_args(args),
             _ => None,
         };
+
+        if let Some(ref sid) = local_session_id {
+            self.terminal_session_ids.lock().insert(terminal_id.to_string(), sid.clone());
+        }
 
         // Store the handle
         self.terminals.lock().insert(
@@ -1532,6 +1546,7 @@ impl PtyManager {
         // `handle` may be `None` if `cleanup_exited` already took it on PTY EOF
         // (the double-fire). In that case the enqueued job does ONLY the session
         // kill below — SIGTERMing the lingering session/daemon after the client EOF'd.
+        self.terminal_session_ids.lock().remove(terminal_id);
         let handle = self.terminals.lock().remove(terminal_id);
         let session_backend = self.session_backend;
         let session_name = session_backend.session_name(terminal_id);
@@ -1642,6 +1657,7 @@ impl PtyManager {
     /// Detach from all terminals without killing sessions
     /// Sessions will persist and can be reconnected on next app start
     pub fn detach_all(&self) {
+        self.terminal_session_ids.lock().clear();
         // Drain all handles while holding the lock, then release lock before joining
         let handles: Vec<PtyHandle> = self.terminals.lock().drain().map(|(_, h)| h).collect();
         for handle in handles {
@@ -1665,6 +1681,9 @@ impl PtyManager {
     /// SSH terminal. Returns `None` for local terminals or before a connection
     /// has been established.
     pub fn get_ssh_session_id(&self, terminal_id: &str) -> Option<String> {
+        if let Some(sid) = self.terminal_session_ids.lock().get(terminal_id).cloned() {
+            return Some(sid);
+        }
         self.terminals.lock().get(terminal_id)
             .and_then(|h| h.ssh_session_id.clone())
     }

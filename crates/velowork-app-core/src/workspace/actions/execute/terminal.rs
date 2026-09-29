@@ -59,7 +59,12 @@ pub(super) fn close(
         Some(path) => {
             // Capture the SSH session id before killing/removing the terminal so
             // we can decide afterwards whether the session is now fully closed.
-            let ssh_session_id = backend.get_ssh_session_id(&terminal_id);
+            let ssh_session_id = backend
+                .get_ssh_session_id(&terminal_id)
+                .or_else(|| {
+                    ws.get_terminal_shell(&project_id, &path)
+                        .and_then(|s| s.session_id().map(ToString::to_string))
+                });
             backend.kill(&terminal_id);
             terminals.lock().remove(&terminal_id);
             ws.close_terminal_and_focus_sibling(focus_manager, &project_id, &path, cx);
@@ -71,7 +76,8 @@ pub(super) fn close(
                 let still_open = terminals
                     .lock()
                     .keys()
-                    .any(|tid| backend.get_ssh_session_id(tid).as_deref() == Some(sid.as_str()));
+                    .any(|tid| backend.get_ssh_session_id(tid).as_deref() == Some(sid.as_str()))
+                    || ws.data().has_session_tab(&sid);
                 if !still_open {
                     ws.mark_ssh_session_disconnected(&sid, cx);
                 }
@@ -98,7 +104,12 @@ pub(super) fn close_many(
         let path = find_terminal_path(ws, &project_id, terminal_id);
         match path {
             Some(path) => {
-                let ssh_session_id = backend.get_ssh_session_id(terminal_id);
+                let ssh_session_id = backend
+                    .get_ssh_session_id(terminal_id)
+                    .or_else(|| {
+                        ws.get_terminal_shell(&project_id, &path)
+                            .and_then(|s| s.session_id().map(ToString::to_string))
+                    });
                 backend.kill(terminal_id);
                 terminals.lock().remove(terminal_id);
                 if let Some(sid) = ssh_session_id {
@@ -118,7 +129,8 @@ pub(super) fn close_many(
         for sid in &closed_session_ids {
             let still_open = remaining_ids
                 .iter()
-                .any(|tid| backend.get_ssh_session_id(tid).as_deref() == Some(sid.as_str()));
+                .any(|tid| backend.get_ssh_session_id(tid).as_deref() == Some(sid.as_str()))
+                || ws.data().has_session_tab(sid);
             if !still_open {
                 ws.mark_ssh_session_disconnected(sid, cx);
             }
