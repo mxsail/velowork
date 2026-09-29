@@ -354,6 +354,12 @@ where
         let zdata_hdr = build_binary32_header_with_escctl(ZDATA, (start_pos as u32).to_le_bytes(), escctl);
         terminal.send_bytes(&zdata_hdr);
 
+        // For a 0-byte file, send an empty subpacket with ZCRCE so rz exits zrdata cleanly and expects ZEOF
+        if bytes.is_empty() {
+            let empty_subpacket = encode_subpacket_with_escctl(&[], ZCRCE, use_crc32, escctl);
+            terminal.send_bytes(&empty_subpacket);
+        }
+
         // 5. Send file chunks with CRC32 streaming (Full Streaming with sliding window backpressure)
         let transfer_start = Instant::now();
         let chunk_size = 4096;
@@ -386,6 +392,13 @@ where
                                     last_acked_pos = pos;
                                     bytes_since_ack_req = 0;
                                     log::info!("[ZMODEM-UPLOAD] Remote requested retransmit from offset {}", pos);
+                                    let zdata_hdr = build_binary32_header_with_escctl(ZDATA, (pos as u32).to_le_bytes(), escctl);
+                                    terminal.send_bytes(&zdata_hdr);
+                                }
+                                ZmodemHeaderType::Znak => {
+                                    log::warn!("[ZMODEM-UPLOAD] Remote sent ZNAK during streaming, retransmitting ZDATA at offset {}", pos);
+                                    let zdata_hdr = build_binary32_header_with_escctl(ZDATA, (pos as u32).to_le_bytes(), escctl);
+                                    terminal.send_bytes(&zdata_hdr);
                                 }
                                 ZmodemHeaderType::Zack => {
                                     let ack_pos = u32::from_le_bytes(hdr.flags) as usize;
@@ -430,6 +443,13 @@ where
                                     last_acked_pos = pos;
                                     bytes_since_ack_req = 0;
                                     log::info!("[ZMODEM-UPLOAD] Remote requested retransmit from offset {}", pos);
+                                    let zdata_hdr = build_binary32_header_with_escctl(ZDATA, (pos as u32).to_le_bytes(), escctl);
+                                    terminal.send_bytes(&zdata_hdr);
+                                }
+                                ZmodemHeaderType::Znak => {
+                                    log::warn!("[ZMODEM-UPLOAD] Remote sent ZNAK during window wait, retransmitting ZDATA at offset {}", pos);
+                                    let zdata_hdr = build_binary32_header_with_escctl(ZDATA, (pos as u32).to_le_bytes(), escctl);
+                                    terminal.send_bytes(&zdata_hdr);
                                 }
                                 ZmodemHeaderType::Zack => {
                                     let ack_pos = u32::from_le_bytes(hdr.flags) as usize;
@@ -491,8 +511,8 @@ where
             tokio::task::yield_now().await;
         }
 
-        // 6. Send ZEOF header
-        let zeof_hdr = build_binary32_header_with_escctl(ZEOF, (file_size as u32).to_le_bytes(), escctl);
+        // 6. Send ZEOF header (Hex header, standard in lsz / ZMODEM spec)
+        let zeof_hdr = build_hex_header(ZEOF, (file_size as u32).to_le_bytes());
         terminal.send_bytes(&zeof_hdr);
 
         // 7. Wait for ZRINIT from remote rz acknowledging file completion
@@ -629,110 +649,142 @@ where
             return Err("ZMODEM transfer was cancelled by remote".to_string());
         }
 
-        // Process any headers in buffer
-        while let Some((hdr, _start, end)) = parse_any_header(&stream_buffer) {
-            // Drain up to the header
-            stream_buffer.drain(..end);
+        // Decode subpackets & parse headers while progress is being made on stream_buffer
+        let mut progress = true;
+        while progress {
+            progress = false;
 
-            match hdr.parsed_type() {
-                ZmodemHeaderType::Zfile => {
-                    file_idx += 1;
-                    // Next comes the ZFILE payload subpacket
-                    // Wait for subpacket to decode filename and size
-                    let mut payload_opt = None;
-                    for _ in 0..10 {
-                        if let Some((payload, _end_delim, consumed)) = decode_subpacket(&stream_buffer, false)
-                            .or_else(|| decode_subpacket(&stream_buffer, true))
-                        {
-                            stream_buffer.drain(..consumed);
-                            payload_opt = Some(payload);
-                            break;
-                        }
-                        if let Ok(Some(next_chunk)) = tokio::time::timeout(std::time::Duration::from_millis(200), raw_rx.recv()).await {
-                            stream_buffer.extend_from_slice(&next_chunk);
-                        } else {
-                            break;
-                        }
+            // A. If file is open, decode and write data subpackets
+            if let Some((ref mut file, ref path, total, ref mut written, start_time)) = current_file.0 {
+                let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+
+                while let Some((sub_payload, frame_end, consumed)) = decode_subpacket(&stream_buffer, true)
+                    .or_else(|| decode_subpacket(&stream_buffer, false))
+                {
+                    progress = true;
+                    if cancel_flag.load(Ordering::Relaxed) {
+                        log::info!("[ZMODEM-SESSION] Download cancelled by user during decoding, draining...");
+                        abort_and_drain_stream(&terminal, &mut raw_rx).await;
+                        return Err("Download cancelled by user".to_string());
+                    }
+                    stream_buffer.drain(..consumed);
+                    if !sub_payload.is_empty() {
+                        file.write_all(&sub_payload)
+                            .map_err(|e| format!("Failed to write to file: {}", e))?;
+                        *written += sub_payload.len() as u64;
+                        let elapsed = start_time.elapsed().as_secs_f64().max(0.001);
+                        let speed = *written as f64 / elapsed;
+                        progress_cb(*written, total, speed, &filename, file_idx, 1);
                     }
 
-                    let payload = payload_opt.unwrap_or_default();
-                    let (remote_name, file_size) = parse_zfile_payload(&payload)
-                        .unwrap_or_else(|| (format!("download_{}", file_idx), 0));
-
-                    let local_path = resolve_unique_download_path(&target_dir, &remote_name);
-                    let file = std::fs::File::create(&local_path)
-                        .map_err(|e| format!("Failed to create local file {:?}: {}", local_path, e))?;
-
-                    current_file.0 = Some((file, local_path.clone(), file_size, 0, Instant::now()));
-                    last_saved_path = local_path;
-
-                    // Reply ZRPOS(0) to request data from 0
-                    let zrpos_hdr = build_hex_header(ZRPOS, [0, 0, 0, 0]);
-                    terminal.send_bytes(&zrpos_hdr);
-                }
-                ZmodemHeaderType::Zdata(_pos) => {
-                    // Data header received, data subpackets follow in stream_buffer
-                }
-                ZmodemHeaderType::Zeof => {
-                    // Flush current file
-                    if let Some((mut f, _, _, _, _)) = current_file.0.take() {
-                        let _ = f.flush();
+                    // If sender requested ACK (ZCRCQ or ZCRCW), reply ZACK(written)
+                    if frame_end == ZCRCQ || frame_end == ZCRCW {
+                        let zack_hdr = build_hex_header(ZACK, (*written as u32).to_le_bytes());
+                        terminal.send_bytes(&zack_hdr);
                     }
-                    // Reply ZRINIT to acknowledge EOF
-                    let zrinit_hdr = build_hex_header(ZRINIT, [0, 0, 0, CANFDX | CANOVIO | CANFC32]);
-                    terminal.send_bytes(&zrinit_hdr);
                 }
-                ZmodemHeaderType::Zfin => {
-                    // End of session
-                    if let Some((mut f, _, _, _, _)) = current_file.0.take() {
-                        let _ = f.flush();
-                    }
-                    let zfin_hdr = build_hex_header(ZFIN, [0, 0, 0, 0]);
-                    terminal.send_bytes(&zfin_hdr);
-                    terminal.send_bytes(b"OO\r");
-                    log::info!("[ZMODEM-SESSION] Download completed successfully | path={:?}", last_saved_path);
-                    return Ok(last_saved_path);
-                }
-                ZmodemHeaderType::Zcan => {
-                    log::info!("[ZMODEM-SESSION] Received Zcan from remote, draining...");
-                    abort_and_drain_stream(&terminal, &mut raw_rx).await;
-                    return Err("Transfer cancelled by remote".to_string());
-                }
-                ZmodemHeaderType::Zrqinit => {
-                    let zrinit_hdr = build_hex_header(ZRINIT, [0, 0, 0, CANFDX | CANOVIO | CANFC32]);
-                    terminal.send_bytes(&zrinit_hdr);
-                }
-                _ => {}
             }
-        }
 
-        // If file is open, decode and write data subpackets
-        if let Some((ref mut file, ref path, total, ref mut written, start_time)) = current_file.0 {
-            let filename = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            // B. Process any headers in buffer
+            if let Some((hdr, _start, end)) = parse_any_header(&stream_buffer) {
+                progress = true;
+                stream_buffer.drain(..end);
 
-            // Try decoding subpackets (CRC32 first, fallback to CRC16)
-            while let Some((sub_payload, frame_end, consumed)) = decode_subpacket(&stream_buffer, true)
-                .or_else(|| decode_subpacket(&stream_buffer, false))
-            {
-                if cancel_flag.load(Ordering::Relaxed) {
-                    log::info!("[ZMODEM-SESSION] Download cancelled by user during decoding, draining...");
-                    abort_and_drain_stream(&terminal, &mut raw_rx).await;
-                    return Err("Download cancelled by user".to_string());
-                }
-                stream_buffer.drain(..consumed);
-                if !sub_payload.is_empty() {
-                    file.write_all(&sub_payload)
-                        .map_err(|e| format!("Failed to write to file: {}", e))?;
-                    *written += sub_payload.len() as u64;
-                    let elapsed = start_time.elapsed().as_secs_f64().max(0.001);
-                    let speed = *written as f64 / elapsed;
-                    progress_cb(*written, total, speed, &filename, file_idx, 1);
-                }
+                match hdr.parsed_type() {
+                    ZmodemHeaderType::Zsinit => {
+                        log::info!("[ZMODEM-SESSION] Received ZSINIT from sender, acknowledging with ZACK");
+                        // Wait briefly if sender attached an init subpacket (e.g. Attn sequence)
+                        if let Some((_sub, _end, consumed)) = decode_subpacket(&stream_buffer, false).or_else(|| decode_subpacket(&stream_buffer, true)) {
+                            stream_buffer.drain(..consumed);
+                        }
+                        let zack_hdr = build_hex_header(ZACK, [0, 0, 0, 0]);
+                        terminal.send_bytes(&zack_hdr);
+                    }
+                    ZmodemHeaderType::Zfile => {
+                        file_idx += 1;
+                        // Next comes the ZFILE payload subpacket
+                        // Wait for subpacket to decode filename and size (up to 50 attempts = 10s)
+                        let mut payload_opt = None;
+                        for _ in 0..50 {
+                            if cancel_flag.load(Ordering::Relaxed) {
+                                abort_and_drain_stream(&terminal, &mut raw_rx).await;
+                                return Err("Download cancelled by user".to_string());
+                            }
+                            if let Some((payload, _end_delim, consumed)) = decode_subpacket(&stream_buffer, false)
+                                .or_else(|| decode_subpacket(&stream_buffer, true))
+                            {
+                                stream_buffer.drain(..consumed);
+                                payload_opt = Some(payload);
+                                break;
+                            }
+                            if let Ok(Some(next_chunk)) = tokio::time::timeout(std::time::Duration::from_millis(200), raw_rx.recv()).await {
+                                stream_buffer.extend_from_slice(&next_chunk);
+                            } else {
+                                // Waiting for next chunk
+                            }
+                        }
 
-                // If sender requested ACK (ZCRCQ or ZCRCW), reply ZACK(written)
-                if frame_end == ZCRCQ || frame_end == ZCRCW {
-                    let zack_hdr = build_hex_header(ZACK, (*written as u32).to_le_bytes());
-                    terminal.send_bytes(&zack_hdr);
+                        let Some(payload) = payload_opt else {
+                            log::error!("[ZMODEM-SESSION] Timed out waiting for ZFILE metadata subpacket");
+                            abort_and_drain_stream(&terminal, &mut raw_rx).await;
+                            return Err("Timed out waiting for ZFILE file metadata subpacket from remote".to_string());
+                        };
+
+                        let (remote_name, file_size) = parse_zfile_payload(&payload)
+                            .unwrap_or_else(|| (format!("download_{}", file_idx), 0));
+
+                        let local_path = resolve_unique_download_path(&target_dir, &remote_name);
+                        let file = std::fs::File::create(&local_path)
+                            .map_err(|e| format!("Failed to create local file {:?}: {}", local_path, e))?;
+
+                        current_file.0 = Some((file, local_path.clone(), file_size, 0, Instant::now()));
+                        last_saved_path = local_path;
+
+                        // Reply ZRPOS(0) to request data from 0
+                        let zrpos_hdr = build_hex_header(ZRPOS, [0, 0, 0, 0]);
+                        terminal.send_bytes(&zrpos_hdr);
+                    }
+                    ZmodemHeaderType::Zdata(_pos) => {
+                        // Data header received, data subpackets follow in stream_buffer; next progress loop will decode them
+                    }
+                    ZmodemHeaderType::Zeof => {
+                        // Flush current file
+                        if let Some((mut f, _, _, _, _)) = current_file.0.take() {
+                            let _ = f.flush();
+                        }
+                        // Reply ZRINIT to acknowledge EOF
+                        let zrinit_hdr = build_hex_header(ZRINIT, [0, 0, 0, CANFDX | CANOVIO | CANFC32]);
+                        terminal.send_bytes(&zrinit_hdr);
+                    }
+                    ZmodemHeaderType::Zfin => {
+                        // End of session
+                        if let Some((mut f, _, _, _, _)) = current_file.0.take() {
+                            let _ = f.flush();
+                        }
+                        let zfin_hdr = build_hex_header(ZFIN, [0, 0, 0, 0]);
+                        terminal.send_bytes(&zfin_hdr);
+                        terminal.send_bytes(b"OO\r");
+                        log::info!("[ZMODEM-SESSION] Download completed successfully | path={:?}", last_saved_path);
+                        return Ok(last_saved_path);
+                    }
+                    ZmodemHeaderType::Zcan => {
+                        log::info!("[ZMODEM-SESSION] Received Zcan from remote, draining...");
+                        abort_and_drain_stream(&terminal, &mut raw_rx).await;
+                        return Err("Transfer cancelled by remote".to_string());
+                    }
+                    ZmodemHeaderType::Zrqinit => {
+                        let zrinit_hdr = build_hex_header(ZRINIT, [0, 0, 0, CANFDX | CANOVIO | CANFC32]);
+                        terminal.send_bytes(&zrinit_hdr);
+                    }
+                    ZmodemHeaderType::Znak => {
+                        log::warn!("[ZMODEM-SESSION] Remote sent ZNAK during download");
+                    }
+                    ZmodemHeaderType::Unknown(ZCOMMAND) => {
+                        log::warn!("[ZMODEM-SESSION] Remote sent unsupported ZCOMMAND header, aborting");
+                        abort_and_drain_stream(&terminal, &mut raw_rx).await;
+                        return Err("Remote sent unsupported ZCOMMAND request".to_string());
+                    }
+                    _ => {}
                 }
             }
         }
@@ -802,5 +854,544 @@ mod tests {
             reason: ZmodemSkipReason::Protected,
         };
         assert_ne!(prog_event, skip_event);
+    }
+
+    struct MockTransport {
+        tx: tokio::sync::mpsc::UnboundedSender<Vec<u8>>,
+    }
+
+    impl crate::terminal::TerminalTransport for MockTransport {
+        fn send_input(&self, _terminal_id: &str, data: &[u8]) {
+            let _ = self.tx.send(data.to_vec());
+        }
+        fn resize(&self, _terminal_id: &str, _cols: u16, _rows: u16) {}
+        fn uses_mouse_backend(&self) -> bool {
+            false
+        }
+    }
+
+    async fn wait_for_header(
+        buf: &mut Vec<u8>,
+        rx: &mut tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+        expected_type: u8,
+        timeout: std::time::Duration,
+    ) -> Option<ZmodemHeader> {
+        let start = std::time::Instant::now();
+        while start.elapsed() < timeout {
+            while let Some((hdr, _start, end)) = parse_any_header(buf) {
+                buf.drain(..end);
+                if hdr.header_type == expected_type {
+                    return Some(hdr);
+                }
+            }
+            match tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await {
+                Ok(Some(chunk)) => buf.extend_from_slice(&chunk),
+                Ok(None) => return None,
+                Err(_) => {}
+            }
+        }
+        None
+    }
+
+    #[tokio::test]
+    async fn test_mock_zmodem_upload_empty_file() {
+        let tmp = std::env::temp_dir();
+        let empty_file_path = tmp.join(format!("empty_upload_{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&empty_file_path, b"").unwrap();
+
+        let (term_tx, mut term_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let (raw_tx, raw_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let transport = Arc::new(MockTransport { tx: term_tx });
+        let terminal = Arc::new(crate::terminal::Terminal::new(
+            "mock_term".to_string(),
+            crate::terminal::TerminalSize::default(),
+            transport,
+            "/tmp".to_string(),
+        ));
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+        let empty_path_clone = empty_file_path.clone();
+
+        let upload_task = tokio::spawn(async move {
+            send_zmodem_upload_with_progress(
+                terminal,
+                vec![empty_path_clone],
+                false,
+                raw_rx,
+                cancel_flag_clone,
+                |_| {},
+            )
+            .await
+        });
+
+        let peer_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            // 1. Send initial ZRINIT
+            let zrinit = build_hex_header(ZRINIT, [0, 0, 0, CANFC32 | ESCCTL]);
+            let _ = raw_tx.send(zrinit);
+
+            // 2. Wait for ZFILE
+            let hdr = wait_for_header(&mut buf, &mut term_rx, ZFILE, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFILE");
+            assert_eq!(hdr.header_type, ZFILE);
+
+            // 3. Reply ZRPOS(0)
+            let zrpos = build_hex_header(ZRPOS, [0, 0, 0, 0]);
+            let _ = raw_tx.send(zrpos);
+
+            // 4. Wait for ZEOF
+            let zeof = wait_for_header(&mut buf, &mut term_rx, ZEOF, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZEOF");
+            assert_eq!(zeof.header_type, ZEOF);
+
+            // 5. Send ZRINIT to acknowledge EOF
+            let zrinit2 = build_hex_header(ZRINIT, [0, 0, 0, CANFC32]);
+            let _ = raw_tx.send(zrinit2);
+
+            // 6. Wait for ZFIN
+            let zfin = wait_for_header(&mut buf, &mut term_rx, ZFIN, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFIN");
+            assert_eq!(zfin.header_type, ZFIN);
+
+            // 7. Reply ZFIN
+            let zfin_reply = build_hex_header(ZFIN, [0, 0, 0, 0]);
+            let _ = raw_tx.send(zfin_reply);
+        });
+
+        let (res_upload, _) = tokio::join!(upload_task, peer_task);
+        let summary = res_upload.unwrap().expect("upload succeeded");
+        assert_eq!(summary.total_files, 1);
+        assert_eq!(summary.transferred_files, 1);
+        assert_eq!(summary.transferred_bytes, 0);
+
+        let _ = std::fs::remove_file(empty_file_path);
+    }
+
+    #[tokio::test]
+    async fn test_mock_zmodem_upload_normal_file() {
+        let tmp = std::env::temp_dir();
+        let test_file_path = tmp.join(format!("normal_upload_{}.bin", uuid::Uuid::new_v4()));
+        let test_data = vec![0x42u8; 8192];
+        std::fs::write(&test_file_path, &test_data).unwrap();
+
+        let (term_tx, mut term_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let (raw_tx, raw_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let transport = Arc::new(MockTransport { tx: term_tx });
+        let terminal = Arc::new(crate::terminal::Terminal::new(
+            "mock_term".to_string(),
+            crate::terminal::TerminalSize::default(),
+            transport,
+            "/tmp".to_string(),
+        ));
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+        let path_clone = test_file_path.clone();
+
+        let upload_task = tokio::spawn(async move {
+            send_zmodem_upload_with_progress(
+                terminal,
+                vec![path_clone],
+                false,
+                raw_rx,
+                cancel_flag_clone,
+                |_| {},
+            )
+            .await
+        });
+
+        let peer_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            // 1. Send initial ZRINIT
+            let zrinit = build_hex_header(ZRINIT, [0, 0, 0, CANFC32 | ESCCTL]);
+            let _ = raw_tx.send(zrinit);
+
+            // 2. Wait for ZFILE
+            let hdr = wait_for_header(&mut buf, &mut term_rx, ZFILE, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFILE");
+            assert_eq!(hdr.header_type, ZFILE);
+
+            // 3. Reply ZRPOS(0)
+            let zrpos = build_hex_header(ZRPOS, [0, 0, 0, 0]);
+            let _ = raw_tx.send(zrpos);
+
+            // 4. Wait for ZDATA
+            let zdata = wait_for_header(&mut buf, &mut term_rx, ZDATA, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZDATA");
+            assert_eq!(zdata.header_type, ZDATA);
+
+            // 5. Wait for ZEOF
+            let zeof = wait_for_header(&mut buf, &mut term_rx, ZEOF, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZEOF");
+            assert_eq!(zeof.header_type, ZEOF);
+
+            // 6. Send ZRINIT
+            let zrinit2 = build_hex_header(ZRINIT, [0, 0, 0, CANFC32]);
+            let _ = raw_tx.send(zrinit2);
+
+            // 7. Wait for ZFIN
+            let zfin = wait_for_header(&mut buf, &mut term_rx, ZFIN, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFIN");
+            assert_eq!(zfin.header_type, ZFIN);
+
+            // 8. Reply ZFIN
+            let zfin_reply = build_hex_header(ZFIN, [0, 0, 0, 0]);
+            let _ = raw_tx.send(zfin_reply);
+        });
+
+        let (res_upload, _) = tokio::join!(upload_task, peer_task);
+        let summary = res_upload.unwrap().expect("upload succeeded");
+        assert_eq!(summary.total_files, 1);
+        assert_eq!(summary.transferred_files, 1);
+        assert_eq!(summary.transferred_bytes, 8192);
+
+        let _ = std::fs::remove_file(test_file_path);
+    }
+
+    #[tokio::test]
+    async fn test_mock_zmodem_upload_skip_file() {
+        let tmp = std::env::temp_dir();
+        let test_file_path = tmp.join(format!("skip_upload_{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&test_file_path, b"content").unwrap();
+
+        let (term_tx, mut term_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let (raw_tx, raw_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let transport = Arc::new(MockTransport { tx: term_tx });
+        let terminal = Arc::new(crate::terminal::Terminal::new(
+            "mock_term".to_string(),
+            crate::terminal::TerminalSize::default(),
+            transport,
+            "/tmp".to_string(),
+        ));
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+        let path_clone = test_file_path.clone();
+
+        let upload_task = tokio::spawn(async move {
+            send_zmodem_upload_with_progress(
+                terminal,
+                vec![path_clone],
+                false,
+                raw_rx,
+                cancel_flag_clone,
+                |_| {},
+            )
+            .await
+        });
+
+        let peer_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            // 1. Initial ZRINIT
+            let zrinit = build_hex_header(ZRINIT, [0, 0, 0, CANFC32]);
+            let _ = raw_tx.send(zrinit);
+
+            // 2. Wait for ZFILE
+            let _hdr = wait_for_header(&mut buf, &mut term_rx, ZFILE, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFILE");
+
+            // 3. Send ZSKIP (indicating remote skips file)
+            let mut skip_flags = [0u8; 4];
+            skip_flags[ZF1_IDX] = ZF1_ZMPROT;
+            let zskip = build_hex_header(ZSKIP, skip_flags);
+            let _ = raw_tx.send(zskip);
+
+            // 4. Wait for ZFIN
+            let zfin = wait_for_header(&mut buf, &mut term_rx, ZFIN, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFIN");
+            assert_eq!(zfin.header_type, ZFIN);
+
+            // 5. Reply ZFIN
+            let _ = raw_tx.send(build_hex_header(ZFIN, [0, 0, 0, 0]));
+        });
+
+        let (res_upload, _) = tokio::join!(upload_task, peer_task);
+        let summary = res_upload.unwrap().expect("upload succeeded");
+        assert_eq!(summary.total_files, 1);
+        assert_eq!(summary.transferred_files, 0);
+        assert_eq!(summary.skipped_files.len(), 1);
+        assert_eq!(summary.skipped_files[0].1, ZmodemSkipReason::Protected);
+
+        let _ = std::fs::remove_file(test_file_path);
+    }
+
+    #[tokio::test]
+    async fn test_mock_zmodem_download_file() {
+        let tmp = std::env::temp_dir();
+        let target_dir = tmp.join(format!("zmodem_dl_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let (term_tx, mut term_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let (raw_tx, raw_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let transport = Arc::new(MockTransport { tx: term_tx });
+        let terminal = Arc::new(crate::terminal::Terminal::new(
+            "mock_term".to_string(),
+            crate::terminal::TerminalSize::default(),
+            transport,
+            "/tmp".to_string(),
+        ));
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+        let target_dir_clone = target_dir.clone();
+
+        let download_task = tokio::spawn(async move {
+            receive_zmodem_download_with_progress(
+                terminal,
+                target_dir_clone,
+                raw_rx,
+                cancel_flag_clone,
+                |_, _, _, _, _, _| {},
+            )
+            .await
+        });
+
+        let peer_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            // 1. Wait for receiver's initial ZRINIT
+            let zrinit = wait_for_header(&mut buf, &mut term_rx, ZRINIT, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received initial ZRINIT");
+            assert_eq!(zrinit.header_type, ZRINIT);
+
+            // 2. Send ZSINIT
+            let zsinit = build_hex_header(ZSINIT, [0, 0, 0, 0]);
+            let _ = raw_tx.send(zsinit);
+
+            // 3. Wait for receiver's ZACK
+            let zack = wait_for_header(&mut buf, &mut term_rx, ZACK, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZACK to ZSINIT");
+            assert_eq!(zack.header_type, ZACK);
+
+            // 4. Send ZFILE header + subpacket
+            let payload = build_zfile_payload("downloaded_sample.bin", 128);
+            let mut zfile_wire = build_hex_header(ZFILE, [0, 0, 0, 1]);
+            let subpacket = encode_subpacket_with_escctl(&payload, ZCRCW, false, false);
+            zfile_wire.extend_from_slice(&subpacket);
+            let _ = raw_tx.send(zfile_wire);
+
+            // 5. Wait for receiver's ZRPOS
+            let zrpos = wait_for_header(&mut buf, &mut term_rx, ZRPOS, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZRPOS");
+            assert_eq!(zrpos.header_type, ZRPOS);
+
+            // 6. Send ZDATA + 128 bytes data subpacket + ZEOF
+            let test_bytes = vec![0x5au8; 128];
+            let zdata = build_binary32_header_with_escctl(ZDATA, [0, 0, 0, 0], false);
+            let data_subpacket = encode_subpacket_with_escctl(&test_bytes, ZCRCE, true, false);
+            let zeof = build_hex_header(ZEOF, (128u32).to_le_bytes());
+            let mut data_wire = zdata;
+            data_wire.extend_from_slice(&data_subpacket);
+            data_wire.extend_from_slice(&zeof);
+            let _ = raw_tx.send(data_wire);
+
+            // 7. Wait for receiver's ZRINIT after EOF
+            let zrinit2 = wait_for_header(&mut buf, &mut term_rx, ZRINIT, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZRINIT after ZEOF");
+            assert_eq!(zrinit2.header_type, ZRINIT);
+
+            // 8. Send ZFIN
+            let zfin = build_hex_header(ZFIN, [0, 0, 0, 0]);
+            let _ = raw_tx.send(zfin);
+
+            // 9. Wait for receiver's ZFIN reply
+            let zfin_reply = wait_for_header(&mut buf, &mut term_rx, ZFIN, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFIN reply");
+            assert_eq!(zfin_reply.header_type, ZFIN);
+        });
+
+        let (res_download, _) = tokio::join!(download_task, peer_task);
+        let saved_path = res_download.unwrap().expect("download succeeded");
+        assert!(saved_path.exists());
+        let read_bytes = std::fs::read(&saved_path).unwrap();
+        assert_eq!(read_bytes.len(), 128);
+        assert_eq!(read_bytes, vec![0x5au8; 128]);
+
+        let _ = std::fs::remove_dir_all(target_dir);
+    }
+
+    #[tokio::test]
+    async fn test_mock_zmodem_upload_with_zrpos_retransmit() {
+        let tmp = std::env::temp_dir();
+        let test_file_path = tmp.join(format!("retransmit_upload_{}.bin", uuid::Uuid::new_v4()));
+        let test_data = vec![0x33u8; 8192];
+        std::fs::write(&test_file_path, &test_data).unwrap();
+
+        let (term_tx, mut term_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let (raw_tx, raw_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let transport = Arc::new(MockTransport { tx: term_tx });
+        let terminal = Arc::new(crate::terminal::Terminal::new(
+            "mock_term".to_string(),
+            crate::terminal::TerminalSize::default(),
+            transport,
+            "/tmp".to_string(),
+        ));
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+        let path_clone = test_file_path.clone();
+
+        let upload_task = tokio::spawn(async move {
+            send_zmodem_upload_with_progress(
+                terminal,
+                vec![path_clone],
+                false,
+                raw_rx,
+                cancel_flag_clone,
+                |_| {},
+            )
+            .await
+        });
+
+        let peer_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            // 1. Initial ZRINIT
+            let zrinit = build_hex_header(ZRINIT, [0, 0, 0, CANFC32]);
+            let _ = raw_tx.send(zrinit);
+
+            // 2. Wait for ZFILE
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZFILE, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFILE");
+
+            // 3. Reply ZRPOS(0)
+            let _ = raw_tx.send(build_hex_header(ZRPOS, [0, 0, 0, 0]));
+
+            // 4. Wait for initial ZDATA(0)
+            let zdata = wait_for_header(&mut buf, &mut term_rx, ZDATA, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received initial ZDATA");
+            assert_eq!(zdata.position(), 0);
+
+            // 5. Simulate error: peer sends ZRPOS(4096) to request retransmission
+            let _ = raw_tx.send(build_hex_header(ZRPOS, (4096u32).to_le_bytes()));
+
+            // 6. Sender must send a new ZDATA(4096) header!
+            let zdata_retransmit = wait_for_header(&mut buf, &mut term_rx, ZDATA, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received retransmitted ZDATA");
+            assert_eq!(zdata_retransmit.position(), 4096);
+
+            // 7. Wait for ZEOF
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZEOF, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZEOF");
+
+            // 8. Reply ZRINIT
+            let _ = raw_tx.send(build_hex_header(ZRINIT, [0, 0, 0, CANFC32]));
+
+            // 9. Wait for ZFIN
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZFIN, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFIN");
+
+            // 10. Reply ZFIN
+            let _ = raw_tx.send(build_hex_header(ZFIN, [0, 0, 0, 0]));
+        });
+
+        let (res_upload, _) = tokio::join!(upload_task, peer_task);
+        let summary = res_upload.unwrap().expect("upload succeeded with retransmission");
+        assert_eq!(summary.total_files, 1);
+        assert_eq!(summary.transferred_files, 1);
+        assert_eq!(summary.transferred_bytes, 8192);
+
+        let _ = std::fs::remove_file(test_file_path);
+    }
+
+    #[tokio::test]
+    async fn test_mock_zmodem_upload_with_znak_retry() {
+        let tmp = std::env::temp_dir();
+        let test_file_path = tmp.join(format!("znak_upload_{}.txt", uuid::Uuid::new_v4()));
+        std::fs::write(&test_file_path, b"test znak retry").unwrap();
+
+        let (term_tx, mut term_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let (raw_tx, raw_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+        let transport = Arc::new(MockTransport { tx: term_tx });
+        let terminal = Arc::new(crate::terminal::Terminal::new(
+            "mock_term".to_string(),
+            crate::terminal::TerminalSize::default(),
+            transport,
+            "/tmp".to_string(),
+        ));
+
+        let cancel_flag = Arc::new(AtomicBool::new(false));
+        let cancel_flag_clone = cancel_flag.clone();
+        let path_clone = test_file_path.clone();
+
+        let upload_task = tokio::spawn(async move {
+            send_zmodem_upload_with_progress(
+                terminal,
+                vec![path_clone],
+                false,
+                raw_rx,
+                cancel_flag_clone,
+                |_| {},
+            )
+            .await
+        });
+
+        let peer_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            // 1. Initial ZRINIT
+            let _ = raw_tx.send(build_hex_header(ZRINIT, [0, 0, 0, CANFC32]));
+
+            // 2. Wait for first ZFILE
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZFILE, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received first ZFILE");
+
+            // 3. Send ZNAK to simulate garbled packet
+            let _ = raw_tx.send(build_hex_header(ZNAK, [0, 0, 0, 0]));
+
+            // 4. Wait for retransmitted ZFILE
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZFILE, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received retransmitted ZFILE");
+
+            // 5. Now reply ZRPOS(0)
+            let _ = raw_tx.send(build_hex_header(ZRPOS, [0, 0, 0, 0]));
+
+            // 6. Wait for ZDATA
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZDATA, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZDATA");
+
+            // 7. Wait for ZEOF
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZEOF, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZEOF");
+
+            // 8. Reply ZRINIT
+            let _ = raw_tx.send(build_hex_header(ZRINIT, [0, 0, 0, CANFC32]));
+
+            // 9. Wait for ZFIN
+            let _ = wait_for_header(&mut buf, &mut term_rx, ZFIN, std::time::Duration::from_secs(2))
+                .await
+                .expect("peer received ZFIN");
+
+            // 10. Reply ZFIN
+            let _ = raw_tx.send(build_hex_header(ZFIN, [0, 0, 0, 0]));
+        });
+
+        let (res_upload, _) = tokio::join!(upload_task, peer_task);
+        let summary = res_upload.unwrap().expect("upload succeeded after ZNAK retry");
+        assert_eq!(summary.total_files, 1);
+        assert_eq!(summary.transferred_files, 1);
+
+        let _ = std::fs::remove_file(test_file_path);
     }
 }

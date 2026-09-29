@@ -7,5 +7,6 @@ mod prompt_jump;
 mod resize_authority;
 mod url_detect;
 mod xterm_color;
+mod zmodem_missing_rz;
 
 pub(crate) use helpers::{CapturingTransport, NullTransport};

@@ -61,7 +61,6 @@ impl Terminal {
 
         let (clean_bytes, frames) = crate::zmodem::strip_all_zmodem_frames(data);
 
-        let mut missing_rz_hint: Option<Vec<u8>> = None;
         if self.has_pending_upload_files() {
             let text = String::from_utf8_lossy(data);
             if text.contains("command not found")
@@ -70,14 +69,12 @@ impl Terminal {
                 || text.contains("rz: command not found")
                 || text.contains("未找到命令")
                 || text.contains("Command 'rz' not found")
+                || text.contains("Unknown command: rz")
+                || text.contains("Unknown command 'rz'")
+                || (text.contains("No such file") && text.contains("rz"))
             {
                 log::warn!("[ZMODEM] Detected remote missing rz command, clearing pending upload queue");
                 self.clear_pending_upload_files();
-                missing_rz_hint = Some(
-                    "\r\n\x1b[33m[Velowork] 远端服务器未安装 rz 工具（可通过 apt/yum install lrzsz 安装），已取消拖拽上传任务。\x1b[0m\r\n"
-                        .as_bytes()
-                        .to_vec(),
-                );
             }
         }
 
@@ -135,67 +132,61 @@ impl Terminal {
             screen_data = &spliced_buffer;
         }
 
-        if screen_data.is_empty() {
-            return;
-        }
+        if !screen_data.is_empty() {
+            let mut term = self.term.lock();
+            let mut processor = self.processor.lock();
+            let mut sidecar = self.osc_sidecar.lock();
+            let mut prompt_sidecar = self.prompt_sidecar.lock();
+            let mut prompt_tracker = self.prompt_tracker.lock();
 
-        let mut term = self.term.lock();
-        let mut processor = self.processor.lock();
-        let mut sidecar = self.osc_sidecar.lock();
-        let mut prompt_sidecar = self.prompt_sidecar.lock();
-        let mut prompt_tracker = self.prompt_tracker.lock();
+            let history_before = term.grid().history_size();
 
-        let history_before = term.grid().history_size();
+            // OSC 7 / OSC 9 / XTVERSION observer runs on the full chunk in one
+            // pass — it never needs cursor-accurate positioning.
+            sidecar.advance(screen_data);
 
-        // OSC 7 / OSC 9 / XTVERSION observer runs on the full chunk in one
-        // pass — it never needs cursor-accurate positioning.
-        sidecar.advance(screen_data);
+            // OSC 133 requires the main processor and the prompt sidecar to
+            // advance in lockstep so we can snapshot the cursor at the exact
+            // byte where each mark arrives. `advance_until_terminated` stops
+            // the prompt sidecar at every OSC 133 so the main processor can
+            // catch up before we read `grid.cursor.point`.
+            let mut block_tracker = self.block_tracker.lock();
+            let cwd = self.reported_cwd.lock().clone();
+            let (command_finished, finished_block) = advance_with_prompt_marks(
+                &mut *term,
+                &mut processor,
+                &mut prompt_sidecar,
+                &mut prompt_tracker,
+                &mut block_tracker,
+                cwd,
+                screen_data,
+            );
+            if command_finished {
+                self.command_finished_pending.store(true, Ordering::Relaxed);
+            }
+            if let Some(block) = finished_block {
+                let _ = self.command_finish_tx.send(std::sync::Arc::new(block));
+            }
 
-        // OSC 133 requires the main processor and the prompt sidecar to
-        // advance in lockstep so we can snapshot the cursor at the exact
-        // byte where each mark arrives. `advance_until_terminated` stops
-        // the prompt sidecar at every OSC 133 so the main processor can
-        // catch up before we read `grid.cursor.point`.
-        let mut block_tracker = self.block_tracker.lock();
-        let cwd = self.reported_cwd.lock().clone();
-        let (command_finished, finished_block) = advance_with_prompt_marks(
-            &mut *term,
-            &mut processor,
-            &mut prompt_sidecar,
-            &mut prompt_tracker,
-            &mut block_tracker,
-            cwd,
-            screen_data,
-        );
-        if command_finished {
-            self.command_finished_pending.store(true, Ordering::Relaxed);
-        }
-        if let Some(block) = finished_block {
-            let _ = self.command_finish_tx.send(std::sync::Arc::new(block));
-        }
+            let history_after = term.grid().history_size();
+            let delta = history_after.saturating_sub(history_before);
+            prompt_tracker.on_history_changed(
+                history_before,
+                history_after,
+                term.grid().topmost_line().0,
+            );
+            block_tracker.on_history_changed(delta, term.grid().topmost_line().0);
 
-        let history_after = term.grid().history_size();
-        let delta = history_after.saturating_sub(history_before);
-        prompt_tracker.on_history_changed(
-            history_before,
-            history_after,
-            term.grid().topmost_line().0,
-        );
-        block_tracker.on_history_changed(delta, term.grid().topmost_line().0);
+            let real_cursor = term.grid().cursor.point;
+            self.predictive_echo.lock().on_remote_output(real_cursor);
 
-        let real_cursor = term.grid().cursor.point;
-        self.predictive_echo.lock().on_remote_output(real_cursor);
+            // New output disengages the prompt-jump walker so the next
+            // Above jump starts from the newest prompt again.
+            *self.prompt_jump_index.lock() = None;
 
-        // New output disengages the prompt-jump walker so the next
-        // Above jump starts from the newest prompt again.
-        *self.prompt_jump_index.lock() = None;
-
-        self.dirty.store(true, Ordering::Relaxed);
-        self.content_generation.fetch_add(1, Ordering::Relaxed);
-        *self.last_output_time.lock() = Instant::now();
-
-        if let Some(hint) = missing_rz_hint {
-            self.write_to_screen(&hint);
+            self.dirty.store(true, Ordering::Relaxed);
+            self.content_generation.fetch_add(1, Ordering::Relaxed);
+            *self.last_output_time.lock() = Instant::now();
         }
     }
 
