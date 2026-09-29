@@ -215,7 +215,7 @@ pub fn build_hex_header(header_type: u8, flags: [u8; 4]) -> Vec<u8> {
 }
 
 /// Format a ZMODEM binary header with 16-bit CRC (`*\x18A...`)
-pub fn build_binary16_header(header_type: u8, flags: [u8; 4]) -> Vec<u8> {
+pub fn build_binary16_header_with_escctl(header_type: u8, flags: [u8; 4], escctl: bool) -> Vec<u8> {
     let mut payload = Vec::with_capacity(5);
     payload.push(header_type);
     payload.extend_from_slice(&flags);
@@ -226,14 +226,19 @@ pub fn build_binary16_header(header_type: u8, flags: [u8; 4]) -> Vec<u8> {
     out.push(ZDLE);
     out.push(ZBIN);
 
-    out.extend_from_slice(&zdle_encode(&payload));
+    out.extend_from_slice(&zdle_encode_with_escctl(&payload, escctl));
     let crc_bytes = crc.to_be_bytes();
-    out.extend_from_slice(&zdle_encode(&crc_bytes));
+    out.extend_from_slice(&zdle_encode_with_escctl(&crc_bytes, escctl));
     out
 }
 
+/// Format a ZMODEM binary header with 16-bit CRC (`*\x18A...`) (non-ESCCTL)
+pub fn build_binary16_header(header_type: u8, flags: [u8; 4]) -> Vec<u8> {
+    build_binary16_header_with_escctl(header_type, flags, false)
+}
+
 /// Format a ZMODEM binary header with 32-bit CRC (`*\x18C...`)
-pub fn build_binary32_header(header_type: u8, flags: [u8; 4]) -> Vec<u8> {
+pub fn build_binary32_header_with_escctl(header_type: u8, flags: [u8; 4], escctl: bool) -> Vec<u8> {
     let mut payload = Vec::with_capacity(5);
     payload.push(header_type);
     payload.extend_from_slice(&flags);
@@ -244,10 +249,15 @@ pub fn build_binary32_header(header_type: u8, flags: [u8; 4]) -> Vec<u8> {
     out.push(ZDLE);
     out.push(ZBIN32);
 
-    out.extend_from_slice(&zdle_encode(&payload));
+    out.extend_from_slice(&zdle_encode_with_escctl(&payload, escctl));
     let crc_bytes = crc.to_le_bytes();
-    out.extend_from_slice(&zdle_encode(&crc_bytes));
+    out.extend_from_slice(&zdle_encode_with_escctl(&crc_bytes, escctl));
     out
+}
+
+/// Format a ZMODEM binary header with 32-bit CRC (`*\x18C...`) (non-ESCCTL)
+pub fn build_binary32_header(header_type: u8, flags: [u8; 4]) -> Vec<u8> {
+    build_binary32_header_with_escctl(header_type, flags, false)
 }
 
 /// Parse a ZMODEM hex header from bytes.
@@ -405,8 +415,10 @@ pub fn parse_any_header(data: &[u8]) -> Option<(ZmodemHeader, usize, usize)> {
     candidates.into_iter().min_by_key(|c| c.0).map(|(s, e, h)| (h, s, e))
 }
 
-/// ZDLE escape bytes in buffer for transmission
-pub fn zdle_encode(data: &[u8]) -> Vec<u8> {
+/// ZDLE escape bytes in buffer for transmission with optional ESCCTL mode.
+/// If `escctl` is true, all ASCII control characters (0x00..=0x1F, 0x80..=0x9F) as well as
+/// 0x7F, 0xFF, and ZDLE are escaped.
+pub fn zdle_encode_with_escctl(data: &[u8], escctl: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(data.len() * 2);
     for &b in data {
         match b {
@@ -418,6 +430,10 @@ pub fn zdle_encode(data: &[u8]) -> Vec<u8> {
                 out.push(ZDLE);
                 out.push(ZRUB1);
             }
+            _ if escctl && (b & 0x60) == 0 => {
+                out.push(ZDLE);
+                out.push(b ^ 0x40);
+            }
             0x10 | 0x11 | 0x13 | 0x18 | 0x8d | 0x90 | 0x91 | 0x93 => {
                 out.push(ZDLE);
                 out.push(b ^ 0x40);
@@ -426,6 +442,11 @@ pub fn zdle_encode(data: &[u8]) -> Vec<u8> {
         }
     }
     out
+}
+
+/// ZDLE escape bytes in buffer for transmission (standard non-ESCCTL mode)
+pub fn zdle_encode(data: &[u8]) -> Vec<u8> {
+    zdle_encode_with_escctl(data, false)
 }
 
 /// ZDLE decode incoming bytes, unescaping ZDLE sequences.
@@ -456,10 +477,10 @@ pub fn zdle_decode(data: &[u8]) -> (Vec<u8>, usize) {
     (out, i)
 }
 
-/// Encode a ZMODEM data subpacket.
+/// Encode a ZMODEM data subpacket with ESCCTL support.
 /// Format: `[zdle_encode(data)] [ZDLE] [frame_end] [zdle_encode(crc)]`
-pub fn encode_subpacket(data: &[u8], frame_end: u8, use_crc32: bool) -> Vec<u8> {
-    let encoded_data = zdle_encode(data);
+pub fn encode_subpacket_with_escctl(data: &[u8], frame_end: u8, use_crc32: bool, escctl: bool) -> Vec<u8> {
+    let encoded_data = zdle_encode_with_escctl(data, escctl);
     let mut out = Vec::with_capacity(encoded_data.len() + 12);
     out.extend_from_slice(&encoded_data);
     out.push(ZDLE);
@@ -471,17 +492,23 @@ pub fn encode_subpacket(data: &[u8], frame_end: u8, use_crc32: bool) -> Vec<u8> 
         crc_input.push(frame_end);
         let crc = crc32(&crc_input);
         let crc_bytes = crc.to_le_bytes();
-        out.extend_from_slice(&zdle_encode(&crc_bytes));
+        out.extend_from_slice(&zdle_encode_with_escctl(&crc_bytes, escctl));
     } else {
         let mut crc_input = Vec::with_capacity(data.len() + 1);
         crc_input.extend_from_slice(data);
         crc_input.push(frame_end);
         let crc = crc16(&crc_input);
         let crc_bytes = crc.to_be_bytes();
-        out.extend_from_slice(&zdle_encode(&crc_bytes));
+        out.extend_from_slice(&zdle_encode_with_escctl(&crc_bytes, escctl));
     }
 
     out
+}
+
+/// Encode a ZMODEM data subpacket (standard non-ESCCTL mode).
+/// Format: `[zdle_encode(data)] [ZDLE] [frame_end] [zdle_encode(crc)]`
+pub fn encode_subpacket(data: &[u8], frame_end: u8, use_crc32: bool) -> Vec<u8> {
+    encode_subpacket_with_escctl(data, frame_end, use_crc32, false)
 }
 
 /// Decode a ZMODEM data subpacket from incoming buffer.
@@ -842,5 +869,32 @@ mod tests {
         let (_, flags_prot_out, _, _) = parse_hex_header(&zfile_hdr_prot).expect("parse prot zfile");
         assert_eq!(flags_prot_out[ZF0_IDX], ZCBIN);
         assert_eq!(flags_prot_out[ZF1_IDX], ZF1_ZMPROT);
+    }
+
+    #[test]
+    fn test_zdle_encode_with_escctl() {
+        // Test that 0x00 (NUL), 0x0D (CR), 0x0A (LF), 0x1B (ESC) are escaped under ESCCTL
+        let raw = vec![0x00, 0x0D, 0x0A, 0x1B, 0x41, 0x7F, 0xFF, 0x80];
+        let encoded_escctl = zdle_encode_with_escctl(&raw, true);
+
+        // 0x00 must be escaped as ZDLE + (0x00 ^ 0x40) == [ZDLE, 0x40] ('@')
+        assert!(encoded_escctl.windows(2).any(|w| w == [ZDLE, 0x40]));
+        // 0x0D must be escaped as ZDLE + (0x0D ^ 0x40) == [ZDLE, 0x4D] ('M')
+        assert!(encoded_escctl.windows(2).any(|w| w == [ZDLE, 0x4D]));
+        // 0x41 ('A') must NOT be escaped
+        assert!(encoded_escctl.contains(&0x41));
+
+        // Decoding must recover exact raw bytes
+        let (decoded, consumed) = zdle_decode(&encoded_escctl);
+        assert_eq!(decoded, raw);
+        assert_eq!(consumed, encoded_escctl.len());
+
+        // Subpacket roundtrip with ESCCTL
+        let subpacket = encode_subpacket_with_escctl(&raw, ZCRCW, false, true);
+        let (sub_payload, frame_end, sub_consumed) =
+            decode_subpacket(&subpacket, false).expect("decode binary subpacket with escctl");
+        assert_eq!(sub_payload, raw);
+        assert_eq!(frame_end, ZCRCW);
+        assert_eq!(sub_consumed, subpacket.len());
     }
 }

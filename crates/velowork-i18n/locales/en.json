@@ -742,7 +742,9 @@
       "status_cancelled": "Transfer Cancelled",
       "all_skipped_or_protected": "All files were skipped or protected; no files were modified.",
       "skipped_protected": "Rejected: {} (protected / permission denied)",
-      "skipped_exists": "Skipped: {} (already exists)"
+      "skipped_exists": "Skipped: {} (already exists)",
+      "drag_upload_timeout": "Timed out waiting for remote rz response; pending upload cancelled.",
+      "rz_not_installed": "Remote host does not have rz installed; please install the lrzsz package."
     },
     "no_blocks_recorded": "No recorded command blocks yet",
     "rerun": "Re-run",

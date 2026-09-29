@@ -649,6 +649,14 @@ impl Terminal {
         *self.pending_upload_files.lock() = files;
     }
 
+    pub fn has_pending_upload_files(&self) -> bool {
+        !self.pending_upload_files.lock().is_empty()
+    }
+
+    pub fn clear_pending_upload_files(&self) {
+        self.pending_upload_files.lock().clear();
+    }
+
     pub fn take_pending_upload_files(&self) -> Vec<std::path::PathBuf> {
         std::mem::take(&mut *self.pending_upload_files.lock())
     }

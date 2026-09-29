@@ -742,7 +742,9 @@
       "status_cancelled": "传输已取消",
       "all_skipped_or_protected": "全部文件均已跳过或受保护，未修改任何文件。",
       "skipped_protected": "拒绝: {} (目标受保护或无写入权限)",
-      "skipped_exists": "跳过: {} (目标已存在)"
+      "skipped_exists": "跳过: {} (目标已存在)",
+      "drag_upload_timeout": "等待远端 rz 响应超时，已取消拖拽上传队列",
+      "rz_not_installed": "远端未安装 rz 工具，请安装 lrzsz 软件包"
     },
     "no_blocks_recorded": "暂无记录的命令执行块",
     "rerun": "重新执行",

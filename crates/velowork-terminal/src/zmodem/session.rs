@@ -186,6 +186,48 @@ where
     let mut transferred_files_count: usize = 0;
     let mut skipped_files: Vec<(String, ZmodemSkipReason)> = Vec::new();
 
+    // 0. Extract / wait for initial ZRINIT from remote rz to negotiate capabilities (ESCCTL, CRC32)
+    let mut escctl = false;
+    let mut use_crc32 = true;
+    let mut got_initial_zrinit = false;
+    let init_wait_start = Instant::now();
+
+    while !got_initial_zrinit && init_wait_start.elapsed() < std::time::Duration::from_secs(5) {
+        if cancel_flag.load(Ordering::Relaxed) {
+            log::info!("[ZMODEM-SESSION] Upload cancelled by user before initial handshake");
+            return Err("Upload cancelled by user".to_string());
+        }
+
+        match tokio::time::timeout(std::time::Duration::from_millis(300), raw_rx.recv()).await {
+            Ok(Some(chunk)) => {
+                stream_buffer.extend_from_slice(&chunk);
+                while let Some((hdr, _start, end)) = parse_any_header(&stream_buffer) {
+                    stream_buffer.drain(..end);
+                    if let ZmodemHeaderType::Zrinit = hdr.parsed_type() {
+                        escctl = (hdr.flags[ZF0_IDX] & ESCCTL) != 0;
+                        use_crc32 = (hdr.flags[ZF0_IDX] & CANFC32) != 0;
+                        log::info!(
+                            "[ZMODEM-SESSION] Negotiated initial ZRINIT: escctl={}, use_crc32={}, flags={:?}",
+                            escctl,
+                            use_crc32,
+                            hdr.flags
+                        );
+                        got_initial_zrinit = true;
+                        break;
+                    }
+                }
+            }
+            Ok(None) => return Err("Terminal stream closed before transfer began".to_string()),
+            Err(_) => {
+                // If remote hasn't sent ZRINIT after 1s, send a ZRQINIT to prompt it
+                if init_wait_start.elapsed() >= std::time::Duration::from_secs(1) {
+                    let zrqinit_hdr = build_hex_header(ZRQINIT, [0, 0, 0, 0]);
+                    terminal.send_bytes(&zrqinit_hdr);
+                }
+            }
+        }
+    }
+
     for (file_idx, local_path) in local_paths.into_iter().enumerate() {
         if cancel_flag.load(Ordering::Relaxed) {
             log::info!("[ZMODEM-SESSION] Upload cancelled by user, draining stream...");
@@ -214,14 +256,16 @@ where
         terminal.send_bytes(&zfile_hdr);
 
         // 2. Send ZFILE payload subpacket with ZCRCW delimiter
+        // In ZMODEM protocol (and lrzsz zm.c), subpackets following a ZHEX (hex) header ALWAYS use CRC-16.
         let zfile_payload = build_zfile_payload(&filename, file_size);
-        let zfile_subpacket = encode_subpacket(&zfile_payload, ZCRCW, false);
+        let zfile_subpacket = encode_subpacket_with_escctl(&zfile_payload, ZCRCW, false, escctl);
         terminal.send_bytes(&zfile_subpacket);
 
         // 3. Wait for ZRPOS from receiver
         let mut start_pos: u64 = 0;
         let mut got_zrpos = false;
         let mut file_skip_reason: Option<ZmodemSkipReason> = None;
+        let mut nak_retries = 0;
         let wait_start = Instant::now();
 
         while !got_zrpos && file_skip_reason.is_none() {
@@ -249,6 +293,19 @@ where
                                 start_pos = pos as u64;
                                 got_zrpos = true;
                                 break;
+                            }
+                            ZmodemHeaderType::Znak => {
+                                nak_retries += 1;
+                                log::warn!(
+                                    "[ZMODEM-UPLOAD] Remote rz sent ZNAK on ZFILE, retransmitting ({}/5)...",
+                                    nak_retries
+                                );
+                                if nak_retries > 5 {
+                                    terminal.send_bytes(ZMODEM_CANCEL_SEQUENCE);
+                                    return Err("Remote rz rejected ZFILE after 5 retries (ZNAK)".to_string());
+                                }
+                                terminal.send_bytes(&zfile_hdr);
+                                terminal.send_bytes(&zfile_subpacket);
                             }
                             ZmodemHeaderType::Zskip => {
                                 let is_explicit_protect = hdr.flags[ZF1_IDX] == ZF1_ZMPROT;
@@ -294,7 +351,7 @@ where
         }
 
         // 4. Send ZDATA header at offset
-        let zdata_hdr = build_binary32_header(ZDATA, (start_pos as u32).to_le_bytes());
+        let zdata_hdr = build_binary32_header_with_escctl(ZDATA, (start_pos as u32).to_le_bytes(), escctl);
         terminal.send_bytes(&zdata_hdr);
 
         // 5. Send file chunks with CRC32 streaming (Full Streaming with sliding window backpressure)
@@ -415,7 +472,7 @@ where
                 ZCRCG
             };
 
-            let subpacket = encode_subpacket(chunk, frame_end, true);
+            let subpacket = encode_subpacket_with_escctl(chunk, frame_end, use_crc32, escctl);
             terminal.send_bytes(&subpacket);
             pos = end;
 
@@ -435,7 +492,7 @@ where
         }
 
         // 6. Send ZEOF header
-        let zeof_hdr = build_binary32_header(ZEOF, (file_size as u32).to_le_bytes());
+        let zeof_hdr = build_binary32_header_with_escctl(ZEOF, (file_size as u32).to_le_bytes(), escctl);
         terminal.send_bytes(&zeof_hdr);
 
         // 7. Wait for ZRINIT from remote rz acknowledging file completion
@@ -452,6 +509,8 @@ where
                     while let Some((hdr, _start, consumed)) = parse_any_header(&stream_buffer) {
                         stream_buffer.drain(..consumed);
                         if let ZmodemHeaderType::Zrinit = hdr.parsed_type() {
+                            escctl = (hdr.flags[ZF0_IDX] & ESCCTL) != 0;
+                            use_crc32 = (hdr.flags[ZF0_IDX] & CANFC32) != 0;
                             got_zrinit = true;
                             break;
                         }

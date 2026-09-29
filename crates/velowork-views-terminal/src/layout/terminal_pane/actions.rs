@@ -6,6 +6,7 @@ use velowork_core::api::ActionRequest;
 use velowork_terminal::shell_config::ShellType;
 use velowork_workspace::state::SplitDirection;
 use gpui::*;
+use velowork_i18n::i18n;
 
 use super::TerminalPane;
 
@@ -228,8 +229,32 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         };
 
         if is_ssh {
+            let overwrite = cx
+                .try_global::<velowork_app_core::settings::GlobalSettings>()
+                .map(|g| g.0.read(cx).settings.zmodem_upload_overwrite)
+                .unwrap_or(false);
+            let rz_cmd = if overwrite { "rz -b -y\r" } else { "rz -b\r" };
+
             terminal.set_pending_upload_files(dropped_paths);
-            terminal.send_input("rz -e\r");
+            terminal.send_input(rz_cmd);
+
+            // Watchdog timer: clear pending upload files if not triggered within 6 seconds
+            let term_watchdog = terminal.clone();
+            cx.spawn(async move |this: WeakEntity<Self>, cx| {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(6))
+                    .await;
+                if term_watchdog.has_pending_upload_files() {
+                    log::info!("[ZMODEM] Pending upload expired after 6s timeout, clearing queue");
+                    term_watchdog.clear_pending_upload_files();
+                    let _ = this.update(cx, |_, cx| {
+                        let msg = i18n!(cx, "terminal.zmodem.drag_upload_timeout");
+                        velowork_workspace::toast::ToastManager::warning(msg, cx);
+                    });
+                }
+            })
+            .detach();
+
             cx.notify();
         } else {
             for path in &dropped_paths {

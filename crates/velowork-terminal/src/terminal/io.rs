@@ -61,6 +61,26 @@ impl Terminal {
 
         let (clean_bytes, frames) = crate::zmodem::strip_all_zmodem_frames(data);
 
+        let mut missing_rz_hint: Option<Vec<u8>> = None;
+        if self.has_pending_upload_files() {
+            let text = String::from_utf8_lossy(data);
+            if text.contains("command not found")
+                || text.contains("not found: rz")
+                || text.contains("rz: not found")
+                || text.contains("rz: command not found")
+                || text.contains("未找到命令")
+                || text.contains("Command 'rz' not found")
+            {
+                log::warn!("[ZMODEM] Detected remote missing rz command, clearing pending upload queue");
+                self.clear_pending_upload_files();
+                missing_rz_hint = Some(
+                    "\r\n\x1b[33m[Velowork] 远端服务器未安装 rz 工具（可通过 apt/yum install lrzsz 安装），已取消拖拽上传任务。\x1b[0m\r\n"
+                        .as_bytes()
+                        .to_vec(),
+                );
+            }
+        }
+
         let mut trigger_frame = None;
         if !is_suppressed {
             for frame in &frames {
@@ -170,6 +190,10 @@ impl Terminal {
         self.dirty.store(true, Ordering::Relaxed);
         self.content_generation.fetch_add(1, Ordering::Relaxed);
         *self.last_output_time.lock() = Instant::now();
+
+        if let Some(hint) = missing_rz_hint {
+            self.write_to_screen(&hint);
+        }
     }
 
     /// Write directly to the terminal screen grid (bypassing any ZMODEM session interception).
