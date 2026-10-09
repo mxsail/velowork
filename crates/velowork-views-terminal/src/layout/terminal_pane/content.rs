@@ -834,7 +834,8 @@ impl Render for TerminalContent {
         let is_default_scheme = active_color_scheme == "Dark"
             || active_color_scheme == "Velowork Dark"
             || active_color_scheme.is_empty();
-        let base_alpha = if image_set || (opacity < 1.0 && (is_same_bg || (is_default_scheme && bg_tint.is_none()))) {
+        let is_default_dark_match = t.is_dark() && is_default_scheme && bg_tint.is_none();
+        let base_alpha = if image_set || (opacity < 1.0 && (is_same_bg || is_default_dark_match)) {
             0.0
         } else {
             opacity
