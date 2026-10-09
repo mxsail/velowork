@@ -618,6 +618,7 @@ impl Render for CommandHistoryPanel {
                             .overflow_y_scroll()
                             .flex()
                             .flex_col()
+                            .gap(px(2.0))
                             .py(ui_space_xs(cx))
                             .px(ui_space_xs(cx))
                             .on_click(cx.listener(|this, _, window, cx| {
@@ -645,6 +646,15 @@ impl Render for CommandHistoryPanel {
                                     times_suffix,
                                 );
 
+                                let lines: Vec<&str> = entry.command.lines().collect();
+                                let first_line = lines
+                                    .iter()
+                                    .find(|l| !l.trim().is_empty())
+                                    .copied()
+                                    .unwrap_or(&entry.command);
+                                let is_multiline = lines.len() > 1;
+                                let extra_lines_count = lines.len().saturating_sub(1);
+
                                 h_flex()
                                     .id(ElementId::Name(row_id.into()))
                                     .w_full()
@@ -653,7 +663,7 @@ impl Render for CommandHistoryPanel {
                                     .justify_between()
                                     .px(ui_space_sm(cx))
                                     .rounded(RADIUS_STD)
-                                    .gap(ui_space_sm(cx))
+                                    .gap(ui_space_xs(cx))
                                     .cursor_pointer()
                                     .border_1()
                                     .border_color(with_alpha(0x00000000, 0.0))
@@ -722,15 +732,17 @@ impl Render for CommandHistoryPanel {
                                             .overflow_hidden()
                                             .whitespace_nowrap()
                                             .text_ellipsis()
-                                            .child(entry.command.clone()),
+                                            .child(first_line.to_string()),
                                     )
-                                    .child(
-                                        div()
-                                            .text_size(ui_text_xs(cx))
-                                            .text_color(rgb(t.text_muted))
-                                            .flex_shrink_0()
-                                            .child(format_short_timestamp(&entry.timestamp)),
-                                    )
+                                    .when(is_multiline, |d| {
+                                        d.child(
+                                            div()
+                                                .flex_shrink_0()
+                                                .text_size(ui_text_xs(cx))
+                                                .text_color(rgb(t.text_muted))
+                                                .child(format!("+{}", extra_lines_count)),
+                                        )
+                                    })
                                 })
                             }),
                     )
@@ -748,6 +760,7 @@ impl Render for CommandHistoryPanel {
     }
 }
 
+#[allow(dead_code)]
 fn format_short_timestamp(ts: &str) -> String {
     if ts.len() >= 16 {
         ts[5..16].replace('T', " ")
