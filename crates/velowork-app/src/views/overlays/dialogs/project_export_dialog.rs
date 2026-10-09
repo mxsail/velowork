@@ -501,8 +501,6 @@ impl Render for ProjectExportDialog {
                     .h(px(48.0))
                     .flex_shrink_0()
                     .px(SPACE_LG)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .items_center()
                     .justify_end()
                     .gap(SPACE_MD)

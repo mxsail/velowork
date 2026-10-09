@@ -28,7 +28,7 @@ use crate::icon::AppIcon;
 use crate::overlay_registry::{ClosePolicy, OverlayInfo, OverlayRegistry};
 use crate::input::{focus_ring_shadows, Input, InputChangedEvent, InputState};
 use crate::scrollable::{Scrollbar, ScrollbarShow};
-use crate::theme::{surface_bg, theme, ThemeColors};
+use crate::theme::{theme, ThemeColors};
 use crate::tokens::{
     ui_icon_sm, ui_icon_std_ts, ui_text_md, ui_text_sm, ui_text_xs, DIALOG_LG, DIALOG_SM,
     POPOVER_LIST_HEADER_H, POPOVER_LIST_MAX_H, POPOVER_LIST_MIN_H,
@@ -1316,7 +1316,7 @@ impl<T: Clone + PartialEq + 'static> Render for SelectState<T> {
                     }
                 }))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .bg(surface_bg(t.bg_primary, cx))
+                .bg(p.surface_overlay)
                 .border_1()
                 .border_color(p.border_subtle)
                 .rounded(RADIUS_MD)

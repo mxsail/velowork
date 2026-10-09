@@ -12,7 +12,6 @@ use std::net::SocketAddr;
 use velowork_i18n::i18n;
 use velowork_state::{ReconnectPolicy, TunnelKind, TunnelProfile};
 use velowork_ui::overlay_registry::OverlayRegistry;
-use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::theme::theme;
 use velowork_ui::tokens::{ui_text_sm, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_STD};
 use velowork_ui::{h_flex, v_flex};
@@ -565,7 +564,6 @@ fn tunnel_tree(cx: &App) -> Vec<velowork_state::TunnelNode> {
 impl Render for TunnelDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = SemanticPalette::from_theme(&t);
 
         // 同步下拉 Select 组件的选项与当前选中值（目录/会话列表为动态数据）。
         self.refresh_selects(cx);
@@ -900,8 +898,6 @@ impl Render for TunnelDialog {
                     .items_center()
                     .justify_end()
                     .px(SPACE_LG)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .child(dialog_actions(
                         &i18n!(cx, "common.action.cancel"),
                         cx.listener(|this, _, window, cx| this.close(Some(window), cx)),

@@ -65,8 +65,6 @@ pub fn tab_style(div: Stateful<Div>, _t: &ThemeColors, is_active: bool, cx: &App
         .when(is_active, |d| {
             d.text_color(palette.text_primary)
                 .bg(palette.surface_selection)
-                .border_1()
-                .border_color(palette.border_subtle)
                 .hover(move |s| s.bg(palette.surface_hover))
         })
         .when(!is_active, |d| {

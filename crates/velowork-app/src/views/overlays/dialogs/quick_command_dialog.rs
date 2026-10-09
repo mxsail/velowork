@@ -969,7 +969,6 @@ impl QuickCommandDialog {
 impl Render for QuickCommandDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = SemanticPalette::from_theme(&t);
 
         // 同步「所属目录」下拉 Select 组件的选项与当前选中值。
         self.refresh_selects(cx);
@@ -1109,8 +1108,6 @@ impl Render for QuickCommandDialog {
                     .items_center()
                     .justify_end()
                     .px(SPACE_LG)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .child(dialog_actions(
                         &i18n!(cx, "common.action.cancel"),
                         cx.listener(|this, _, window, cx| this.close(Some(window), cx)),

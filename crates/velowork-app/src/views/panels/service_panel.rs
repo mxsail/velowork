@@ -1755,8 +1755,6 @@ impl Render for ServiceMonitorPanel {
                 h_flex()
                     .h(px(velowork_ui::tab_height(cx)))
                     .px(ui_space_xs(cx))
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .items_center()
                     .gap(ui_space_xs(cx))
                     .child(

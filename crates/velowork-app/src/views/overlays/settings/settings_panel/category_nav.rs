@@ -40,8 +40,6 @@ impl SettingsPanel {
                 .bg(p.surface_card)
                 .px(ui_space_sm(cx))
                 .py(ui_space_xs(cx))
-                .border_b_1()
-                .border_color(p.border_subtle)
                 .children(categories.iter().map(|cat| {
                     let is_active = *cat == self.active_category;
                     let category = cat.clone();
@@ -56,8 +54,6 @@ impl SettingsPanel {
                 .id("settings-category-nav")
                 .w(px(220.0))
                 .flex_shrink_0()
-                .border_r_1()
-                .border_color(p.border_subtle)
                 .overflow_hidden()
                 .flex()
                 .flex_col()

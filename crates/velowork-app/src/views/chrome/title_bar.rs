@@ -255,7 +255,8 @@ impl TitleBar {
                     .absolute()
                     .top(px(32.0))
                     .left(left_offset)
-                    .bg(rgb(t.bg_primary))
+                    .occlude()
+                    .bg(p.surface_overlay)
                     .border_1()
                     .border_color(p.border_subtle)
                     .rounded(RADIUS_MD)
@@ -678,8 +679,6 @@ impl Render for TitleBar {
             .items_center()
             .justify_between()
             .bg(p.surface_card)
-            .border_b_1()
-            .border_color(p.border_subtle)
             .when(has_rounded_corners, |d| {
                 d.rounded_tl(radius).rounded_tr(radius)
             })

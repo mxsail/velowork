@@ -139,13 +139,12 @@ pub fn render_terminal_shared_background(
     bottom_only: bool,
 ) -> AnyElement {
     let t = theme(cx);
-    let theme_palette = SemanticPalette::from_theme(&t);
+    let opacity = bg_opacity(cx);
     let container = div()
         .absolute()
         .inset_0()
         .size_full()
-        .overflow_hidden()
-        .opacity(bg_opacity(cx));
+        .overflow_hidden();
 
     let el = match crate::background_cache::terminal_background_element_with_corners(
         cx,
@@ -155,11 +154,11 @@ pub fn render_terminal_shared_background(
         bottom_only,
     ) {
         // When an image is present, the image element itself renders the authoritative
-        // rounded corners and Cover texture. Do NOT stack a solid color quad beneath it,
-        // which would cause double antialiasing (sub-pixel fringing) around corner curves.
-        Some(img) => container.child(img),
+        // rounded corners and Cover texture.
+        Some(img) => container.opacity(opacity).child(img),
         None => {
             let bar_height = compute_tab_bar_height(cx);
+            let p = SemanticPalette::from_context(cx);
 
             let top_corners = !bottom_only && radius > 0.0;
             let bottom_corners = radius > 0.0;
@@ -168,22 +167,30 @@ pub fn render_terminal_shared_background(
                 .flex()
                 .flex_col()
                 .child(
-                    // Top zone: Tab bar header backdrop (dark surface)
+                    // Top zone: Tab bar header backdrop.
+                    // When opacity < 1.0, use p.surface_card (aligned with title_bar) to provide
+                    // a delicate distinction over the underlying `#root` without additive alpha saturation.
+                    // When opacity >= 1.0, use opaque bg_header.
                     div()
                         .w_full()
                         .h(bar_height)
-                        .bg(theme_palette.surface_header)
+                        .bg(if opacity < 1.0 {
+                            p.surface_card
+                        } else {
+                            with_alpha(t.bg_header, 1.0)
+                        })
                         .when(top_corners, |d| d.rounded_t(px(radius))),
                 )
                 .child(
                     // Bottom zone: Base card surface backdrop behind terminal panes.
-                    // Each foreground terminal pane renders its own session color scheme
-                    // and handles its respective bottom corner radii.
+                    // When opacity < 1.0, `#root` directly beneath already paints `surface_bg(t.bg_primary, cx)`
+                    // at the exact user-configured opacity. Keeping this transparent avoids double-applying
+                    // opacity and prevents additive alpha saturation on Windows.
                     div()
                         .flex_1()
                         .w_full()
                         .min_h_0()
-                        .bg(theme_palette.surface_card)
+                        .when(opacity >= 1.0, |d| d.bg(with_alpha(t.bg_primary, 1.0)))
                         .when(bottom_corners, |d| {
                             d.rounded_bl(px(radius)).rounded_br(px(radius))
                         }),

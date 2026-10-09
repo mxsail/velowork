@@ -1472,8 +1472,6 @@ impl Render for StatusBar {
             .items_center()
             .justify_between()
             .bg(p.surface_card)
-            .border_t_1()
-            .border_color(p.border_subtle)
             .child(
                 canvas(
                     move |bounds, _window, _cx| {

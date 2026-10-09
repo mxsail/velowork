@@ -987,6 +987,7 @@ pub fn settings(cx: &App) -> AppSettings {
     settings_entity(cx).read(cx).settings.clone()
 }
 
+
 /// Resolve the window-surface alpha a window must request *at creation* so that
 /// custom-titlebar rounded corners (and translucent backgrounds) are drawn
 /// without sharp square tips on compositors such as KDE Plasma on Wayland.
@@ -997,23 +998,55 @@ pub fn settings(cx: &App) -> AppSettings {
 /// the runtime logic in `velowork_app::simple_root::SimpleRoot::render`. A
 /// freshly opened window is never maximized, so the maximize guard applied at
 /// runtime is intentionally omitted here.
-pub fn window_background_appearance(settings: &AppSettings) -> gpui::WindowBackgroundAppearance {
-    if settings.bg_opacity < 1.0 {
-        if cfg!(target_os = "windows") {
-            // Windows 11 DWM deprecated legacy `ACCENT_ENABLE_ACRYLICBLURBEHIND` (state 4),
-            // which causes `Blurred` to fall back to an opaque solid black/dark background.
-            // Using `Transparent` (state 2) enables DirectComposition premultiplied alpha
-            // to blend directly with the Windows desktop.
-            gpui::WindowBackgroundAppearance::Transparent
-        } else {
-            // macOS uses native `NSVisualEffectView`, and Linux Wayland/X11 uses compositor blur protocols.
-            gpui::WindowBackgroundAppearance::Blurred
-        }
-    } else if settings.titlebar_style == TitlebarStyle::Custom && settings.window_corner_radius > 0.0
+pub fn window_background_appearance(_settings: &AppSettings) -> gpui::WindowBackgroundAppearance {
+    #[cfg(target_os = "windows")]
     {
-        gpui::WindowBackgroundAppearance::Transparent
-    } else {
-        gpui::WindowBackgroundAppearance::Opaque
+        // On Windows 10/11, always initialize the window with DirectComposition and Acrylic
+        // premultiplied alpha support. When bg_opacity is 1.0, opaque theme colors cover the
+        // entire surface so the window is 100% solid. When bg_opacity is changed, transparency
+        // and frosted glass effects take effect immediately with zero delay and no resize required.
+        let pref = crate::window_effects::WindowAppearancePreference {
+            composition: crate::window_effects::WindowComposition::Transparent,
+            material: crate::window_effects::BackdropMaterial::Acrylic,
+        };
+        let caps = crate::window_effects::WindowEffectCapabilities::detect_current_platform();
+        let resolved = crate::window_effects::resolve_window_appearance(
+            pref,
+            crate::window_effects::CompositionPolicy::Normal,
+            caps,
+        );
+        resolved.to_gpui_appearance()
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let composition = if _settings.bg_opacity < 1.0
+            || (_settings.titlebar_style == TitlebarStyle::Custom
+                && _settings.window_corner_radius > 0.0)
+        {
+            crate::window_effects::WindowComposition::Transparent
+        } else {
+            crate::window_effects::WindowComposition::Opaque
+        };
+
+        let material = if _settings.bg_opacity < 1.0 {
+            crate::window_effects::BackdropMaterial::Acrylic
+        } else {
+            crate::window_effects::BackdropMaterial::None
+        };
+
+        let pref = crate::window_effects::WindowAppearancePreference {
+            composition,
+            material,
+        };
+
+        let caps = crate::window_effects::WindowEffectCapabilities::detect_current_platform();
+        let resolved = crate::window_effects::resolve_window_appearance(
+            pref,
+            crate::window_effects::CompositionPolicy::Normal,
+            caps,
+        );
+        resolved.to_gpui_appearance()
     }
 }
 

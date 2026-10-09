@@ -125,6 +125,12 @@ pub struct WindowView {
     right_toolbar_last_panel: Option<String>,
     /// Right dock state controller
     right_dock_ctrl: DockController,
+    /// 仅 AI 助手面板需要常驻缓存，以避免在后台长问答流式输出期间切换到其他面板导致问答中断。
+    pub(crate) ai_assistant_panel: Option<velowork_ui::dock::AnyPanel>,
+    /// 记录当前已分离到独立窗口的右侧面板 (panel_id -> AnyWindowHandle)，支持多功能各自独立悬浮。
+    pub(crate) detached_right_panels: HashMap<String, AnyWindowHandle>,
+    /// OS window handle of this window
+    pub(crate) window_handle: AnyWindowHandle,
     /// Right toolbar registry for dynamic panel registration & visibility management
     right_toolbar_registry: velowork_ui::dock::RightToolbarRegistry,
     /// Controls whether the vertical right toolbar is visible
@@ -639,6 +645,9 @@ impl WindowView {
             right_dock_ctrl,
             right_toolbar_active: None,
             right_toolbar_last_panel: None,
+            ai_assistant_panel: None,
+            detached_right_panels: HashMap::new(),
+            window_handle,
             right_toolbar_registry,
             right_toolbar_open: app_settings.right_toolbar_open,
             bottom_dock,
@@ -1088,8 +1097,8 @@ impl WindowView {
     /// 按需创建右侧专属 DockPanel（IDEA Tool Window 单一激活模式）。
     ///
     /// 每个 `panel_id` 对应一个独立的 `DockPanel`（内部仅含该按钮的专属 tab）。
-    /// 调用方在切换离开旧面板时先将其置 `None` 丢弃强引用，GPUI 在引用归零后
-    /// 自动销毁 entity 释放内存。新面板在此订阅 detach/hide/whole 与宽度同步事件。
+    /// 对于 AI 助手，复用 `ai_assistant_panel` 缓存以保留问答流式上下文；
+    /// 对于其他面板，按需动态创建并在切换离开时随旧 DockPanel 销毁释放内存。
     fn create_right_panel(
         &mut self,
         panel_id: &str,
@@ -1105,25 +1114,30 @@ impl WindowView {
             self.overlay_manager.clone(),
             self.overlay_registry.clone(),
         );
-        let providers = Self::right_dock_panel_providers(&self.right_toolbar_registry, cx);
+
+        let panel: velowork_ui::dock::AnyPanel = if panel_id == "ai_assistant" {
+            if let Some(p) = self.ai_assistant_panel.clone() {
+                p
+            } else {
+                let p = factory(panel_id, window, cx);
+                self.ai_assistant_panel = Some(p.clone());
+                p
+            }
+        } else {
+            factory(panel_id, window, cx)
+        };
+
         let dp = cx.new(|cx| {
             let mut dp = velowork_ui::dock::DockPanel::new("right_dock", width, cx);
             dp.set_header_mode(velowork_ui::dock::DockHeaderMode::TitleOnly);
             dp.set_resize_edge(velowork_ui::dock::ResizeEdge::Left, cx);
 
-            // Register the panels that can be toggled from this dock's "more"
-            // menu. 即使当前仅显示单一 tab，保留 providers 以便通过 "more" 选择器切换。
-            dp.set_panel_providers(providers);
-
-            // 工厂闭包：按 id 返回对应面板 view 的 AnyPanel。
-            dp.set_on_request_panel(factory);
-
-            dp.activate_or_add_panel(panel_id, window, cx);
+            // 保持严格的单一 Tab：仅添加当前激活功能的专属面板
+            dp.add_tab(panel, cx);
             dp
         });
 
-
-        // Hand the overlay registry to the dock so its "more" / tab menus
+        // Hand the overlay registry to the dock so its dropdowns/menus
         // register themselves for centralized click-outside dismissal.
         dp.update(cx, |d, _cx| {
             d.set_overlay_registry(self.overlay_registry.clone())
@@ -1133,30 +1147,12 @@ impl WindowView {
         self.status_bar
             .update(cx, |sb, _cx| sb.set_right_dock(Some(dp.clone())));
 
-        // 订阅该专属 dock 的 detach / hide / whole 事件（在 entity 创建时各自订阅，
-        // 因 panel 按需创建、切换即销毁，无法在初始化时统一订阅固定实体）。
+        // 订阅该专属 dock 的 detach / hide / whole 事件
         cx.subscribe(
             &dp,
-            |this, dock, event: &velowork_ui::dock::DockPanelDetachEvent, cx| {
+            |this, _dock, event: &velowork_ui::dock::DockPanelDetachEvent, cx| {
                 let panel_id = event.id.clone();
-                this.spawn_detached_panel_window(
-                    velowork_ui::dock::DockPosition::Right,
-                    dock.clone(),
-                    &panel_id,
-                    cx,
-                );
-                if dock.read(cx).tabs.is_empty() {
-                    // Panel fully left the main window: drop the toolbar
-                    // highlight so the detached panel doesn't leave a stuck
-                    // active button pointing at a panel that is no longer here;
-                    // its re-attach will re-set the highlight itself.
-                    if this.right_toolbar_active.as_deref() == Some(panel_id.as_str()) {
-                        this.right_toolbar_active = None;
-                    }
-                    if this.right_dock_ctrl.is_open() {
-                        this.toggle_right_dock(cx);
-                    }
-                }
+                this.spawn_detached_right_panel_window(&panel_id, cx);
             },
         )
         .detach();
@@ -1164,43 +1160,27 @@ impl WindowView {
         cx.subscribe(
             &dp,
             |this, _, _event: &velowork_ui::dock::DockPanelHideEvent, cx| {
-                // 隐藏面板即视为该专属面板收起，必须清除工具栏高亮，否则按钮
-                // 会残留选中背景，且下次点击走 toggle-off 分支只切换 dock 而不
-                // 重建面板，最终显示空白面板。
-                this.right_toolbar_active = None;
-                if this.right_dock_ctrl.is_open() {
-                    this.toggle_right_dock(cx);
-                }
+                this.hide_right_dock(cx);
             },
         )
         .detach();
 
         cx.subscribe(
             &dp,
-            |this, dock, event: &velowork_ui::dock::DockPanelDetachWholeEvent, cx| {
-                let tabs = event.tabs.clone();
-                let active = event.active_tab_index;
-                this.spawn_detached_whole_panel_window(
-                    velowork_ui::dock::DockPosition::Right,
-                    dock.clone(),
-                    tabs,
-                    active,
-                    cx,
-                );
-                // 整体分离后清除工具栏高亮，与单 tab 分离处理器一致。
-                // 附加回主窗口时由 reattach 逻辑重新设置。
-                this.right_toolbar_active = None;
-                if this.right_dock_ctrl.is_open() {
-                    this.toggle_right_dock(cx);
-                }
+            |this, dock, _event: &velowork_ui::dock::DockPanelDetachWholeEvent, cx| {
+                let panel_id = dock
+                    .read(cx)
+                    .tabs
+                    .first()
+                    .map(|t| t.metadata(cx).id.0.clone())
+                    .or_else(|| this.right_toolbar_active.clone())
+                    .unwrap_or_else(|| "ai_assistant".to_string());
+                this.spawn_detached_right_panel_window(&panel_id, cx);
             },
         )
         .detach();
 
-        // 宽度同步：拖拽调整右侧 dock 宽度时回写 controller 与设置。
-        // 同时检测专属面板标签是否被用户在面板内关闭：右侧 dock 为单一 tab
-        // 的专属面板，标签被关闭后 `right_toolbar_active` 必须立即清除，否则
-        // 工具栏按钮会残留选中背景，且再次点击只能显示空白面板。
+        // 宽度同步与标签关闭检测
         let right_panel_id = panel_id.to_string();
         cx.subscribe(
             &dp,
@@ -1216,11 +1196,7 @@ impl WindowView {
                         .iter()
                         .any(|t| t.metadata(cx).id.0 == right_panel_id)
                 {
-                    // 标签已关闭：清除高亮并收起 dock，使其回到"未展开"状态。
-                    this.right_toolbar_active = None;
-                    if this.right_dock_ctrl.is_open() {
-                        this.toggle_right_dock(cx);
-                    }
+                    this.hide_right_dock(cx);
                 }
                 cx.notify();
             },
@@ -1228,6 +1204,146 @@ impl WindowView {
         .detach();
 
         dp
+    }
+
+    /// 为右侧面板生成专属独立 OS 悬浮窗口（每个功能独立单窗口，纯净 TitleOnly，支持多功能各自独立悬浮）。
+    fn spawn_detached_right_panel_window(
+        &mut self,
+        panel_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let panel_id_owned = panel_id.to_string();
+
+        // 1. 获取面板实例：如果是 AI 助手，复用常驻实体；否则从主窗口右侧 dock 提取或动态创建
+        let panel = if panel_id == "ai_assistant" {
+            if let Some(p) = self.ai_assistant_panel.clone() {
+                Some(p)
+            } else if let Some(dock) = self.right_dock.as_ref() {
+                dock.read(cx).tabs.first().cloned()
+            } else {
+                None
+            }
+        } else {
+            // 优先从当前主窗口 dock 提取已运行的面板实例（保持内部状态）
+            self.right_dock
+                .as_ref()
+                .and_then(|dock| dock.read(cx).tabs.first().cloned())
+        };
+
+        // 2. 主窗口收起右侧 Dock 并清空当前 dock 引用
+        self.right_dock = None;
+        self.right_toolbar_active = None;
+        if self.right_dock_ctrl.is_open() {
+            self.hide_right_dock(cx);
+        }
+
+        // 3. 准备回调闭包
+        let main_window_view = cx.entity().clone();
+        let pid_for_attach = panel_id_owned.clone();
+        let pid_for_close = panel_id_owned.clone();
+
+        // Attach 回调：收回并自动展开主窗口对应右侧面板，同时前置主窗口
+        let view_for_reattach = main_window_view.clone();
+        let reattach = Arc::new(move |_pid: &str, _win: &mut Window, cx: &mut App| {
+            let pid = pid_for_attach.clone();
+            let view = view_for_reattach.clone();
+            let handle = view.read(cx).window_handle;
+            let _ = cx.update_window(handle, move |_, window, cx| {
+                view.update(cx, |this, cx| {
+                    this.detached_right_panels.remove(&pid);
+                    this.show_right_dock(&pid, window, cx);
+                    window.activate_window();
+                });
+            });
+        });
+
+        // Close 回调：仅关闭该悬浮窗口，从 detached_right_panels 中注销，主窗口不主动弹出打扰
+        let view_for_close = main_window_view.clone();
+        let on_close_cleanup = Arc::new(move |_win: &mut Window, cx: &mut App| {
+            let pid = pid_for_close.clone();
+            view_for_close.update(cx, |this, _cx| {
+                this.detached_right_panels.remove(&pid);
+            });
+        });
+
+        let on_close_cleanup_for_dock = on_close_cleanup.clone();
+
+        // 4. 准备创建工厂（兜底若主窗口未持有面板）
+        let factory_registry = self.right_toolbar_registry.clone();
+        let factory_workspace = self.workspace.clone();
+        let factory_focus = self.focus_manager.clone();
+        let factory_terminals = self.terminals.clone();
+        let factory_overlay = self.overlay_manager.clone();
+        let factory_overlay_reg = self.overlay_registry.clone();
+        let pid_for_build = panel_id_owned.clone();
+
+        let initial_title = panel
+            .as_ref()
+            .map(|p| p.metadata(cx).title.clone())
+            .unwrap_or_else(|| match panel_id {
+                "ai_assistant" => "AI Assistant",
+                "quick_commands" => "Quick Commands",
+                "command_history" => "Command History",
+                "tunnels" => "Tunnels",
+                "services" => "Services",
+                _ => "Detached Panel",
+            }.to_string());
+        let window_title = format!("{} ({})", initial_title, velowork_i18n::i18n!(cx, "dock.panel.detach"));
+
+        let handle = open_detached_overlay::<
+            DetachedHost<velowork_ui::dock::DockPanel>,
+            DetachedHostCloseEvent,
+        >(
+            window_title,
+            move |window, overlay_registry, cx| {
+                let panel = panel.unwrap_or_else(|| {
+                    let ctx = velowork_ui::dock::PanelCreationContext::new(
+                        crate::views::panels::registry::AppPanelCreationContext {
+                            workspace: factory_workspace,
+                            focus_manager: factory_focus,
+                            terminals: factory_terminals,
+                            overlay_manager: factory_overlay,
+                            overlay_registry: factory_overlay_reg,
+                        },
+                    );
+                    factory_registry
+                        .create_panel(&pid_for_build, &ctx, window, cx)
+                        .unwrap_or_else(|| panic!("unknown panel id: {}", pid_for_build))
+                });
+
+                let detached_dock = cx.new(|cx| {
+                    let mut dp = velowork_ui::dock::DockPanel::new("detached_right_dock", 400.0, cx);
+                    dp.add_tab(panel, cx);
+                    dp.fill_window = true;
+                    dp.set_header_mode(velowork_ui::dock::DockHeaderMode::TitleOnly);
+                    dp.set_overlay_registry(overlay_registry.clone());
+
+                    let reattach = reattach.clone();
+                    dp.set_on_attach(move |pid, window, cx| reattach(pid, window, cx));
+
+                    let on_close_dock = on_close_cleanup_for_dock.clone();
+                    dp.set_on_window_close(move |window, cx| on_close_dock(window, cx));
+
+                    dp
+                });
+
+                cx.new(|_| DetachedHost { inner: detached_dock })
+            },
+            DetachedOverlayOptions {
+                size: gpui::size(gpui::px(400.0), gpui::px(600.0)),
+                min_size: gpui::Size {
+                    width: gpui::px(250.0),
+                    height: gpui::px(300.0),
+                },
+                on_close: Some(on_close_cleanup),
+                hide_titlebar: true,
+            },
+            cx,
+        );
+
+        if let Some(h) = handle {
+            self.detached_right_panels.insert(panel_id_owned, h);
+        }
     }
 
     fn setup_dock_subscriptions(

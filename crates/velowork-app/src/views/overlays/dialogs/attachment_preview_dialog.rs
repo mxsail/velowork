@@ -193,8 +193,6 @@ impl Render for AttachmentPreviewDialog {
                     .items_center()
                     .justify_between()
                     .bg(p.surface_card)
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .child(
                         h_flex()
                             .items_center()

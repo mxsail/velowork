@@ -132,6 +132,9 @@ pub fn init_theme(app_settings: &AppSettings, cx: &mut App) -> Entity<AppTheme> 
                 cache.ensure_loaded(path, blur, cx);
             });
         }
+
+        // Refresh all windows so changes (e.g. background transparency, theme) take effect immediately across all windows
+        cx.refresh_windows();
     })
     .detach();
 

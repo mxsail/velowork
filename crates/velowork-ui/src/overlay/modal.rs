@@ -36,7 +36,7 @@ use crate::button::Button;
 use crate::design::semantic::SemanticPalette;
 use crate::icon::AppIcon;
 use crate::styled::{h_flex, v_flex};
-use crate::theme::{ThemeColors, bg_opacity, surface_bg, theme, with_alpha};
+use crate::theme::{ThemeColors, bg_opacity, theme, with_alpha};
 use crate::tokens::{
     RADIUS_LG, RADIUS_STD, SPACE_LG, SPACE_XL, ui_icon_sm, ui_icon_std, ui_space_lg, ui_space_md,
     ui_space_sm, ui_space_xs, ui_text_md, ui_text_ms, ui_text_sm, ui_text_xl, ui_text_xs,
@@ -285,8 +285,6 @@ impl ModalHeader {
             .py(ui_space_md(cx))
             .bg(p.surface_card)
             .rounded_t(RADIUS_LG)
-            .border_b_1()
-            .border_color(p.border_subtle)
             .child(left)
             .child(right)
     }
@@ -548,8 +546,6 @@ impl ModalFooter {
                 .py(ui_space_md(cx))
                 .bg(p.surface_card)
                 .rounded_b(RADIUS_LG)
-                .border_t_1()
-                .border_color(p.border_subtle)
                 .child(status_area)
                 .child(self.actions.render(cx)),
         )
@@ -739,8 +735,14 @@ fn window_chrome_button(
 ///     .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.close(cx)))
 ///     .child(modal_content("my-modal", cx).child(...))
 /// ```
-pub fn modal_backdrop(id: impl Into<SharedString>, _t: &ThemeColors, cx: &App) -> Stateful<Div> {
+pub fn modal_backdrop(id: impl Into<SharedString>, t: &ThemeColors, cx: &App) -> Stateful<Div> {
     let corner_radius = cx.global::<WindowCornerRadius>().0;
+    let is_dark = t.is_dark();
+    let op = bg_opacity(cx);
+    // Frosted backdrop mask: maintains a strong 42%~58% noise-dampening floor
+    // to thoroughly conceal and fade high-frequency terminal text behind the modal.
+    let mask_color = if is_dark { 0x000000 } else { 0x1A1A1A };
+    let mask_alpha = (0.42 + 0.16 * op.clamp(0.0, 1.0)).clamp(0.42, 0.58);
 
     div()
         .id(ElementId::Name(id.into()))
@@ -749,7 +751,7 @@ pub fn modal_backdrop(id: impl Into<SharedString>, _t: &ThemeColors, cx: &App) -
         .inset_0()
         .size_full()
         .p(SPACE_LG)
-        .bg(with_alpha(0x000000, 0.35 * bg_opacity(cx)))
+        .bg(with_alpha(mask_color, mask_alpha))
         // Clip the dimming mask to the window's rounded corners so it doesn't
         // paint square dark tips over the (Transparent) window surface.
         .when(corner_radius > 0.0, |d| {
@@ -765,21 +767,20 @@ pub fn modal_backdrop(id: impl Into<SharedString>, _t: &ThemeColors, cx: &App) -
 /// Returns a styled div with background, border, shadow, and rounded corners.
 /// Includes a mouse handler that prevents clicks from propagating to the backdrop.
 ///
-/// The card background uses `surface_bg` so it respects the global
-/// `bg_opacity` setting — when the user lowers transparency, every modal that
-/// builds its content through this helper becomes translucent (showing the
-/// surface behind it) instead of staying fully opaque.
+/// Adopts `p.surface_overlay` to smoothly track the liquid glass dynamic curve:
+/// transitions into 38% luminous frosted glass at high transparency so the underlying
+/// desktop Acrylic blur shines through cleanly, while maintaining 100% solid density
+/// at full window opacity.
 pub fn modal_content(id: impl Into<SharedString>, cx: &App) -> Stateful<Div> {
-    let t = theme(cx);
     let p = SemanticPalette::from_context(cx);
     div()
         .id(ElementId::Name(id.into()))
-        .bg(surface_bg(t.bg_primary, cx))
+        .bg(p.surface_overlay)
         .text_color(p.text_primary)
         .rounded(RADIUS_LG)
         .border_1()
         .border_color(p.border_subtle)
-        .shadow_xl()
+        .shadow(crate::tokens::elevation_modal_shadow())
         .flex()
         .flex_col()
         .max_w_full()
@@ -834,8 +835,6 @@ where
         .justify_between()
         .bg(p.surface_card)
         .rounded_t(RADIUS_LG)
-        .border_b_1()
-        .border_color(p.border_subtle)
         .child(title_section)
         .child(
             div()

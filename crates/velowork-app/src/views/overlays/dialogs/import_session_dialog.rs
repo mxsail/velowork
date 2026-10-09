@@ -340,7 +340,6 @@ impl ImportSessionsDialog {
 impl Render for ImportSessionsDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let focus_handle = self.focus_handle.clone();
 
         if !self.initial_focus_done {
@@ -374,8 +373,6 @@ impl Render for ImportSessionsDialog {
             .justify_between()
             .px(SPACE_XL)
             .py(SPACE_LG)
-            .border_b_1()
-            .border_color(p.border_subtle)
             .child(
                 h_flex()
                     .gap(SPACE_MD)
@@ -568,8 +565,6 @@ impl Render for ImportSessionsDialog {
                             .h(px(48.0))
                             .flex_shrink_0()
                             .px(SPACE_LG)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
                             .items_center()
                             .justify_end()
                             .gap(SPACE_MD)

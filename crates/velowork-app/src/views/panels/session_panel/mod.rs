@@ -20,7 +20,6 @@ use gpui::prelude::*;
 use gpui::*;
 
 use std::sync::Arc;
-use velowork_ui::SemanticPalette;
 use velowork_ui::tree::{expandable_file_row, expandable_folder_row, tree_row_appearance};
 
 /// 会话树行高（纯几何，与主题无关）：由设计系统 Compact 档解析，
@@ -8314,7 +8313,6 @@ impl Focusable for SessionPanel {
 impl Render for SessionPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = SemanticPalette::from_context(cx);
         if self.show_search && self.search_input.is_none() {
             let input = cx
                 .new(|cx| InputState::new(cx).placeholder(i18n!(cx, "common.search_placeholder")));
@@ -8432,8 +8430,6 @@ impl Render for SessionPanel {
         let header = h_flex()
             .h(px(velowork_ui::tab_height(cx)))
             .px(ui_space_xs(cx))
-            .border_b_1()
-            .border_color(p.border_subtle)
             .items_center()
             .gap(ui_space_xs(cx))
             .child(
@@ -8500,13 +8496,6 @@ impl Render for SessionPanel {
                     let __tip = i18n!(cx, "session.import.title");
                     cx.new(|_| Tooltip::new(__tip)).into()
                 }),
-            )
-            .child(
-                div()
-                    .w(px(1.0))
-                    .h(ICON_STD)
-                    .bg(p.border_subtle)
-                    .mx(ui_space_xs(cx)),
             )
             .child(
                 velowork_ui::icon_button::icon_button("toggle-search-hdr", AppIcon::Search, &t, cx)
@@ -8627,7 +8616,6 @@ impl Render for SessionPanel {
             .px(ui_space_xs(cx))
             .gap(ui_space_xs(cx))
             .items_center()
-            .bg(surface_bg(t.bg_secondary, cx))
             .child(
                 h_flex()
                     .id("project-selector-trigger")

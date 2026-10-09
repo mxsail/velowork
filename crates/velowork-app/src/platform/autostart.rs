@@ -5,6 +5,7 @@
 //! - **Windows**: Manages `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Velowork`
 //!   via Windows `reg.exe` with `CREATE_NO_WINDOW` to avoid console flicker.
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::path::PathBuf;
 
 /// Check if autostart is supported on the current platform.
@@ -211,7 +212,6 @@ mod macos {
 
 #[cfg(target_os = "windows")]
 mod windows {
-    use super::*;
     use std::os::windows::process::CommandExt;
     use std::process::Command;
 

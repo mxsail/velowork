@@ -316,8 +316,6 @@ impl Render for LogConsole {
                     .py(px(12.0))
                     .justify_between()
                     .items_center()
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .child(
                         h_flex()
                             .gap(SPACE_SM)
@@ -360,13 +358,10 @@ impl Render for LogConsole {
 
 impl LogConsole {
     fn render_toolbar(&self, t: &ThemeColors, cx: &mut Context<Self>) -> impl IntoElement {
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         v_flex()
             .px(SPACE_XL)
             .py(px(10.0))
             .gap(SPACE_MD)
-            .border_b_1()
-            .border_color(p.border_subtle)
             // Capture directive row (the runtime switch).
             .child(
                 h_flex()

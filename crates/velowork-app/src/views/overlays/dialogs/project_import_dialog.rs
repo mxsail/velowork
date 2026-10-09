@@ -675,8 +675,6 @@ impl Render for ProjectImportDialog {
                                     v_flex()
                                         .gap(SPACE_MD)
                                         .pt(SPACE_MD)
-                                        .border_t_1()
-                                        .border_color(p.border_subtle)
                                         .child(
                                             // Project preview card
                                             h_flex()
@@ -917,8 +915,6 @@ impl Render for ProjectImportDialog {
                     .h(px(48.0))
                     .flex_shrink_0()
                     .px(SPACE_LG)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .items_center()
                     .justify_end()
                     .gap(SPACE_MD)

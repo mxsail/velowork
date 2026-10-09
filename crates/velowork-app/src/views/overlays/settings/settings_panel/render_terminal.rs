@@ -621,6 +621,15 @@ impl SettingsPanel {
             (false, None)
         };
 
+        let has_bg_image = settings_entity(cx)
+            .read(cx)
+            .settings
+            .terminal_background_image
+            .as_deref()
+            .map(|p| !p.trim().is_empty())
+            .unwrap_or(false)
+            || !self.terminal_bg_image_input.read(cx).value(cx).trim().is_empty();
+
         v_flex()
             .w_full()
             .gap(SPACE_2XS)
@@ -643,7 +652,10 @@ impl SettingsPanel {
                                 .child(self.terminal_bg_image_input.clone())
                                 .child(canvas(bounds_setter, |_, _, _, _| {}).absolute().inset_0()),
                         )
-                        .child(self.render_image_picker_button(is_loading, cx)),
+                        .child(self.render_image_picker_button(is_loading, cx))
+                        .when(has_bg_image, |this| {
+                            this.child(self.render_image_clear_button(cx))
+                        }),
                 ),
             )
             .when_some(status_row, |this, row| {
@@ -675,6 +687,21 @@ impl SettingsPanel {
             }))
     }
 
+    /// "Clear" button shown after the browse button when a background image is configured or entered.
+    fn render_image_clear_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx);
+        let label = i18n!(cx, "common.action.reset");
+        let focus_handle = self.get_or_create_button_focus_handle("terminal-bg-image-clear-btn", cx);
+        Button::new("terminal-bg-image-clear-btn", &t)
+            .size(ControlSize::Default)
+            .icon_left(AppIcon::Close)
+            .tooltip(label)
+            .focus_handle(&focus_handle)
+            .on_click(cx.listener(|this, _, _window, cx| {
+                this.clear_terminal_bg_image(cx);
+            }))
+    }
+
     /// Path-completion suggestions rendered as a floating dropdown panel (uses
     /// the virtualized `render_path_suggestions` with max 8 items per page and
     /// keyboard arrow navigation following).
@@ -701,13 +728,11 @@ impl SettingsPanel {
                 && is_image_path(&path)
             {
                 let p = path.to_string_lossy().to_string();
-                    let _ = this.update(cx, |this, cx| {
-                        this.terminal_bg_image_input
-                            .update(cx, |st, cx| st.set_value_quiet(p.clone(), cx));
-                        settings_entity(cx).update(cx, |state, cx| {
-                            state.set_terminal_background_image(Some(p), cx);
-                        });
-                    });
+                let _ = this.update(cx, |this, cx| {
+                    this.terminal_bg_image_input
+                        .update(cx, |st, cx| st.set_value_quiet(p.clone(), cx));
+                    this.update_terminal_bg_image(Some(p), cx);
+                });
             }
         })
         .detach();

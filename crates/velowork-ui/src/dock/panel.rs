@@ -294,6 +294,9 @@ pub struct DockPanel {
     // Attach to main window callback (for detached floating panels)
     pub on_attach: Option<Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>>,
 
+    // Close window callback for detached floating panels (when clicking close 'x', distinguish from on_attach)
+    pub on_window_close: Option<Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>>,
+
     /// Panels that can be toggled on/off from this dock's "more" menu.
     /// Only metadata is stored; the concrete panel is produced on demand
     /// by `on_request_panel`.
@@ -358,6 +361,7 @@ impl DockPanel {
             more_button_bounds: Bounds::default(),
             on_layout_changed: None,
             on_attach: None,
+            on_window_close: None,
             panel_providers: Vec::new(),
             on_request_panel: None,
             peer_docks: Vec::new(),
@@ -380,6 +384,13 @@ impl DockPanel {
         cb: impl Fn(&str, &mut Window, &mut App) + Send + Sync + 'static,
     ) {
         self.on_attach = Some(Arc::new(cb));
+    }
+
+    pub fn set_on_window_close(
+        &mut self,
+        cb: impl Fn(&mut Window, &mut App) + Send + Sync + 'static,
+    ) {
+        self.on_window_close = Some(Arc::new(cb));
     }
 
     /// Register the panels that can be toggled from this dock's "more" menu.
@@ -803,9 +814,8 @@ impl DockPanel {
         let scale = crate::tokens::ui_scale_factor(cx);
         let action_btn_size = f32::from(crate::design::appearance::control_height_for_size(ControlSize::Compact, cx));
         let action_gap = f32::from(crate::tokens::ui_space_sm(cx));
-        let divider_w = 9.0;
-        let mut actions_w = action_btn_size + divider_w; // Base: "More" menu + Divider
-        let mut action_count = 2; // more + divider
+        let mut actions_w = action_btn_size; // Base: "More" menu
+        let mut action_count = 1; // more
         if let Some(active_panel) = self.active_tab() {
             let custom_count = active_panel.custom_actions(cx).len();
             actions_w += custom_count as f32 * action_btn_size;
@@ -1663,17 +1673,6 @@ impl Render for DockPanel {
             }
         }
 
-        actions_w += 9.0;
-        action_elements.push(
-            div()
-                .id("action-divider")
-                .h(SPACE_XL)
-                .w(px(1.0))
-                .my(px(2.0))
-                .bg(p.border_subtle)
-                .into_any_element(),
-        );
-
         if !self.fill_window {
             let weak_expand = cx.entity().downgrade();
             let is_maximized = self.mode == PanelMode::Maximized;
@@ -1799,10 +1798,19 @@ impl Render for DockPanel {
                     let decoration_config = crate::decorations::get_window_decoration_config(cx);
                     let control_icon_sz = crate::decorations::get_window_control_icon_size(cx);
 
-                    let close_fn = std::sync::Arc::new(move |window: &mut Window, cx: &mut App| {
-                        on_attach_close(&active_tab_id_close, window, cx);
-                        window.remove_window();
-                    });
+                    let close_fn: std::sync::Arc<dyn Fn(&mut Window, &mut App)> =
+                        if let Some(on_window_close) = &self.on_window_close {
+                            let on_window_close = on_window_close.clone();
+                            std::sync::Arc::new(move |window: &mut Window, cx: &mut App| {
+                                on_window_close(window, cx);
+                                window.remove_window();
+                            })
+                        } else {
+                            std::sync::Arc::new(move |window: &mut Window, cx: &mut App| {
+                                on_attach_close(&active_tab_id_close, window, cx);
+                                window.remove_window();
+                            })
+                        };
 
                     let controls_bar = crate::title_bar::render_window_controls(
                         "detached-dock-ctrl",
@@ -1935,9 +1943,7 @@ impl Render for DockPanel {
                 ToolbarItem::Separator => {
                     div()
                         .flex_shrink_0()
-                        .w(px(1.0))
-                        .h(SPACE_XL)
-                        .bg(p.border_subtle)
+                        .w(px(4.0))
                         .into_any_element()
                 }
                 ToolbarItem::Label(lbl) => {
@@ -2411,8 +2417,6 @@ impl Render for DockPanel {
                     .w_full()
                     .px(SPACE_LG)
                     .py(SPACE_XS)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .text_size(ui_text_ms(cx))
                     .text_color(p.text_muted)
                     .child(status),
@@ -2461,8 +2465,6 @@ impl Render for DockPanel {
             } else {
                 surface_bg(t.bg_panel, cx)
             })
-            .border_1()
-            .border_color(p.border_subtle)
             .when_some(drag_overlay, |this, overlay| this.child(overlay));
 
         // Set dimensions based on collapse state and size parameter
@@ -2634,8 +2636,6 @@ impl Render for DockPanel {
                     )
                     .pl(left_header_padding)
                     .pr(right_header_padding)
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .when(!is_maximized_or_fullscreen && !self.fill_window, |d| {
                         d.rounded_t(RADIUS_CARD)
                     })
@@ -2827,8 +2827,6 @@ impl Render for TabDragView {
             .items_center()
             .gap(SPACE_SM)
             .bg(surface_bg(t.bg_panel, cx))
-            .border_1()
-            .border_color(p.border_subtle)
             .rounded(RADIUS_STD)
             .px(SPACE_MD)
             .py(SPACE_XS)

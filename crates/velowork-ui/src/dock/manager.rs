@@ -1,6 +1,6 @@
 use gpui::*;
 use gpui::prelude::*;
-use crate::theme::{surface_bg, theme};
+use crate::theme::{bg_opacity, surface_bg, theme};
 use crate::{h_flex, v_flex};
 use super::types::*;
 use super::panel::{DockPanel, DockPanelEvent};
@@ -205,7 +205,7 @@ impl Render for DockManager {
 
         h_flex()
             .size_full()
-            .bg(surface_bg(t.bg_primary, cx))
+            .when(bg_opacity(cx) >= 1.0, |d| d.bg(surface_bg(t.bg_primary, cx)))
             .when_some(left_el, |this, left| this.child(left))
             .child(
                 v_flex()

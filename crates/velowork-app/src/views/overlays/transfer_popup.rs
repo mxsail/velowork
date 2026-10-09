@@ -230,8 +230,6 @@ impl TransferPopup {
                     .justify_between()
                     .px(px(10.0))
                     .py(SPACE_MD)
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .child(
                         div()
                             .text_size(ui_text_md(cx))

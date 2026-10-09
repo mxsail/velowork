@@ -138,6 +138,15 @@ impl LockScreen {
             }
         }
 
+        cx.observe(&crate::settings::settings_entity(cx), |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
+        cx.observe(&crate::theme::theme_entity(cx), |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
+
         lock_screen
     }
 
@@ -258,6 +267,7 @@ impl LockScreen {
 impl Render for LockScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
+        let p = SemanticPalette::from_context(cx);
         // Auto-focus input box when lock screen appears
         if !self.has_focused {
             self.has_focused = true;
@@ -281,7 +291,7 @@ impl Render for LockScreen {
             .track_focus(&self.focus_handle)
             .size_full()
             .occlude()
-            .bg(rgb(t.bg_primary))
+            .bg(p.surface_card)
             .flex()
             .flex_col()
             .items_center()
@@ -337,7 +347,6 @@ impl Render for LockScreen {
                 // 4. Password Capsule Box [  ••••••••  (👁)  ]
                 .child({
                     let is_focused = self.password_input.read(cx).focus_handle(cx).is_focused(window);
-                    let p = SemanticPalette::from_theme(&t);
                     let ring = focus_ring_shadows(&t);
 
                     h_flex()
@@ -350,7 +359,7 @@ impl Render for LockScreen {
                         .bg(if is_focused {
                             p.surface_hover
                         } else {
-                            with_alpha(t.bg_secondary, 0.75)
+                            p.surface_raised
                         })
                         .border_1()
                         .border_color(if is_focused {

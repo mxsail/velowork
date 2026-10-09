@@ -237,7 +237,6 @@ impl WindowView {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let t = theme(cx);
         // Execute pending center-scroll (deferred from unfocus to let layout update first).
         // We wait until the scroll handle reports overflow (max_offset > 0), which means
         // the layout has been recalculated with all projects visible.
@@ -444,12 +443,6 @@ impl WindowView {
         let pixel_widths =
             Self::to_pixel_widths(&widths, container_size, settings.min_column_width);
 
-        // Project currently hovered in the Switch Project overlay (any window).
-        // Its panel gets an accent ring here so a hover also reveals where the
-        // project lives — across every window it is open in.
-        let hovered_project = crate::views::overlays::project_hover::hovered_project(cx);
-        let ring_color = theme(cx).border_active;
-
         let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             self.initial_titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
         } else {
@@ -473,9 +466,7 @@ impl WindowView {
             let is_last = i == num_projects - 1;
 
             if let Some(col) = self.project_columns.get(project_id).cloned() {
-                let is_hovered = hovered_project.as_deref() == Some(project_id.as_str());
                 let terminal_fullscreen = self.focus_manager.read(cx).has_fullscreen();
-                let palette = SemanticPalette::from_theme(&t);
                 let col_element = div()
                     .overflow_hidden()
                     .when(!terminal_fullscreen, |d| d.rounded(RADIUS_CARD))
@@ -499,30 +490,6 @@ impl WindowView {
                     })
                     .relative()
                     .child(AnyView::from(col).cached(StyleRefinement::default().size_full()))
-                    // Subtle panel border drawn as a non-occluding overlay so it is never
-                    // obscured or blurred by child elements' antialiased solid backgrounds.
-                    .when(!terminal_fullscreen, |d| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .rounded(RADIUS_CARD)
-                                .border_1()
-                                .border_color(palette.border_subtle),
-                        )
-                    })
-                    // Accent ring drawn as a non-occluding overlay so it adds no
-                    // layout shift and does not intercept clicks on the panel.
-                    .when(is_hovered, |d| {
-                        d.child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .border_2()
-                                .border_color(rgb(ring_color))
-                                .rounded(RADIUS_CARD),
-                        )
-                    })
                     .into_any_element();
 
                 elements.push(col_element);
@@ -919,6 +886,8 @@ impl Render for WindowView {
             0.0
         };
 
+        let root_bg = surface_bg(t.bg_primary, cx);
+
         div()
             .id("root")
             .size_full()
@@ -929,7 +898,7 @@ impl Render for WindowView {
             .when(has_rounded_corners, |d| {
                 d.rounded(corner_radius).overflow_hidden()
             })
-            .bg(surface_bg(t.bg_primary, cx))
+            .bg(root_bg)
             .track_focus(&focus_handle)
             // Global mouse move handler for resize and auto-hide
             .on_mouse_move(cx.listener({
@@ -1447,9 +1416,10 @@ impl Render for WindowView {
             // modals. Its .relative() establishes the positioning context for
             // modal overlays so their .absolute().inset_0() covers only the
             // content area — never the Window Chrome (titlebar).
-            .child(
-                div()
-                    .id("content-root")
+            .when(!self.is_locked, |d| {
+                d.child(
+                    div()
+                        .id("content-root")
                     .relative()
                     .flex_1()
                     .flex()
@@ -1717,7 +1687,7 @@ impl Render for WindowView {
                                         && velowork_workspace::security::is_master_password_set()
                                 };
 
-                                let palette = SemanticPalette::from_theme(&t);
+                                let palette = SemanticPalette::from_context(cx);
                                 Some(
                                     div()
                                         .id("right-toolbar")
@@ -1725,8 +1695,6 @@ impl Render for WindowView {
                                         .h_full()
                                         .overflow_hidden()
                                         .rounded(RADIUS_CARD)
-                                        .border_1()
-                                        .border_color(palette.border_subtle)
                                         .bg(palette.surface_card)
                                         .flex()
                                         .flex_col()
@@ -1886,7 +1854,8 @@ impl Render for WindowView {
                                 .children(self.overlay_manager.read(cx).render_transfer_popup()),
                         )
                     })
-            ) // end of content-root .child()
+                )
+            })
             // App menu dropdown (renders on top of everything when custom titlebar menu is open)
             .when(
                 is_custom_titlebar && self.title_bar.read(cx).is_menu_open(),

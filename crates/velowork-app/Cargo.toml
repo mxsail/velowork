@@ -67,5 +67,16 @@ anyhow = "1.0"
 # Time handling (cross-platform, thread-safe)
 time = { version = "0.3", features = ["local-offset"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Controls",
+    "Win32_Graphics_Dwm",
+    "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
+] }
+raw-window-handle = "0.6"
+
 [dev-dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", features = ["test-support"] }

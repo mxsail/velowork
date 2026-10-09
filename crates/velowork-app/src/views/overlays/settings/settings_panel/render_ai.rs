@@ -69,8 +69,6 @@ impl SettingsPanel {
                         let section = v_flex()
                             .mx(SPACE_LG)
                             .rounded(RADIUS_LG)
-                            .border_1()
-                            .border_color(p.border_subtle)
                             .bg(p.surface_card)
                             .overflow_hidden();
                         let mut section = section;
@@ -402,7 +400,6 @@ impl SettingsPanel {
         } else {
             i18n!(cx, "settings.ai.add_model_title")
         };
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let name_label = i18n!(cx, "settings.ai.model_name");
         let base_url_label = i18n!(cx, "settings.ai.base_url");
         let api_key_label = i18n!(cx, "settings.ai.api_key");
@@ -512,8 +509,6 @@ impl SettingsPanel {
                             .h(px(52.0))
                             .flex_shrink_0()
                             .px(SPACE_LG)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
                             .items_center()
                             .justify_between()
                             .gap(SPACE_MD)

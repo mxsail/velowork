@@ -85,8 +85,6 @@ impl SettingsPanel {
             .mx(SPACE_LG)
             .gap_0()
             .rounded(RADIUS_LG)
-            .border_1()
-            .border_color(p.border_subtle)
             .bg(p.surface_card)
             .overflow_hidden()
             .children(engines.iter().enumerate().map(|(idx, engine)| {
@@ -208,7 +206,6 @@ impl SettingsPanel {
         } else {
             i18n!(cx, "settings.search_engines.add_title")
         };
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let name_label = i18n!(cx, "settings.search_engines.name");
         let url_label = i18n!(cx, "settings.search_engines.url");
         let url_hint = i18n!(cx, "settings.search_engines.url_hint");
@@ -301,8 +298,6 @@ impl SettingsPanel {
                             .h(px(52.0))
                             .flex_shrink_0()
                             .px(SPACE_LG)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
                             .items_center()
                             .justify_end()
                             .child(

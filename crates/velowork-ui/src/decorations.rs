@@ -1,6 +1,8 @@
 //! Window decoration manager for cross-platform and Linux desktop environment adaptation.
 
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use std::env;
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use std::fs;
 use gpui::{App, Decorations, Global, Window};
 

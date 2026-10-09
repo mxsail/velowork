@@ -2025,7 +2025,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
         let tab_bar_bg = if image_set {
             with_alpha(t.bg_header, 0.85 * bg_opacity(cx))
         } else {
-            p.surface_header
+            // The underlying `render_terminal_shared_background` already paints `bg_header`
+            // with `bg_opacity`. Keeping `tab_bar_bg` transparent avoids double-applying opacity.
+            transparent_black()
         };
 
         let preview_overlay = if let (Some(preview_idx), Some(props)) = (self.preview_tab, active_preview_props.borrow_mut().take()) {

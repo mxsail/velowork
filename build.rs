@@ -1,7 +1,6 @@
 fn main() {
-    // Windows: Embed icon into executable
-    #[cfg(target_os = "windows")]
-    {
+    // Windows: Embed icon into executable when compiling for Windows target
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let icon_path = "assets/app-icon.ico";
 
         let mut res = winresource::WindowsResource::new();

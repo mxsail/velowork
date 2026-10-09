@@ -241,22 +241,43 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.right_dock.is_none() {
+        // 1. 若该功能已在外部独立悬浮窗口中运行，前置该窗口并不打乱主界面
+        if let Some(handle) = self.detached_right_panels.get(panel_id).copied() {
+            let activated = cx
+                .update_window(handle, |_, win, _| {
+                    win.activate_window();
+                })
+                .is_ok();
+            if activated {
+                return;
+            } else {
+                self.detached_right_panels.remove(panel_id);
+            }
+        }
+
+        // 2. 检查当前 DockPanel 是否已经是该面板
+        let need_recreate = match &self.right_dock {
+            None => true,
+            Some(dock) => {
+                let current_id = dock
+                    .read(cx)
+                    .tabs
+                    .first()
+                    .map(|t| t.metadata(cx).id.0.clone());
+                current_id.as_deref() != Some(panel_id)
+            }
+        };
+
+        if need_recreate {
+            // 创建目标专属单 Tab DockPanel。旧 DockPanel 会被替换：
+            // 若旧面板为非 AI 助手，entity 自然释放销毁；若为 AI 助手，entity 在 ai_assistant_panel 中常驻保存。
             let panel = self.create_right_panel(panel_id, window, cx);
             self.right_dock = Some(panel);
-            self.right_toolbar_active = Some(panel_id.to_string());
-            self.right_toolbar_last_panel = Some(panel_id.to_string());
-        } else if self.right_toolbar_last_panel.as_deref() != Some(panel_id) {
-            if let Some(dock) = self.right_dock.as_ref() {
-                dock.update(cx, |d, cx| {
-                    d.activate_or_add_panel(panel_id, window, cx);
-                });
-            }
-            self.right_toolbar_active = Some(panel_id.to_string());
-            self.right_toolbar_last_panel = Some(panel_id.to_string());
-        } else {
-            self.right_toolbar_active = Some(panel_id.to_string());
         }
+
+        self.right_toolbar_active = Some(panel_id.to_string());
+        self.right_toolbar_last_panel = Some(panel_id.to_string());
+
         self.right_dock_ctrl.set_open(true);
         if let Some(dock) = self.right_dock.as_ref() {
             dock.update(cx, |d, cx| {
@@ -277,6 +298,21 @@ impl WindowView {
     pub(super) fn hide_right_dock(&mut self, cx: &mut Context<Self>) {
         self.right_toolbar_active = None;
         self.right_dock_ctrl.set_open(false);
+
+        // 用户需求：“除了AI助手dock，其余功能未显示时都是可以销毁的”
+        // 收起时，如果当前面板不是 AI 助手，销毁右侧 dock 实体以释放内存
+        if let Some(dock) = self.right_dock.as_ref() {
+            let is_ai = dock
+                .read(cx)
+                .tabs
+                .first()
+                .map(|t| t.metadata(cx).id.0.as_str() == "ai_assistant")
+                .unwrap_or(false);
+            if !is_ai {
+                self.right_dock = None;
+            }
+        }
+
         let window_id = self.window_id;
         self.workspace.update(cx, |ws, cx| {
             ws.set_dock_open(window_id, DockPosition::Right, false, cx)
@@ -364,11 +400,28 @@ impl WindowView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // 1. 若该面板已分离为独立窗口，激活并前置该独立窗口
+        if let Some(handle) = self.detached_right_panels.get(panel_id).copied() {
+            let activated = cx
+                .update_window(handle, |_, win, _| {
+                    win.activate_window();
+                })
+                .is_ok();
+            if activated {
+                return;
+            } else {
+                // 窗口已关闭但未收到通知，清理句柄缓存并继续走正常打开流程
+                self.detached_right_panels.remove(panel_id);
+            }
+        }
+
+        // 2. 若当前已在主窗口展开且激活，点击即收起
         if self.right_toolbar_active.as_deref() == Some(panel_id) && self.right_dock_ctrl.is_open()
         {
             self.hide_right_dock(cx);
             self.focus_active_terminal(window, cx);
         } else {
+            // 3. 否则展开/切换至该面板
             self.show_right_dock(panel_id, window, cx);
         }
     }

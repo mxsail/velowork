@@ -329,7 +329,6 @@ impl EventEmitter<CommandPaletteEvent> for CommandPalette {}
 impl Render for CommandPalette {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let focus_handle = self.focus_handle.clone();
         let config_width = self.state.config.width;
         let config_max_height = self.state.config.max_height;
@@ -407,8 +406,6 @@ impl Render for CommandPalette {
                 div()
                     .px(SPACE_SM)
                     .py(px(10.0))
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .when_some(self.search_input.as_ref(), |this, inp| {
                         this.child(velowork_ui::Input::new(inp).cleanable(true))
                     }),

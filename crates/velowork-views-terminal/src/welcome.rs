@@ -409,17 +409,10 @@ pub fn render_welcome_dashboard(
                         } else {
                             p.surface_card
                         })
-                        .border_1()
-                        .border_color(if is_focused {
-                            p.border_active
-                        } else {
-                            p.border_subtle
-                        })
                         .when(is_focused, |s| s.shadow(ring))
                         .when(!is_focused, |s| {
                             s.hover(|h| {
-                                h.border_color(p.surface_accent.opacity(0.6))
-                                    .bg(p.surface_hover)
+                                h.bg(p.surface_hover)
                             })
                         })
                         .cursor_text()
@@ -738,7 +731,6 @@ fn render_action_card(
 ) -> impl IntoElement {
     let card_bg = p.surface_card;
     let hover_bg = p.surface_hover;
-    let hover_border = p.surface_accent.opacity(0.8);
 
     h_flex()
         .id(id)
@@ -751,9 +743,7 @@ fn render_action_card(
         .p(SPACE_LG)
         .rounded(RADIUS_MD)
         .bg(card_bg)
-        .border_1()
-        .border_color(p.border_subtle)
-        .hover(move |s| s.bg(hover_bg).border_color(hover_border))
+        .hover(move |s| s.bg(hover_bg))
         .on_click(on_click)
         .child(
             div()
@@ -762,8 +752,6 @@ fn render_action_card(
                 .flex_shrink_0()
                 .rounded(RADIUS_MD)
                 .bg(accent_color.opacity(0.12))
-                .border_1()
-                .border_color(accent_color.opacity(0.25))
                 .flex()
                 .items_center()
                 .justify_center()
@@ -818,13 +806,7 @@ fn render_recent_session_card(
     } else {
         p.surface_card
     };
-    let border_color = if is_selected {
-        p.surface_accent
-    } else {
-        p.border_subtle
-    };
     let hover_bg = p.surface_hover;
-    let hover_border = p.surface_accent.opacity(0.8);
     let id_str: SharedString = format!("recent-session-{}", session.id).into();
 
     let icon = match session.protocol {
@@ -858,9 +840,7 @@ fn render_recent_session_card(
         .py(SPACE_SM)
         .rounded(RADIUS_MD)
         .bg(card_bg)
-        .border_1()
-        .border_color(border_color)
-        .hover(move |s| s.bg(hover_bg).border_color(hover_border))
+        .hover(move |s| s.bg(hover_bg))
         .tooltip(move |_, cx| cx.new(|_| Tooltip::new(tooltip_text.clone())).into())
         .on_click(move |_, window, cx| {
             on_click(session_for_click.clone(), window, cx);

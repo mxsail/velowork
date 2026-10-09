@@ -27,5 +27,11 @@ uuid = { version = "1.10", features = ["v4"] }
 base64 = "0.22"
 parking_lot = "0.12"
 
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+] }
+
 [dev-dependencies]
 gpui = { git = "https://github.com/zed-industries/zed", package = "gpui", features = ["test-support"] }

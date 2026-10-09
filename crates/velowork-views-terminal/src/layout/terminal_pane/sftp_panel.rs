@@ -1479,7 +1479,6 @@ impl BottomPanel {
     /// 可排序的列表表头。点击列名按该列排序（目录始终在前），当前排序列显示升降箭头。
     fn sftp_header_row(&self, cx: &mut Context<Self>) -> Stateful<Div> {
         let t = theme(cx);
-        let p = SemanticPalette::from_theme(&t);
         let active = self.sort_key;
         let asc = self.sort_asc;
 
@@ -1534,8 +1533,6 @@ impl BottomPanel {
             .px(SPACE_LG)
             .py(SPACE_XS)
             .bg(surface_bg_t(t.bg_header, &t))
-            .border_b_1()
-            .border_color(p.border_subtle)
             .items_center()
             .on_mouse_down(
                 MouseButton::Right,

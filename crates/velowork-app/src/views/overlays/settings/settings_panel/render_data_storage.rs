@@ -185,8 +185,6 @@ impl SettingsPanel {
             .child(
                 v_flex()
                     .w_full()
-                    .border_1()
-                    .border_color(p.border_subtle)
                     .rounded(RADIUS_MD)
                     .bg(p.surface_card)
                     .overflow_hidden()
@@ -395,7 +393,6 @@ impl SettingsPanel {
 
     fn render_migration_modal(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let selected_mode = self.data_root_mode_select.read(cx).selected_value().copied().unwrap_or_default();
         let target_path = match selected_mode {
             DataRootMode::Default => system_default_data_root(),
@@ -447,8 +444,6 @@ impl SettingsPanel {
                         .flex_shrink_0()
                         .w_full()
                         .px(SPACE_LG)
-                        .border_t_1()
-                        .border_color(p.border_subtle)
                         .items_center()
                         .justify_end()
                         .gap(SPACE_MD)

@@ -81,8 +81,6 @@ impl Render for SyncScopeCardView {
 
         div()
             .bg(p.surface_card)
-            .border_1()
-            .border_color(p.border_subtle)
             .rounded(RADIUS_LG)
             .p(SPACE_LG)
             .flex()

@@ -64,8 +64,6 @@ impl AboutDialog {
         div()
             .px(SPACE_XL)
             .py(px(10.0))
-            .border_b_1()
-            .border_color(p.border_subtle)
             .flex()
             .items_center()
             .justify_between()
@@ -279,7 +277,6 @@ impl AboutDialog {
 
     fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
-        let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let license_label = i18n!(cx, "about.license");
         let close_label = i18n!(cx, "common.action.close");
 
@@ -287,8 +284,6 @@ impl AboutDialog {
             .h(px(48.0))
             .flex_shrink_0()
             .px(SPACE_LG)
-            .border_t_1()
-            .border_color(p.border_subtle)
             .items_center()
             .justify_between()
             .child(

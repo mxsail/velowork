@@ -26,9 +26,9 @@ use crate::views::overlays::dialogs::terminal_color_scheme_dialog::{
     TerminalColorSchemeDialog, TerminalColorSchemeDialogEvent,
 };
 use crate::terminal::available_shell_select_options;
-use crate::theme::theme;
+use crate::theme::{theme, theme_entity};
 use crate::ui::tokens::{ui_font_family, use_custom_ui_font};
-use crate::views::components::{PathAutoCompleteState, dropdown_anchored_below};
+use crate::views::components::{PathAutoCompleteEvent, PathAutoCompleteState, dropdown_anchored_below};
 use crate::workspace::settings::SyncProvider;
 use crate::workspace::settings::TextAntialiasingMode;
 use crate::workspace::state::Workspace;
@@ -381,23 +381,34 @@ impl SettingsPanel {
             terminal_bg_image_input.update(cx, |p, cx| p.set_value_quiet(img.clone(), cx));
         }
         let inner_bg_input = terminal_bg_image_input.read(cx).input().clone();
-        let committed_bg_img = Rc::new(RefCell::new(s.terminal_background_image.clone()));
-        let committed_bg_clone = committed_bg_img.clone();
         cx.subscribe(
             &inner_bg_input,
             move |this, entity, event: &InputEvent, cx| {
-                if matches!(event, InputEvent::Blur | InputEvent::PressEnter) {
-                    let val = entity.read(cx).text().to_string();
-                    let opt = if val.trim().is_empty() {
-                        None
-                    } else {
-                        Some(val.clone())
-                    };
-                    if *committed_bg_clone.borrow() != opt {
-                        *committed_bg_clone.borrow_mut() = opt.clone();
-                        this.bg_image_show_success = false;
-                        settings_entity(cx)
-                            .update(cx, |state, cx| state.set_terminal_background_image(opt, cx));
+                let text = entity.read(cx).text().to_string();
+                let is_empty = text.trim().is_empty();
+                // When cleared to empty (via clear icon or backspace), apply immediately on Change.
+                // For non-empty path typing, apply on Blur or PressEnter to avoid disk I/O thrashing.
+                let should_apply = if is_empty {
+                    true
+                } else {
+                    matches!(event, InputEvent::Blur | InputEvent::PressEnter)
+                };
+                if should_apply {
+                    let opt = if is_empty { None } else { Some(text.trim().to_string()) };
+                    this.update_terminal_bg_image(opt, cx);
+                }
+            },
+        )
+        .detach();
+
+        cx.subscribe(
+            &terminal_bg_image_input,
+            move |this, _entity, event: &PathAutoCompleteEvent, cx| {
+                match event {
+                    PathAutoCompleteEvent::Change(val) => {
+                        if val.trim().is_empty() {
+                            this.update_terminal_bg_image(None, cx);
+                        }
                     }
                 }
             },
@@ -442,6 +453,9 @@ impl SettingsPanel {
                 } else if is_loading {
                     this.bg_image_show_success = false;
                 } else if has_error {
+                    this.bg_image_show_success = false;
+                    this.bg_image_last_loaded_key = None;
+                } else if !has_image {
                     this.bg_image_show_success = false;
                     this.bg_image_last_loaded_key = None;
                 }
@@ -1569,6 +1583,15 @@ impl SettingsPanel {
             window.focus(&initial_fh, cx);
         });
 
+        cx.observe(&settings_entity(cx), |_this, _, cx| {
+            cx.notify();
+        })
+        .detach();
+        cx.observe(&theme_entity(cx), |_this, _, cx| {
+            cx.notify();
+        })
+        .detach();
+
         panel.with_security_input_subscription(cx)
     }
 
@@ -1695,6 +1718,45 @@ impl SettingsPanel {
             }))
             .detach();
         }
+
+        let terminal_bg = self.terminal_bg_image_input.read(cx).value(cx);
+        let terminal_bg_opt = if terminal_bg.trim().is_empty() {
+            None
+        } else {
+            Some(terminal_bg.trim().to_string())
+        };
+        self.update_terminal_bg_image(terminal_bg_opt, cx);
+    }
+
+    pub(super) fn update_terminal_bg_image(
+        &mut self,
+        new_val: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let normalized = new_val.filter(|s| !s.trim().is_empty());
+        let current_val = settings_entity(cx).read(cx).settings.terminal_background_image.clone();
+        if current_val != normalized {
+            self.bg_image_show_success = false;
+            if normalized.is_none() {
+                self.bg_image_last_loaded_key = None;
+            }
+            settings_entity(cx).update(cx, |state, cx| {
+                state.set_terminal_background_image(normalized, cx);
+            });
+            cx.notify();
+        }
+    }
+
+    pub(super) fn clear_terminal_bg_image(&mut self, cx: &mut Context<Self>) {
+        self.terminal_bg_image_input.update(cx, |p, cx| {
+            p.set_value_quiet("", cx);
+        });
+        self.bg_image_show_success = false;
+        self.bg_image_last_loaded_key = None;
+        settings_entity(cx).update(cx, |state, cx| {
+            state.set_terminal_background_image(None, cx);
+        });
+        cx.notify();
     }
 
     fn close(&mut self, cx: &mut Context<Self>) {
@@ -1741,8 +1803,6 @@ impl SettingsPanel {
             .items_center()
             .gap(SPACE_MD)
             .pb(SPACE_MD)
-            .border_b_1()
-            .border_color(palette.border_subtle)
             .child(
                 active_cat
                     .icon()
@@ -1763,8 +1823,6 @@ impl SettingsPanel {
             .id("settings-active-card")
             .w_full()
             .bg(palette.surface_card)
-            .border_1()
-            .border_color(palette.border_subtle)
             .rounded(RADIUS_CARD)
             .px(SPACE_LG)
             .py(SPACE_MD)

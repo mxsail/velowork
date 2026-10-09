@@ -1,7 +1,7 @@
 use crate::action_dispatch::ActionDispatcher;
 use crate::settings::settings_entity;
 use crate::terminal::backend::TerminalBackend;
-use crate::theme::{ThemeColors, surface_bg_t, theme};
+use crate::theme::{ThemeColors, surface_bg, surface_bg_t, theme};
 use crate::ui::tokens::{
     ICON_MICRO, ICON_SM, RADIUS_CARD, RADIUS_MD, RADIUS_STD,
     ui_space_lg, ui_space_sm, ui_space_xs,
@@ -542,7 +542,7 @@ impl ProjectColumn {
                     .rounded(RADIUS_STD)
                     .border_1()
                     .border_color(rgb(t.border))
-                    .bg(surface_bg_t(t.bg_panel, &t))
+                    .bg(surface_bg(t.bg_panel, cx))
                     .hover(|s| s.bg(rgb(t.bg_selection)).border_color(rgb(t.border_active)))
                     .flex()
                     .items_center()
@@ -1551,7 +1551,7 @@ impl Render for ProjectColumn {
                         terminal_fullscreen,
                     )
                 } else {
-                    let palette = SemanticPalette::from_theme(&t);
+                    let palette = SemanticPalette::from_context(cx);
                     div()
                         .absolute()
                         .inset_0()

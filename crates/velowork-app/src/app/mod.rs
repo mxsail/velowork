@@ -245,6 +245,16 @@ impl Velowork {
         })
         .detach();
 
+        // Observe settings and theme so Velowork re-renders when transparency/theme changes while locked
+        cx.observe(&crate::settings::settings_entity(cx), |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
+        cx.observe(&crate::theme::theme_entity(cx), |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
+
         let mut manager = Self {
             main_window,
             main_window_handle,
@@ -768,7 +778,6 @@ impl Velowork {
 
 impl Render for Velowork {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let t = crate::theme::theme(cx);
         let settings = &crate::settings::settings_entity(cx).read(cx).settings;
         let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
             settings.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom
@@ -797,7 +806,6 @@ impl Render for Velowork {
                     .bottom_0()
                     .left_0()
                     .right_0()
-                    .bg(rgb(t.bg_primary))
                     .occlude();
 
                 if has_rounded_corners {

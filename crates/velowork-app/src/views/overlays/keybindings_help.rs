@@ -5,7 +5,7 @@ use crate::keybindings::{
     translate_action_desc_for_id, translate_action_name, translate_category,
     Cancel, ConflictKind, KeybindingConfig, KeybindingEntry, ShowKeybindings,
 };
-use crate::theme::{surface_bg_t, theme};
+use crate::theme::{surface_bg, surface_bg_t, theme};
 use crate::views::components::{modal_content, modal_header};
 use velowork_ui::badge::keyboard_hint;
 use crate::ui::tokens::{
@@ -631,8 +631,6 @@ impl Render for KeybindingsHelp {
                         div()
                             .px(SPACE_LG)
                             .py(SPACE_SM)
-                            .border_b_1()
-                            .border_color(p.border_subtle)
                             .when_some(self.search_input.as_ref(), |this, inp| {
                                 this.child(velowork_ui::Input::new(inp).cleanable(true))
                             }),
@@ -642,8 +640,6 @@ impl Render for KeybindingsHelp {
                         div()
                             .px(SPACE_LG)
                             .py(SPACE_XS)
-                            .border_b_1()
-                            .border_color(p.border_subtle)
                             .flex()
                             .flex_wrap()
                             .items_center()
@@ -848,7 +844,7 @@ impl Render for KeybindingsHelp {
                                                                         .px(SPACE_XS)
                                                                         .py(px(1.0))
                                                                         .rounded(RADIUS_MD)
-                                                                        .bg(surface_bg_t(t.bg_secondary, &t))
+                                                                        .bg(surface_bg(t.bg_secondary, cx))
                                                                         .text_color(rgb(t.text_muted))
                                                                         .child(ctx.clone()),
                                                                 )
@@ -1028,8 +1024,6 @@ impl Render for KeybindingsHelp {
                         div()
                             .px(SPACE_LG)
                             .py(SPACE_SM)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
                             .flex()
                             .items_center()
                             .justify_between()
@@ -1079,8 +1073,8 @@ impl Render for KeybindingsHelp {
                                                     .px(SPACE_SM)
                                                     .py(px(2.0))
                                                     .rounded(RADIUS_STD)
-                                                    .bg(surface_bg_t(t.bg_secondary, &t))
-                                                    .hover(|s| s.bg(surface_bg_t(t.bg_hover, &t)))
+                                                    .bg(surface_bg(t.bg_secondary, cx))
+                                                    .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                                                     .text_size(ui_text_sm(cx))
                                                     .text_color(rgb(t.text_primary))
                                                     .child(i18n!(cx, "common.action.cancel"))
@@ -1097,8 +1091,8 @@ impl Render for KeybindingsHelp {
                                                 .px(SPACE_SM)
                                                 .py(px(2.0))
                                                 .rounded(RADIUS_STD)
-                                                .bg(surface_bg_t(t.bg_secondary, &t))
-                                                .hover(|s| s.bg(surface_bg_t(t.bg_hover, &t)))
+                                                .bg(surface_bg(t.bg_secondary, cx))
+                                                .hover(|s| s.bg(surface_bg(t.bg_hover, cx)))
                                                 .text_size(ui_text_sm(cx))
                                                 .text_color(rgb(t.text_secondary))
                                                 .child(i18n!(cx, "keybindings.reset_to_defaults"))

@@ -411,8 +411,6 @@ impl Render for TerminalColorSchemeDialog {
                                         h_flex()
                                             .px(SPACE_XL)
                                             .py(SPACE_SM)
-                                            .border_b_1()
-                                            .border_color(p.border_subtle)
                                             .justify_between()
                                             .items_center()
                                             .child(
@@ -766,8 +764,6 @@ impl Render for TerminalColorSchemeDialog {
                             .h(px(48.0))
                             .flex_shrink_0()
                             .px(SPACE_LG)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
                             .justify_end()
                             .items_center()
                             .gap(SPACE_MD)

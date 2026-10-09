@@ -92,8 +92,7 @@ pub struct SemanticPalette {
 impl SemanticPalette {
     /// Derives a semantic palette from the given `ThemeColors` with custom background opacity.
     pub fn from_theme_with_opacity(t: &ThemeColors, opacity: f32) -> Self {
-        let accent_alpha = (0.85 + 0.15 * opacity) * opacity;
-        let surface_accent = with_alpha(t.accent, accent_alpha);
+        let surface_accent = to_hsla(t.accent);
         let accent_hover = Hsla {
             l: if surface_accent.l > 0.5 {
                 (surface_accent.l * 0.9).clamp(0.0, 1.0)
@@ -117,22 +116,31 @@ impl SemanticPalette {
             to_hsla(0x1A1A1A)
         };
 
+        // Stepped non-linear adaptive curve: 18% micro-stroke at 0% opacity to prevent wireframe cage,
+        // scaling smoothly to 100% solid border at full opacity to maintain crisp definition.
+        let border_subtle_alpha = (0.18 + 0.82 * opacity.clamp(0.0, 1.0).powf(1.2)).clamp(0.0, 1.0);
+
+        // 88% dense opacity floor for floating overlays (menus, tooltips, popovers, dropdowns, modals):
+        // Concurrently completely covers and conceals underlying main window text even at 0%
+        // window opacity, while retaining subtle modern glass translucency.
+        let overlay_opacity = (0.88 + 0.12 * opacity.clamp(0.0, 1.0)).clamp(0.88, 1.0);
+
         Self {
             surface_base: with_alpha(t.bg_primary, opacity),
-            surface_raised: with_alpha(t.bg_secondary, opacity),
+            surface_raised: with_alpha(t.bg_secondary, (0.85 + 0.15 * opacity).clamp(0.0, 1.0)),
             surface_card: with_alpha(t.text_primary, 0.035),
             surface_header: with_alpha(t.bg_header, opacity),
-            surface_overlay: with_alpha(t.bg_primary, opacity),
-            surface_hover: with_alpha(t.bg_hover, opacity),
-            surface_selection: with_alpha(t.bg_selection, opacity),
+            surface_overlay: with_alpha(t.bg_primary, overlay_opacity),
+            surface_hover: with_alpha(t.bg_hover, (0.80 + 0.20 * opacity).clamp(0.0, 1.0)),
+            surface_selection: to_hsla(t.bg_selection),
             surface_accent,
             surface_accent_hover: accent_hover,
-            surface_danger: with_alpha(t.error, accent_alpha),
+            surface_danger: to_hsla(t.error),
             text_primary: to_hsla(t.text_primary),
             text_secondary: to_hsla(t.text_secondary),
             text_muted: to_hsla(t.text_muted),
             text_on_accent,
-            border_subtle: with_alpha(t.border, 0.5),
+            border_subtle: with_alpha(t.border, border_subtle_alpha),
             border_active: to_hsla(t.border_active),
             border_transparent: transparent(),
             editor_cursor: to_hsla(t.text_primary),
@@ -191,7 +199,11 @@ mod tests {
     fn test_palette_with_opacity() {
         let p = SemanticPalette::from_theme_with_opacity(&DARK_THEME, 0.8);
         assert!((p.surface_base.a - 0.8).abs() < 0.01);
-        assert!((p.surface_overlay.a - 0.8).abs() < 0.01);
+        assert!((p.surface_header.a - 0.8).abs() < 0.01);
+        // surface_overlay has an 88% dense floor: 0.88 + 0.12 * 0.8 = 0.976
+        assert!((p.surface_overlay.a - 0.976).abs() < 0.01);
+        assert_eq!(p.surface_selection.a, 1.0);
+        assert!((p.border_subtle.a - 0.81).abs() < 0.02);
     }
 
     #[test]

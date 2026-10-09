@@ -584,8 +584,6 @@ impl Render for AddProjectDialog {
                             .justify_between()
                             .px(SPACE_XL)
                             .py(SPACE_LG)
-                            .border_b_1()
-                            .border_color(p.border_subtle)
                             .child(
                                 h_flex()
                                     .gap(SPACE_MD)
@@ -691,8 +689,6 @@ impl Render for AddProjectDialog {
                             .items_center()
                             .justify_end()
                             .px(SPACE_LG)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
                             .child(dialog_actions_extended(
                                 i18n!(cx, "common.action.cancel"),
                                 cx.listener(|this, _, _window, cx| {

@@ -316,8 +316,6 @@ impl Render for QuickCommandVarDialog {
                     .justify_end()
                     .gap(SPACE_MD)
                     .px(SPACE_LG)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .child(
                         button(
                             "qc-var-cancel",

@@ -1080,8 +1080,6 @@ impl Render for ServiceDialog {
                     .items_center()
                     .justify_end()
                     .px(SPACE_LG)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .child(footer),
             )
     }

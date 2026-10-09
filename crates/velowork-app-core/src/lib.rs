@@ -4,4 +4,5 @@
 
 pub mod settings;
 pub mod settings_persister;
+pub mod window_effects;
 pub mod workspace;

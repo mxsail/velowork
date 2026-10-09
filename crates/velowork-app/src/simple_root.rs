@@ -26,7 +26,6 @@ use crate::theme::theme_entity;
 const SHADOW_SIZE: Pixels = px(10.0);
 
 /// Frame border width, like Zed's `BORDER_SIZE`.
-#[allow(dead_code)]
 const BORDER_SIZE: Pixels = px(1.0);
 
 /// Edge detection zone size for CSD resize when no shadow ring is shown
@@ -42,17 +41,21 @@ impl Global for GlobalResizeEdge {}
 /// resize edges, following Zed's implementation.
 pub struct SimpleRoot {
     view: AnyView,
-    /// Last global background opacity seen, so we only touch the compositor
-    /// when transparency actually changes.
-    last_bg_opacity: f32,
-    /// Last rounded-corner state seen. Tracked separately from `last_bg_opacity`
-    /// so toggling rounded corners (or maximizing the window) re-applies the
-    /// correct `WindowBackgroundAppearance` instead of getting stuck on a
-    /// previously set `Transparent` surface.
+    /// Last window background appearance seen, so we only reconfigure the compositor
+    /// when the underlying composition or material actually changes.
+    last_appearance: Option<WindowBackgroundAppearance>,
+    /// Last rounded-corner state seen. Tracked separately so toggling rounded corners
+    /// (or maximizing the window) re-applies the correct window appearance.
     last_has_rounded_corners: bool,
     /// Last corner radius published to `WindowCornerRadius` so `modal_backdrop`
     /// can clip its dimming mask to the rounded window corners.
     last_modal_corner_radius: f32,
+    /// Last theme brightness (dark mode) seen, so DWM Immersive Dark Mode stays
+    /// in sync when switching between dark and light themes.
+    last_is_dark: Option<bool>,
+    /// Last custom titlebar state seen, so DWM non-client rendering policy disables
+    /// duplicate system caption buttons when custom titlebar is active.
+    last_is_custom_titlebar: Option<bool>,
 }
 
 impl SimpleRoot {
@@ -77,9 +80,11 @@ impl SimpleRoot {
 
         Self {
             view: view.into(),
-            last_bg_opacity: -1.0,
+            last_appearance: None,
             last_has_rounded_corners: false,
             last_modal_corner_radius: -1.0,
+            last_is_dark: None,
+            last_is_custom_titlebar: None,
         }
     }
 }
@@ -120,192 +125,218 @@ impl Render for SimpleRoot {
             Decorations::Client { tiling } => tiling,
         };
 
-        // Like Zed: tell gpui how far the visible frame is inset from the
-        // surface edge. On Wayland this shrinks the xdg window geometry (and
-        // the opaque region) to the inner frame so the compositor aligns
-        // snapping/maximizing/effects with the rounded frame instead of the
-        // rectangular surface.
-        match decorations {
-            Decorations::Client { .. } if has_rounded_corners => {
-                window.set_client_inset(SHADOW_SIZE)
-            }
-            _ => window.set_client_inset(px(0.0)),
+        // Client-side drop shadow ring is ONLY used on Linux Wayland/X11 CSD.
+        // On Windows and macOS, the OS window manager/DWM provides the native shadow,
+        // native 1px border, and handles edge resizing natively.
+        let is_csd_shadow = cfg!(target_os = "linux") && matches!(decorations, Decorations::Client { .. });
+
+        // Tell gpui how far the visible frame is inset from the surface edge.
+        // On Wayland this shrinks the xdg window geometry to the inner frame.
+        if is_csd_shadow && has_rounded_corners {
+            window.set_client_inset(SHADOW_SIZE);
+        } else {
+            window.set_client_inset(px(0.0));
         }
 
         // Keep the compositor's backdrop blur/transparency in sync.
-        // When custom titlebar with rounded corners (or transparency) is active,
-        // we set WindowBackgroundAppearance to Transparent or Blurred so the OS
-        // window compositor renders smooth alpha-clipped corners without sharp dark tips.
-        let opacity = bg_opacity(cx);
-        let target_appearance = if opacity < 1.0 {
-            if cfg!(target_os = "windows") {
-                // Windows 11 DWM deprecated legacy `ACCENT_ENABLE_ACRYLICBLURBEHIND` (state 4),
-                // which causes `Blurred` to fall back to an opaque solid black/dark background.
-                // Using `Transparent` (state 2) enables DirectComposition premultiplied alpha
-                // to blend directly with the Windows desktop.
-                WindowBackgroundAppearance::Transparent
-            } else {
-                // macOS uses native `NSVisualEffectView`, and Linux Wayland/X11 uses compositor blur protocols.
-                WindowBackgroundAppearance::Blurred
-            }
-        } else if has_rounded_corners {
-            WindowBackgroundAppearance::Transparent
-        } else {
-            WindowBackgroundAppearance::Opaque
-        };
+        let target_appearance = crate::settings::window_background_appearance(
+            &crate::settings::settings_entity(cx).read(cx).settings,
+        );
 
-        if self.last_bg_opacity != opacity || self.last_has_rounded_corners != has_rounded_corners {
+        let is_dark = t.is_dark();
+
+        if self.last_appearance != Some(target_appearance)
+            || self.last_has_rounded_corners != has_rounded_corners
+            || self.last_is_dark != Some(is_dark)
+            || self.last_is_custom_titlebar != Some(is_custom_titlebar)
+        {
+            log::info!(
+                "[simple_root] Appearance change: rounded={}, is_dark={}, custom_titlebar={}, target={:?}",
+                has_rounded_corners,
+                is_dark,
+                is_custom_titlebar,
+                target_appearance
+            );
             window.set_background_appearance(target_appearance);
-            self.last_bg_opacity = opacity;
+            crate::platform::windows::sync_window_dwm_frame(
+                window,
+                target_appearance != WindowBackgroundAppearance::Opaque,
+                is_dark,
+                is_custom_titlebar,
+            );
+
+            self.last_appearance = Some(target_appearance);
             self.last_has_rounded_corners = has_rounded_corners;
+            self.last_is_dark = Some(is_dark);
+            self.last_is_custom_titlebar = Some(is_custom_titlebar);
         }
 
+        let opacity = bg_opacity(cx);
         let content_bg = if opacity >= 1.0 {
             with_alpha(t.bg_primary, 1.0)
         } else {
             with_alpha(t.bg_primary, 0.0)
         };
 
-        // Resize detection zone: the shadow ring when present, otherwise a thin
-        // strip just inside the window edge.
-        let resize_zone = if has_rounded_corners {
-            SHADOW_SIZE
-        } else {
-            RESIZE_EDGE_SIZE
-        };
-
         let radius = px(window_corner_radius);
         let entity = cx.entity();
 
-        // Inner frame — Zed's content wrapper: border + rounded corners on
-        // non-tiled edges, drop shadow only when not tiled at all.
+        // 复合自适应边缘设计（仅在 Linux CSD 绘制阴影与模拟边框）：
+        let border_alpha = if opacity < 1.0 {
+            (opacity + (1.0 - opacity) * 0.32).min(1.0)
+        } else {
+            1.0
+        };
+        let border_color = if opacity < 1.0 {
+            with_alpha(t.border, border_alpha)
+        } else {
+            with_alpha(t.border, 0.6)
+        };
+
+        let (shadow_opacity, shadow_blur) = if opacity < 1.0 {
+            let factor = (0.35 + 0.65 * opacity).clamp(0.0, 1.0);
+            (0.4 * factor, (SHADOW_SIZE / 2.0) * factor)
+        } else {
+            (0.4, SHADOW_SIZE / 2.0)
+        };
+
+        // Inner frame — content wrapper:
+        // On Linux CSD: border + rounded corners on non-tiled edges + drop shadow when not tiled.
+        // On Windows/macOS: rounded corners on non-tiled edges when configured, zero artificial shadow/border (OS DWM handles it).
         let inner_frame = div()
             .id("window-frame")
             .size_full()
             .map(|d| {
                 if has_rounded_corners {
-                    d.when(!(tiling.top || tiling.left), |d| d.rounded_tl(radius))
+                    let mut frame = d
+                        .when(!(tiling.top || tiling.left), |d| d.rounded_tl(radius))
                         .when(!(tiling.top || tiling.right), |d| d.rounded_tr(radius))
                         .when(!(tiling.bottom || tiling.left), |d| d.rounded_bl(radius))
                         .when(!(tiling.bottom || tiling.right), |d| d.rounded_br(radius))
-                        .when(!tiling.is_tiled(), |d| {
-                            // Same shadow as Zed: centered, blur = ring / 2, so
-                            // it always fits inside the transparent ring. GPUI
-                            // paints drop shadows with the element's corner
-                            // radii, so it follows `window_corner_radius`.
-                            d.shadow(vec![BoxShadow {
-                                color: black().opacity(0.4),
-                                offset: point(px(0.0), px(0.0)),
-                                blur_radius: SHADOW_SIZE / 2.0,
-                                spread_radius: px(0.0),
-                                inset: false,
-                            }])
-                        })
                         .bg(content_bg)
-                        .overflow_hidden()
+                        .overflow_hidden();
+
+                    if is_csd_shadow {
+                        frame = frame
+                            .border_color(border_color)
+                            .when(!tiling.top, |d| d.border_t(BORDER_SIZE))
+                            .when(!tiling.bottom, |d| d.border_b(BORDER_SIZE))
+                            .when(!tiling.left, |d| d.border_l(BORDER_SIZE))
+                            .when(!tiling.right, |d| d.border_r(BORDER_SIZE))
+                            .when(!tiling.is_tiled(), |d| {
+                                d.shadow(vec![BoxShadow {
+                                    color: black().opacity(shadow_opacity),
+                                    offset: point(px(0.0), px(0.0)),
+                                    blur_radius: shadow_blur,
+                                    spread_radius: px(0.0),
+                                    inset: false,
+                                }])
+                            });
+                    }
+                    frame
                 } else {
                     d.bg(content_bg)
                 }
             })
-            .on_mouse_move(|_e, _window, cx| {
-                // Content area: stop propagation so the backdrop's resize-edge
-                // tracking only reacts inside the shadow ring (Zed does the same).
-                cx.stop_propagation();
+            .when(is_csd_shadow, |d| {
+                d.on_mouse_move(|_e, _window, cx| {
+                    cx.stop_propagation();
+                })
             })
             .child(self.view.clone());
 
-        // Backdrop — Zed's `window-backdrop`: transparent ring that hosts the
-        // shadow and the resize mouse handlers.
-        div()
+        // Backdrop — transparent ring that hosts the shadow and the resize mouse handlers on Linux CSD.
+        // On Windows and macOS, zero padding is applied so the frame perfectly matches the OS window.
+        let mut root_div = div()
             .id("simple-root")
             .size_full()
-            // Apply a custom UI font family only when one is explicitly selected;
-            // "System" (the default) lets GPUI use the native OS UI font.
-            .when(use_custom_ui_font(cx), |div| div.font_family(ui_font_family(cx)))
-            .map(|d| match decorations {
-                Decorations::Server => {
-                    if has_rounded_corners {
-                        d.bg(transparent_black())
-                    } else {
-                        d.bg(content_bg)
-                    }
-                }
-                Decorations::Client { .. } => d
-                    .bg(transparent_black())
-                    .when(has_rounded_corners, |d| {
-                        d.when(!tiling.top, |d| d.pt(SHADOW_SIZE))
-                            .when(!tiling.bottom, |d| d.pb(SHADOW_SIZE))
-                            .when(!tiling.left, |d| d.pl(SHADOW_SIZE))
-                            .when(!tiling.right, |d| d.pr(SHADOW_SIZE))
-                    })
-                    .on_mouse_move({
-                        let entity = entity.clone();
-                        move |e, window, cx| {
-                            let size = window.window_bounds().get_bounds().size;
-                            let new_edge = resize_edge(e.position, resize_zone, size, tiling);
-                            let old_edge = cx.try_global::<GlobalResizeEdge>().map(|e| e.0);
-                            if new_edge != old_edge {
-                                // Re-render so the cursor-style canvas below picks
-                                // up the new hover edge (same as Zed's notify).
-                                entity.update(cx, |_, cx| cx.notify());
-                            }
-                        }
-                    })
-                    .on_mouse_down(MouseButton::Left, move |e, window, _cx| {
+            .when(use_custom_ui_font(cx), |div| div.font_family(ui_font_family(cx)));
+
+        if is_csd_shadow {
+            let resize_zone = if has_rounded_corners {
+                SHADOW_SIZE
+            } else {
+                RESIZE_EDGE_SIZE
+            };
+
+            root_div = root_div
+                .bg(transparent_black())
+                .when(has_rounded_corners, |d| {
+                    d.when(!tiling.top, |d| d.pt(SHADOW_SIZE))
+                        .when(!tiling.bottom, |d| d.pb(SHADOW_SIZE))
+                        .when(!tiling.left, |d| d.pl(SHADOW_SIZE))
+                        .when(!tiling.right, |d| d.pr(SHADOW_SIZE))
+                })
+                .on_mouse_move({
+                    let entity = entity.clone();
+                    move |e, window, cx| {
                         let size = window.window_bounds().get_bounds().size;
-                        let Some(edge) = resize_edge(e.position, resize_zone, size, tiling)
-                        else {
+                        let new_edge = resize_edge(e.position, resize_zone, size, tiling);
+                        let old_edge = cx.try_global::<GlobalResizeEdge>().map(|e| e.0);
+                        if new_edge != old_edge {
+                            entity.update(cx, |_, cx| cx.notify());
+                        }
+                    }
+                })
+                .on_mouse_down(MouseButton::Left, move |e, window, _cx| {
+                    let size = window.window_bounds().get_bounds().size;
+                    let Some(edge) = resize_edge(e.position, resize_zone, size, tiling) else {
+                        return;
+                    };
+                    window.start_window_resize(edge);
+                });
+        } else {
+            root_div = root_div.bg(transparent_black());
+        }
+
+        root_div = root_div.child(inner_frame);
+
+        if is_csd_shadow {
+            let resize_zone = if has_rounded_corners {
+                SHADOW_SIZE
+            } else {
+                RESIZE_EDGE_SIZE
+            };
+
+            root_div = root_div.child(
+                canvas(
+                    |_bounds, window, _cx| {
+                        window.insert_hitbox(
+                            Bounds::new(
+                                point(px(0.0), px(0.0)),
+                                window.window_bounds().get_bounds().size,
+                            ),
+                            HitboxBehavior::Normal,
+                        )
+                    },
+                    move |_bounds, hitbox: Hitbox, window, cx| {
+                        let mouse = window.mouse_position();
+                        let size = window.window_bounds().get_bounds().size;
+                        let Some(edge) = resize_edge(mouse, resize_zone, size, tiling) else {
                             return;
                         };
-                        window.start_window_resize(edge);
-                    }),
-            })
-            .child(inner_frame)
-            // Cursor-style canvas — Zed's third layer: a full-window hitbox that
-            // switches the cursor while hovering a resize edge.
-            .when(matches!(decorations, Decorations::Client { .. }), |d| {
-                d.child(
-                    canvas(
-                        |_bounds, window, _cx| {
-                            window.insert_hitbox(
-                                Bounds::new(
-                                    point(px(0.0), px(0.0)),
-                                    window.window_bounds().get_bounds().size,
-                                ),
-                                HitboxBehavior::Normal,
-                            )
-                        },
-                        move |_bounds, hitbox: Hitbox, window, cx| {
-                            let mouse = window.mouse_position();
-                            let size = window.window_bounds().get_bounds().size;
-                            let Some(edge) = resize_edge(mouse, resize_zone, size, tiling)
-                            else {
-                                return;
-                            };
-                            cx.set_global(GlobalResizeEdge(edge));
-                            window.set_cursor_style(
-                                match edge {
-                                    ResizeEdge::Top | ResizeEdge::Bottom => {
-                                        CursorStyle::ResizeUpDown
-                                    }
-                                    ResizeEdge::Left | ResizeEdge::Right => {
-                                        CursorStyle::ResizeLeftRight
-                                    }
-                                    ResizeEdge::TopLeft | ResizeEdge::BottomRight => {
-                                        CursorStyle::ResizeUpLeftDownRight
-                                    }
-                                    ResizeEdge::TopRight | ResizeEdge::BottomLeft => {
-                                        CursorStyle::ResizeUpRightDownLeft
-                                    }
-                                },
-                                &hitbox,
-                            );
-                        },
-                    )
-                    .size_full()
-                    .absolute(),
+                        cx.set_global(GlobalResizeEdge(edge));
+                        window.set_cursor_style(
+                            match edge {
+                                ResizeEdge::Top | ResizeEdge::Bottom => CursorStyle::ResizeUpDown,
+                                ResizeEdge::Left | ResizeEdge::Right => CursorStyle::ResizeLeftRight,
+                                ResizeEdge::TopLeft | ResizeEdge::BottomRight => {
+                                    CursorStyle::ResizeUpLeftDownRight
+                                }
+                                ResizeEdge::TopRight | ResizeEdge::BottomLeft => {
+                                    CursorStyle::ResizeUpRightDownLeft
+                                }
+                            },
+                            &hitbox,
+                        );
+                    },
                 )
-            })
+                .size_full()
+                .absolute(),
+            );
+        }
+
+        root_div
     }
 }
 

@@ -783,13 +783,11 @@ impl CommandsPanel {
             });
 
         h_flex()
-            .gap(SPACE_XS)
+            .gap(SPACE_SM)
             .child(play_btn)
             .child(pause_btn)
             .child(stop_btn)
-            .child(div().w(px(1.0)).h(SPACE_XL).bg(p.border_subtle))
             .child(send_mode_switcher)
-            .child(div().w(px(1.0)).h(SPACE_XL).bg(p.border_subtle))
             .child(
                 div()
                     .flex_shrink_0()
@@ -818,7 +816,6 @@ impl CommandsPanel {
                     div().into_any_element()
                 },
             )
-            .child(div().w(px(1.0)).h(SPACE_XL).bg(p.border_subtle))
             .child(
                 div()
                     .text_size(ui_text_md(cx))
@@ -1268,8 +1265,6 @@ impl CommandsPanel {
                 .h(px(32.0))
                 .px(SPACE_MD)
                 .bg(rgb(t.bg_header))
-                .border_b_1()
-                .border_color(p.border_subtle)
                 .justify_between()
                 .child(
                     h_flex()
@@ -1291,11 +1286,10 @@ impl CommandsPanel {
                 )
                 .child(
                     h_flex()
-                        .gap(SPACE_XS)
+                        .gap(SPACE_SM)
                         .child(play_btn)
                         .child(pause_btn)
                         .child(stop_btn)
-                        .child(div().w(px(1.0)).h(SPACE_XL).bg(p.border_subtle))
                         .child(
                             div()
                                  .flex_shrink_0()
@@ -1338,7 +1332,6 @@ impl CommandsPanel {
                                         .child("s"),
                                 ),
                         )
-                        .child(div().w(px(1.0)).h(SPACE_XL).bg(p.border_subtle))
                         .child(
                             div()
                                 .text_size(ui_text_md(cx))

@@ -392,8 +392,6 @@ impl Render for ProfileManager {
                             .w_full()
                             .gap(SPACE_MD)
                             .px(SPACE_XS)
-                            .border_t_1()
-                            .border_color(p.border_subtle)
                             .items_center()
                             .child(
                                 div()

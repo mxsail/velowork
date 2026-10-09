@@ -825,7 +825,11 @@ impl Render for TerminalContent {
         // backdrop at the exact user-configured opacity. Stacking `effective_bg` with
         // `base_alpha` on top would compound the opacity into `1 - (1 - opacity)^2`,
         // making the terminal significantly more opaque than intended.
-        let base_alpha = if image_set || (opacity < 1.0 && (effective_bg & 0xFFFFFF) == (t.bg_primary & 0xFFFFFF)) {
+        let is_same_bg = (effective_bg & 0xFFFFFF) == (t.bg_primary & 0xFFFFFF);
+        let is_default_scheme = active_color_scheme == "Dark"
+            || active_color_scheme == "Velowork Dark"
+            || active_color_scheme.is_empty();
+        let base_alpha = if image_set || (opacity < 1.0 && (is_same_bg || (is_default_scheme && bg_tint.is_none()))) {
             0.0
         } else {
             opacity

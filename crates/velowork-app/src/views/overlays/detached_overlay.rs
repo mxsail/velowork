@@ -146,6 +146,13 @@ where
         })
         .detach();
 
+        if let Some(global_settings) = cx.try_global::<crate::settings::GlobalSettings>().map(|g| g.0.clone()) {
+            cx.observe(&global_settings, |_this, _settings, cx| cx.notify())
+                .detach();
+        }
+        cx.observe(&crate::theme::theme_entity(cx), |_this, _theme, cx| cx.notify())
+            .detach();
+
         Self {
             content,
             overlay_registry,
@@ -299,8 +306,6 @@ where
                     .items_center()
                     .justify_between()
                     .bg(p.surface_card)
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .when(has_rounded_corners, |d| d.rounded_tl(radius).rounded_tr(radius))
                     .window_control_area(WindowControlArea::Drag)
                     .when(cfg!(target_os = "linux"), |d| {
@@ -346,7 +351,6 @@ where
         } else {
             None
         };
-
         div()
             .id("detached-overlay-root")
             .track_focus(&focus_handle)

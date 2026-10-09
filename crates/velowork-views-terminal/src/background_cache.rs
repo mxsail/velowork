@@ -170,7 +170,7 @@ impl TerminalBackgroundCache {
         // - A path configured: stable once the result is known or in flight,
         //   AND the blur key matches.
         let already_known = if path.is_none() {
-            self.path.is_none()
+            self.path.is_none() && self.image.is_none() && self.error.is_none() && !self.loading
         } else {
             self.path == path
                 && self.blur == blur

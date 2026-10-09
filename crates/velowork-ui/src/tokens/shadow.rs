@@ -32,6 +32,31 @@ pub fn elevation_menu_shadow() -> Vec<BoxShadow> {
     ]
 }
 
+/// Fluent / Linear 风格的模态弹窗与卡片双层物理投影 (Elevation Modal / Dialog Shadow)。
+///
+/// 1. 接触层 (Ambient Contact Ring)：紧密贴合卡片边缘，防止在透明磨砂背景上边缘发虚；
+/// 2. 纵深扩散层 (Elevation Spread)：柔和向下延展，提供自然的悬浮深度。
+pub fn elevation_modal_shadow() -> Vec<BoxShadow> {
+    vec![
+        // 近景接触轮廓层
+        BoxShadow {
+            color: hsla(0.0, 0.0, 0.0, 0.22),
+            offset: point(px(0.0), px(1.0)),
+            blur_radius: px(3.0),
+            spread_radius: px(0.0),
+            inset: false,
+        },
+        // 纵深环境光扩散层
+        BoxShadow {
+            color: hsla(0.0, 0.0, 0.0, 0.16),
+            offset: point(px(0.0), px(8.0)),
+            blur_radius: px(20.0),
+            spread_radius: px(0.0),
+            inset: false,
+        },
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -43,4 +68,13 @@ mod tests {
         assert_eq!(shadows[0].blur_radius, px(2.0));
         assert_eq!(shadows[1].blur_radius, px(5.0));
     }
+
+    #[test]
+    fn test_elevation_modal_shadow_structure() {
+        let shadows = elevation_modal_shadow();
+        assert_eq!(shadows.len(), 2);
+        assert_eq!(shadows[0].blur_radius, px(3.0));
+        assert_eq!(shadows[1].blur_radius, px(20.0));
+    }
 }
+

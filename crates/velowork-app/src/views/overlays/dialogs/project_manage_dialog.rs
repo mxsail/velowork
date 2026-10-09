@@ -31,7 +31,6 @@ use velowork_i18n::i18n;
 use velowork_ui::badge::keyboard_hint;
 use velowork_ui::button::Button;
 use velowork_ui::design::appearance::ControlSize;
-use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::empty_state::empty_state;
 use velowork_ui::h_flex;
 use velowork_ui::icon::AppIcon;
@@ -546,8 +545,6 @@ impl ManageProjectsDialog {
             .into_any_element()
         };
 
-        let p = SemanticPalette::from_context(cx);
-
         let title_text = if self.query.is_empty() {
             format!("{} ({})", i18n!(cx, "project.manage.title"), total_count)
         } else {
@@ -572,8 +569,6 @@ impl ManageProjectsDialog {
                 div()
                     .px(SPACE_XS)
                     .py(SPACE_SM)
-                    .border_b_1()
-                    .border_color(p.border_subtle)
                     .when_some(self.search_input.as_ref(), |this, inp| {
                         this.child(velowork_ui::Input::new(inp).cleanable(true))
                     }),
@@ -594,8 +589,6 @@ impl ManageProjectsDialog {
                     .w_full()
                     .h(px(48.0))
                     .px(SPACE_LG)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
                     .justify_between()
                     .items_center()
                     .child(
