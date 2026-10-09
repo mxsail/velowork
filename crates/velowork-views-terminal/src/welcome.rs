@@ -305,7 +305,7 @@ pub fn render_welcome_dashboard(
     window: &Window,
     cx: &App,
     on_key_down: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
-    on_submit: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    _on_submit: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
     on_action: impl Fn(&WelcomeAction, &mut Window, &mut App) + 'static,
 ) -> gpui::Stateful<Div> {
     let t = theme(cx);
@@ -402,7 +402,7 @@ pub fn render_welcome_dashboard(
                         .items_center()
                         .gap(SPACE_SM)
                         .pl(SPACE_MD)
-                        .pr(px(4.0))
+                        .pr(SPACE_MD)
                         .rounded(RADIUS_LG)
                         .bg(if is_focused {
                             p.surface_hover
@@ -435,36 +435,6 @@ pub fn render_welcome_dashboard(
                                 .flex()
                                 .items_center()
                                 .child(SimpleInput::new(quick_connect_input).appearance(false)),
-                        )
-                        .child(
-                            h_flex()
-                                .id("welcome-quick-connect-submit")
-                                .cursor_pointer()
-                                .h(px(32.0))
-                                .items_center()
-                                .justify_center()
-                                .gap(SPACE_XS)
-                                .px(SPACE_MD)
-                                .rounded(RADIUS_MD)
-                                .bg(p.surface_accent)
-                                .text_color(p.text_on_accent)
-                                .hover(|s| s.opacity(0.9))
-                                .tooltip({
-                                    let tip = i18n!(cx, "welcome.quick_connect_tip");
-                                    move |_, cx| cx.new(|_| Tooltip::new(tip.clone())).into()
-                                })
-                                .on_click(on_submit)
-                                .child(
-                                    div()
-                                        .text_size(ui_text_ms(cx))
-                                        // .font_weight(FontWeight::SEMIBOLD)
-                                        .child(i18n!(cx, "welcome.quick_connect_btn")),
-                                )
-                                .child(
-                                    AppIcon::ChevronRight
-                                        .size(ICON_SM)
-                                        .text_color(p.text_on_accent),
-                                ),
                         )
                 })
                 // --- 3. Core Actions Grid (2x2) - Hidden during search ---
@@ -781,12 +751,6 @@ fn render_action_card(
         .children(shortcut.map(|sc| {
             div()
                 .flex_shrink_0()
-                .px(SPACE_XS)
-                .py(px(2.0))
-                .rounded(RADIUS_XS)
-                .bg(p.surface_raised)
-                .border_1()
-                .border_color(p.border_subtle)
                 .text_size(ui_text_xs(cx))
                 .text_color(p.text_muted)
                 .font_weight(FontWeight::MEDIUM)
