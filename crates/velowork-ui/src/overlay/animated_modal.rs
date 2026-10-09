@@ -10,7 +10,7 @@ use gpui::*;
 
 use crate::motion::{DURATION_MODAL_ENTER, DURATION_MODAL_LEAVE, DURATION_MODAL_MORPH, ModalMotionState};
 use crate::overlay::modal::modal_backdrop;
-use crate::theme::{theme, with_alpha};
+use crate::theme::theme;
 use crate::design::semantic::SemanticPalette;
 
 /// 全局动画开关配置（可选注入，默认为 true）。
@@ -295,8 +295,11 @@ impl Render for AnimatedModal {
             let backdrop = modal_backdrop("animated-modal-backdrop", &t, cx)
                 .opacity(mv.backdrop_opacity);
 
-            let border_color = if mv.inner_content_opacity < 0.5 {
-                with_alpha(t.error, 0.35)
+            let has_dest = self.morph_destination_content.is_some();
+            let border_color = if has_dest {
+                let mut c = p.border_subtle;
+                c.a *= mv.inner_content_opacity.clamp(0.0, 1.0);
+                c
             } else {
                 p.border_subtle
             };
@@ -313,9 +316,15 @@ impl Render for AnimatedModal {
                             .h(mv.current_bounds.size.height)
                             .rounded(mv.border_radius)
                             .bg(p.surface_overlay)
-                            .border_1()
-                            .border_color(border_color)
-                            .shadow_xl()
+                            .when(!has_dest || mv.inner_content_opacity > 0.01, |el| {
+                                el.border_1().border_color(border_color)
+                            })
+                            .when(has_dest, |el| {
+                                el.shadow(crate::tokens::elevation_menu_shadow())
+                            })
+                            .when(!has_dest, |el| {
+                                el.shadow_xl()
+                            })
                             .overflow_hidden()
                             .opacity(mv.card_opacity)
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())

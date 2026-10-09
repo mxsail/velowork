@@ -791,6 +791,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
     fn render_log_recording_toolbar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         use velowork_i18n::i18n;
         use velowork_ui::theme::with_alpha;
+        use velowork_ui::tokens::elevation_menu_shadow;
         let t = velowork_ui::theme::theme(cx);
         let p = SemanticPalette::from_theme(&t);
 
@@ -871,16 +872,15 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         );
 
         let toolbar_content = div()
+            .occlude()
             .flex()
             .items_center()
             .gap(SPACE_MD)
             .px(SPACE_LG)
             .py(SPACE_SM)
             .bg(p.surface_overlay)
-            .border_1()
-            .border_color(if is_paused { p.border_subtle } else { with_alpha(t.error, 0.35) })
             .rounded(RADIUS_LG)
-            .shadow_xl()
+            .shadow(elevation_menu_shadow())
             .opacity(anim_opacity)
             .relative()
             .top(anim_offset_y)
