@@ -28,6 +28,7 @@ pub struct InputFocusedEvent;
 pub enum InputEvent {
     Change,
     PressEnter,
+    PressEscape,
     Focus,
     Blur,
 }
@@ -150,6 +151,7 @@ pub struct SimpleInputState {
     submit_on_enter: bool,
     submit_on_ctrl_enter: bool,
     pass_enter: bool,
+    pass_escape: bool,
     read_only: bool,
     allow_clear: bool,
     search_highlights: Vec<Range<usize>>,
@@ -208,6 +210,7 @@ impl SimpleInputState {
             submit_on_enter: false,
             submit_on_ctrl_enter: false,
             pass_enter: true,
+            pass_escape: true,
             read_only: false,
             allow_clear: false,
             search_highlights: Vec::new(),
@@ -334,6 +337,29 @@ impl SimpleInputState {
 
     pub fn set_consume_enter(&mut self, consume: bool) {
         self.pass_enter = !consume;
+    }
+
+    /// When true (the default for single-line inputs), pressing Escape emits `PressEscape`
+    /// and leaves the key unhandled so parent elements can handle it via event bubbling.
+    /// When false, pressing Escape is consumed by the input and will not bubble.
+    pub fn pass_escape(mut self, pass: bool) -> Self {
+        self.pass_escape = pass;
+        self
+    }
+
+    pub fn set_pass_escape(&mut self, pass: bool) {
+        self.pass_escape = pass;
+    }
+
+    /// When true, prevents Escape key events from bubbling up to parent containers.
+    /// Equivalent to `.pass_escape(!consume)`.
+    pub fn consume_escape(mut self, consume: bool) -> Self {
+        self.pass_escape = !consume;
+        self
+    }
+
+    pub fn set_consume_escape(&mut self, consume: bool) {
+        self.pass_escape = !consume;
     }
 
     pub fn read_only(mut self, ro: bool) -> Self {
@@ -1616,12 +1642,15 @@ impl SimpleInputState {
                 return KeyHandled::NotHandled;
             }
             "escape" => {
+                cx.emit(InputEvent::PressEscape);
                 if self.selection.is_some() {
                     self.selection = None;
                     cx.notify();
-                    return KeyHandled::Handled;
                 }
-                return KeyHandled::NotHandled;
+                if self.pass_escape {
+                    return KeyHandled::NotHandled;
+                }
+                return KeyHandled::Handled;
             }
             "enter" => {
                 if self.marked_range.is_some() {
@@ -2992,6 +3021,18 @@ impl Render for SimpleInputState {
                 this.is_selecting = false;
                 this.last_mouse_position = None;
                 this._drag_scroll_task = None;
+            }))
+            .on_action(cx.listener(|this, _: &crate::Cancel, _window, cx| {
+                cx.emit(InputEvent::PressEscape);
+                if this.selection.is_some() {
+                    this.selection = None;
+                    cx.notify();
+                }
+                if this.pass_escape {
+                    cx.propagate();
+                } else {
+                    cx.stop_propagation();
+                }
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
                 if this.handle_key_down(event, cx) == KeyHandled::Handled {

@@ -631,6 +631,22 @@ impl ServiceMonitorPanel {
         cx.notify();
     }
 
+    pub fn cancel_inline_folder(&mut self, cx: &mut Context<Self>) {
+        if self.inline_folder.is_some() {
+            self.inline_folder = None;
+            self.inline_folder_sub = None;
+            cx.notify();
+        }
+    }
+
+    pub fn cancel_inline_service(&mut self, cx: &mut Context<Self>) {
+        if self.inline_service.is_some() {
+            self.inline_service = None;
+            self.inline_service_sub = None;
+            cx.notify();
+        }
+    }
+
     pub fn commit_inline_folder(&mut self, cx: &mut Context<Self>) {
         self.inline_folder_sub = None;
         if let Some(state) = self.inline_folder.take() {
@@ -782,8 +798,8 @@ impl ServiceMonitorPanel {
             return div().into_any_element();
         };
 
+        let focus_handle = input.focus_handle(cx);
         if self.inline_folder_sub.is_none() {
-            let focus_handle = input.focus_handle(cx);
             window.focus(&focus_handle, cx);
             self.inline_folder_sub = Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                 this.commit_inline_folder(cx);
@@ -816,17 +832,21 @@ impl ServiceMonitorPanel {
                                 div()
                                     .flex_1()
                                     .min_w_0()
+                                    .track_focus(&focus_handle)
                                     .child(velowork_ui::Input::new(&input))
+                                    .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                        this.cancel_inline_folder(cx);
+                                        window.focus(&this.focus_handle, cx);
+                                        cx.stop_propagation();
+                                    }))
                                     .on_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                                         if e.keystroke.key == "enter" {
                                             this.commit_inline_folder(cx);
                                             window.focus(&this.focus_handle, cx);
                                             cx.stop_propagation();
                                         } else if e.keystroke.key == "escape" {
-                                            this.inline_folder = None;
-                                            this.inline_folder_sub = None;
+                                            this.cancel_inline_folder(cx);
                                             window.focus(&this.focus_handle, cx);
-                                            cx.notify();
                                             cx.stop_propagation();
                                         }
                                     })),
@@ -858,8 +878,8 @@ impl ServiceMonitorPanel {
             return div().into_any_element();
         };
 
+        let focus_handle = input.focus_handle(cx);
         if self.inline_service_sub.is_none() {
-            let focus_handle = input.focus_handle(cx);
             window.focus(&focus_handle, cx);
             self.inline_service_sub = Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                 this.commit_inline_service(cx);
@@ -891,17 +911,21 @@ impl ServiceMonitorPanel {
                                 div()
                                     .flex_1()
                                     .min_w_0()
+                                    .track_focus(&focus_handle)
                                     .child(velowork_ui::Input::new(&input))
+                                    .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                        this.cancel_inline_service(cx);
+                                        window.focus(&this.focus_handle, cx);
+                                        cx.stop_propagation();
+                                    }))
                                     .on_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                                         if e.keystroke.key == "enter" {
                                             this.commit_inline_service(cx);
                                             window.focus(&this.focus_handle, cx);
                                             cx.stop_propagation();
                                         } else if e.keystroke.key == "escape" {
-                                            this.inline_service = None;
-                                            this.inline_service_sub = None;
+                                            this.cancel_inline_service(cx);
                                             window.focus(&this.focus_handle, cx);
-                                            cx.notify();
                                             cx.stop_propagation();
                                         }
                                     })),
@@ -1611,6 +1635,23 @@ impl Render for ServiceMonitorPanel {
                     }
                 }
             }))
+            .on_action(cx.listener(|this, _: &velowork_ui::Cancel, window, cx| {
+                if this.inline_folder.is_some() {
+                    this.cancel_inline_folder(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                if this.inline_service.is_some() {
+                    this.cancel_inline_service(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                cx.propagate();
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.inline_folder.is_some() || this.inline_service.is_some() {
                     return;
@@ -1710,6 +1751,20 @@ impl Render for ServiceMonitorPanel {
                         cx.stop_propagation();
                     }
                     "escape" => {
+                        if this.inline_folder.is_some() {
+                            this.cancel_inline_folder(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
+                        if this.inline_service.is_some() {
+                            this.cancel_inline_service(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
                         if this.show_service_search {
                             this.show_service_search = false;
                             if let Some(ref input) = this.filter_input {

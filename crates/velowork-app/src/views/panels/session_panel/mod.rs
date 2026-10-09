@@ -902,7 +902,13 @@ impl SessionPanel {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .track_focus(&focus_handle)
                             .child(velowork_ui::Input::new(&input))
+                            .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                this.cancel_inline_folder(cx);
+                                window.focus(&this.focus_handle, cx);
+                                cx.stop_propagation();
+                            }))
                             .on_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                                 if e.keystroke.key == "enter" {
                                     if !is_duplicate {
@@ -1022,7 +1028,13 @@ impl SessionPanel {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .track_focus(&focus_handle)
                             .child(velowork_ui::Input::new(&input))
+                            .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                this.cancel_inline_session(cx);
+                                window.focus(&this.focus_handle, cx);
+                                cx.stop_propagation();
+                            }))
                             .on_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                                 if e.keystroke.key == "enter" {
                                     this.commit_inline_session(cx);
@@ -8711,6 +8723,23 @@ impl Render for SessionPanel {
                     this.rename_selected_node(window, cx);
                 }
             }))
+            .on_action(cx.listener(|this, _: &velowork_ui::Cancel, window, cx| {
+                if this.inline_folder.is_some() {
+                    this.cancel_inline_folder(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                if this.inline_session.is_some() {
+                    this.cancel_inline_session(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                cx.propagate();
+            }))
             // Keyboard: Enter opens all selected nodes, Escape clears selection.
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 // 行内重命名输入框正在编辑时，方向键/空格等由输入框自行处理，
@@ -8860,6 +8889,20 @@ impl Render for SessionPanel {
                         }
                     }
                     "escape" => {
+                        if this.inline_folder.is_some() {
+                            this.cancel_inline_folder(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
+                        if this.inline_session.is_some() {
+                            this.cancel_inline_session(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
                         if this.show_search {
                             this.show_search = false;
                             if let Some(ref input) = this.search_input {

@@ -1168,8 +1168,8 @@ impl QuickCommandsPanel {
             return div().into_any_element();
         };
 
+        let focus_handle = input.focus_handle(cx);
         if self.inline_folder_sub.is_none() {
-            let focus_handle = input.focus_handle(cx);
             window.focus(&focus_handle, cx);
             self.inline_folder_sub = Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                 this.commit_inline_folder(cx);
@@ -1237,7 +1237,13 @@ impl QuickCommandsPanel {
                                 div()
                                     .flex_1()
                                     .min_w_0()
+                                    .track_focus(&focus_handle)
                                     .child(velowork_ui::Input::new(&input).border_color(border_color))
+                                    .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                        this.cancel_inline_folder(cx);
+                                        window.focus(&this.focus_handle, cx);
+                                        cx.stop_propagation();
+                                    }))
                                     .on_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                                         if e.keystroke.key == "enter" {
                                             if !is_duplicate {
@@ -1307,8 +1313,8 @@ impl QuickCommandsPanel {
             return div().into_any_element();
         };
 
+        let focus_handle = input.focus_handle(cx);
         if self.inline_command_sub.is_none() {
-            let focus_handle = input.focus_handle(cx);
             window.focus(&focus_handle, cx);
             self.inline_command_sub = Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                 this.commit_inline_command(cx);
@@ -1348,7 +1354,13 @@ impl QuickCommandsPanel {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .track_focus(&focus_handle)
                             .child(velowork_ui::Input::new(&input))
+                            .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                this.cancel_inline_command(cx);
+                                window.focus(&this.focus_handle, cx);
+                                cx.stop_propagation();
+                            }))
                             .on_key_down(cx.listener(move |this, e: &KeyDownEvent, window, cx| {
                                 if e.keystroke.key == "enter" {
                                     this.commit_inline_command(cx);
@@ -1853,6 +1865,23 @@ impl Render for QuickCommandsPanel {
                     }
                 }
             }))
+            .on_action(cx.listener(|this, _: &velowork_ui::Cancel, window, cx| {
+                if this.inline_folder.is_some() {
+                    this.cancel_inline_folder(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                if this.inline_command.is_some() {
+                    this.cancel_inline_command(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                cx.propagate();
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 // 行内编辑（新建/重命名）进行时，输入框自行处理按键，面板不拦截，
                 // 避免与文本输入（如 Delete 删除字符）冲突。
@@ -1980,6 +2009,20 @@ impl Render for QuickCommandsPanel {
                     }
                     // Esc：清空当前选择（与行内重命名的 Esc 取消区分：此处无行内编辑）。
                     "escape" => {
+                        if this.inline_folder.is_some() {
+                            this.cancel_inline_folder(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
+                        if this.inline_command.is_some() {
+                            this.cancel_inline_command(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
                         if this.show_qc_search {
                             this.show_qc_search = false;
                             if let Some(ref input) = this.filter_input {

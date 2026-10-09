@@ -813,8 +813,8 @@ impl TunnelsPanel {
             return div().into_any_element();
         };
 
+        let focus_handle = input.focus_handle(cx);
         if self.inline_tunnel_sub.is_none() {
-            let focus_handle = input.focus_handle(cx);
             window.focus(&focus_handle, cx);
             self.inline_tunnel_sub =
                 Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
@@ -861,7 +861,13 @@ impl TunnelsPanel {
                         div()
                             .flex_1()
                             .min_w_0()
+                            .track_focus(&focus_handle)
                             .child(velowork_ui::Input::new(&input))
+                            .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                this.cancel_inline_tunnel(cx);
+                                window.focus(&this.focus_handle, cx);
+                                cx.stop_propagation();
+                            }))
                             .on_key_down(cx.listener(
                                 move |this, e: &KeyDownEvent, window, cx| {
                                     if e.keystroke.key == "enter" {
@@ -1203,8 +1209,8 @@ impl TunnelsPanel {
             return div().into_any_element();
         };
 
+        let focus_handle = input.focus_handle(cx);
         if self.inline_folder_sub.is_none() {
-            let focus_handle = input.focus_handle(cx);
             window.focus(&focus_handle, cx);
             self.inline_folder_sub =
                 Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
@@ -1275,7 +1281,13 @@ impl TunnelsPanel {
                                 div()
                                     .flex_1()
                                     .min_w_0()
+                                    .track_focus(&focus_handle)
                                     .child(velowork_ui::Input::new(&input).border_color(border_color))
+                                    .on_action(cx.listener(move |this, _: &velowork_ui::Cancel, window, cx| {
+                                        this.cancel_inline_folder(cx);
+                                        window.focus(&this.focus_handle, cx);
+                                        cx.stop_propagation();
+                                    }))
                                     .on_key_down(cx.listener(
                                         move |this, e: &KeyDownEvent, window, cx| {
                                             if e.keystroke.key == "enter" {
@@ -1860,6 +1872,23 @@ impl Render for TunnelsPanel {
                     }
                 }
             }))
+            .on_action(cx.listener(|this, _: &velowork_ui::Cancel, window, cx| {
+                if this.inline_folder.is_some() {
+                    this.cancel_inline_folder(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                if this.inline_tunnel.is_some() {
+                    this.cancel_inline_tunnel(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                    return;
+                }
+                cx.propagate();
+            }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 if this.inline_folder.is_some() {
                     return;
@@ -1959,6 +1988,20 @@ impl Render for TunnelsPanel {
                         cx.stop_propagation();
                     }
                     "escape" => {
+                        if this.inline_folder.is_some() {
+                            this.cancel_inline_folder(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
+                        if this.inline_tunnel.is_some() {
+                            this.cancel_inline_tunnel(cx);
+                            window.focus(&this.focus_handle, cx);
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
                         if this.show_tunnel_search {
                             this.show_tunnel_search = false;
                             if let Some(ref input) = this.filter_input {
