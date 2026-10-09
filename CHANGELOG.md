@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.13] - 2026-10-09
+
+### Added / 新增
+- **快捷命令执行弹窗体验优化 (Quick Commands Execution Modal)**：
+  - **指令预览字体大小调优**：指令预览显示框字体大小调整为标准 md 号字号，大幅提升长命令及复杂脚本的视觉阅读清晰度。
+  - **动态变量提示说明**：针对包含 `${VAR}` 的命令参数，补充清晰直观的变量含义提示，辅助快速填充参数。
+  *(Refine quick commands execution modal with md-sized preview font and clear dynamic variable hints).*
+- **终端行号颜色自适应与当前活动行高亮 (Adaptive Line Numbers & Active Line Highlight)**：
+  - **行号对比度自适应**：修复浅色模式及 Light 终端配色下行号过于贴近背景色导致几乎不可见的问题；行号颜色自动跟随终端配色方案计算最佳对比度。
+  - **活动行行号高亮**：终端当前活动行号应用鲜明的高亮色显示，显著增强大屏与分屏下的光标行位感知。
+  *(Adaptive terminal line number contrast across light/dark schemes and distinct active line highlight).*
+
+### Improved / 优化
+- **历史命令面板多行命令显示与布局重构 (Command History Multiline Display & Layout)**：
+  - **规整单行统一高度**：消除带换行符的多行命令在狭窄侧边栏向下溢出、覆盖相邻行的错位问题，保持列表整洁高密度。
+  - **首行提取与弱化角标**：自动截取首个有效命令行并支持省略截断，行末增加弱化数量角标（如 `+2`）标识多行脚本体量。
+  - **移除列表行内时间戳**：列表行内不再挤占宽度显示短时间戳，释放横向排版空间；悬浮 Tooltip 仍完整保留多行全貌、详细时间戳与执行频次。
+  *(Compact single-line layout for multiline commands in history dock with '+N' badge, full content in tooltip).*
+
+### Fixed / 修复
+- **Windows DWM 透明度渲染与终端背景清理 (Windows Transparency & Background Clearing)**：
+  - 修复 Windows 11 DWM 透明模式下的边缘伪影及双标题栏冲突，强化透明背景下浮层与遮罩的不透明度保护，避免文本混叠。
+  - 修复在设置界面清空终端背景图片后未即时生效、重新打开设置依然残留的问题，确保配置持久化重置。
+  *(Fix Windows DWM transparency artifacts, reinforce overlay opacity floors, and ensure clearing terminal background images persists cleanly).*
+- **ZMODEM / rz / sz 传输会话协议健壮性审计 (Hardened ZMODEM Protocol)**：
+  - 修复下载管道中交错协议头部导致数据包丢失问题，完整支持 0 字节文件上传与自动流控重传。
+  - 修复远端环境缺少 `rz` 命令时可能导致的自锁死问题，终端自然呈现远端输出。
+  *(Harden ZMODEM upload/download streaming pipelines, eliminate missing-rz deadlock).*
+
 ## [0.1.0-beta.12] - 2026-09-29
 
 ### Added / 新增
