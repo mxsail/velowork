@@ -14,7 +14,7 @@ use velowork_ui::input::{InputEvent, InputState};
 use velowork_ui::overlay::{modal_content, modal_header};
 use velowork_ui::theme::theme;
 use velowork_ui::design::semantic::SemanticPalette;
-use velowork_ui::tokens::{ui_text_ms, ui_text_sm, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_STD};
+use velowork_ui::tokens::{ui_text_md, ui_text_ms, ui_text_sm, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_STD};
 use velowork_ui::overlay::CloseEvent;
 use velowork_i18n::i18n;
 use gpui::prelude::*;
@@ -24,6 +24,7 @@ use velowork_ui::tooltip::Tooltip;
 
 struct VarInput {
     name: String,
+    hint: String,
     input: Entity<InputState>,
 }
 
@@ -78,8 +79,13 @@ impl QuickCommandVarDialog {
     ) -> Self {
         let mut vars = Vec::new();
         for v in &variables {
+            let hint = v.hint.clone();
             let input = cx.new(|cx| {
-                InputState::new(cx).default_value(&v.default_value)
+                let mut st = InputState::new(cx).default_value(&v.default_value);
+                if !hint.trim().is_empty() {
+                    st = st.placeholder(&hint);
+                }
+                st
             });
             cx.subscribe(&input, |_, _, _event: &InputEvent, cx| {
                 cx.notify();
@@ -87,6 +93,7 @@ impl QuickCommandVarDialog {
             .detach();
             vars.push(VarInput {
                 name: v.name.clone(),
+                hint,
                 input,
             });
         }
@@ -186,10 +193,13 @@ impl Render for QuickCommandVarDialog {
             .children(self.vars.iter().enumerate().map(|(i, v)| {
                 let label = v.name.clone();
                 let item_id = format!("qc-var-field-{}", i);
-                form_item(item_id)
+                let mut item = form_item(item_id)
                     .label(label)
-                    .focus(&v.input.read(cx).focus_handle(cx))
-                    .child(velowork_ui::Input::new(&v.input).cleanable(true))
+                    .focus(&v.input.read(cx).focus_handle(cx));
+                if !v.hint.trim().is_empty() {
+                    item = item.help(v.hint.clone());
+                }
+                item.child(velowork_ui::Input::new(&v.input).cleanable(true))
                     .render(&t, cx)
                     .into_any_element()
             }))
@@ -258,7 +268,7 @@ impl Render for QuickCommandVarDialog {
                             .border_1()
                             .border_color(p.border_subtle)
                             .bg(p.surface_card)
-                            .text_size(ui_text_sm(cx))
+                            .text_size(ui_text_md(cx))
                             .text_color(p.text_primary)
                             .font_family(crate::settings::settings(cx).font_family.as_str())
                             .whitespace_normal()
