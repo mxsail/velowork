@@ -1223,6 +1223,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         self.terminal.clone()
     }
 
+    pub fn effective_config(&self, cx: &App) -> velowork_terminal::ResolvedTerminalConfig {
+        self.content.read(cx).effective_config(cx)
+    }
+
     pub fn set_detached(&mut self, detached: bool, cx: &mut Context<Self>) {
         if self.detached != detached {
             self.detached = detached;

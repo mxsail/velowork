@@ -898,8 +898,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
                 let preview_el = terminal_arc.clone().map(|term| {
                     TerminalElement::preview(term, cx.focus_handle()).with_zoom(zoom_level)
                 });
+                let config_override = self.terminal_pane.as_ref().map(|p| p.read(cx).effective_config(cx));
                 let gutter_el = terminal_arc.as_ref().and_then(|term| {
-                    crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, None, cx)
+                    crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, None, config_override.as_ref(), cx)
                 });
 
                 let ghost_card = div()
@@ -1054,8 +1055,9 @@ impl<D: ActionDispatch + Send + Sync> LayoutContainer<D> {
             let preview_el = terminal_arc.clone().map(|term| {
                 TerminalElement::preview(term, cx.focus_handle()).with_zoom(zoom_level)
             });
+            let config_override = self.terminal_pane.as_ref().map(|p| p.read(cx).effective_config(cx));
             let gutter_el = terminal_arc.as_ref().and_then(|term| {
-                crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, ghost_bounds, cx)
+                crate::layout::terminal_pane::render_line_numbers_gutter(term, zoom_level, ghost_bounds, config_override.as_ref(), cx)
             });
 
             let expand_ghost_card = div()

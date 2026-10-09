@@ -994,7 +994,13 @@ impl Render for TerminalContent {
                 }),
             )
             .child({
-                let gutter_el = render_line_numbers_gutter(&terminal, zoom_level, self.element_bounds, cx);
+                let gutter_el = render_line_numbers_gutter(
+                    &terminal,
+                    zoom_level,
+                    self.element_bounds,
+                    Some(&effective_config),
+                    cx,
+                );
                 div()
                     .size_full()
                     .flex()
@@ -1063,6 +1069,7 @@ pub fn render_line_numbers_gutter(
     terminal: &Arc<Terminal>,
     zoom_level: f32,
     element_bounds: Option<Bounds<Pixels>>,
+    config_override: Option<&velowork_terminal::ResolvedTerminalConfig>,
     cx: &App,
 ) -> Option<Div> {
     let render_settings = crate::terminal_view_settings(cx);
@@ -1071,7 +1078,7 @@ pub fn render_line_numbers_gutter(
     }
 
     let rows = terminal.resize_state.lock().size.rows;
-    let (line_labels, is_alt_screen, max_line_num) = terminal.with_content(|term| {
+    let (line_items, is_alt_screen, max_line_num) = terminal.with_content(|term| {
         if term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
             return (Vec::new(), true, 0usize);
         }
@@ -1105,8 +1112,12 @@ pub fn render_line_numbers_gutter(
         }
         let last_active_line = last_content_line.max(cursor_line);
 
+        let cursor_visual_row = cursor_line + offset;
+        let cursor_on_screen = cursor_visual_row >= 0 && cursor_visual_row < screen_lines;
+
         let mut current_logical_line = 1usize;
-        let mut labels = Vec::with_capacity(screen_lines as usize);
+        let mut cursor_logical_line = None;
+        let mut visible_lines = Vec::with_capacity(screen_lines as usize);
         let mut max_line = 1usize;
 
         for l in topmost..=last_active_line {
@@ -1123,29 +1134,44 @@ pub fn render_line_numbers_gutter(
                 current_logical_line += 1;
             }
 
+            if l == cursor_line {
+                cursor_logical_line = Some((current_logical_line - 1).max(1));
+            }
+
             let visual_row = l + offset;
             if visual_row >= 0 && visual_row < screen_lines {
                 let num = (current_logical_line - 1).max(1);
-                let label = if is_continuation {
-                    String::new()
-                } else {
+                if !is_continuation {
                     max_line = max_line.max(num);
-                    format!("{}", num)
-                };
-                labels.push(label);
+                }
+                visible_lines.push((num, is_continuation));
             }
         }
 
-        (labels, false, max_line)
+        let items: Vec<(String, bool)> = visible_lines
+            .into_iter()
+            .map(|(num, is_continuation)| {
+                if is_continuation {
+                    (String::new(), false)
+                } else {
+                    let is_active = cursor_on_screen && cursor_logical_line == Some(num);
+                    (format!("{}", num), is_active)
+                }
+            })
+            .collect();
+
+        (items, false, max_line)
     });
 
     if is_alt_screen {
         return None;
     }
 
+    let p = SemanticPalette::from_context(cx);
     let defaults = render_settings.terminal_defaults();
     let default_opts = velowork_state::SessionTerminalOptions::default();
-    let effective_config = velowork_terminal::resolve_effective_terminal_config(&default_opts, &defaults);
+    let fallback_config = velowork_terminal::resolve_effective_terminal_config(&default_opts, &defaults);
+    let effective_config = config_override.unwrap_or(&fallback_config);
     let font_sz = effective_config.font_size * zoom_level * velowork_ui::tokens::ui_scale_factor(cx);
     let lh = font_sz * render_settings.line_height;
     let font_family = effective_config.font_family.clone();
@@ -1153,7 +1179,15 @@ pub fn render_line_numbers_gutter(
         &effective_config.color_scheme,
         &render_settings.custom_terminal_color_schemes,
     );
-    let line_num_color = with_alpha(term_palette.foreground, 0.45);
+    let normal_line_num_color = with_alpha(term_palette.foreground, 0.55);
+    let active_line_num_color: Hsla = match term_palette.cursor {
+        Some(cursor_color)
+            if cursor_color != term_palette.foreground && cursor_color != term_palette.background =>
+        {
+            with_alpha(cursor_color, 1.0)
+        }
+        _ => p.surface_accent,
+    };
 
     let max_digits = max_line_num.to_string().len().max(3);
     let gutter_w = (max_digits as f32 * font_sz * 0.6 + 16.0).max(36.0);
@@ -1179,16 +1213,27 @@ pub fn render_line_numbers_gutter(
             .flex_col()
             .overflow_hidden()
             .children((0..effective_rows).map(move |row| {
-                let label = line_labels
+                let (label, is_active) = line_items
                     .get(row as usize)
                     .cloned()
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| (String::new(), false));
                 let font_family = font_family.clone();
+                let text_color = if is_active {
+                    active_line_num_color
+                } else {
+                    normal_line_num_color
+                };
+                let font_weight = if is_active {
+                    FontWeight::SEMIBOLD
+                } else {
+                    FontWeight::NORMAL
+                };
                 div()
                     .font_family(font_family)
                     .text_size(px(font_sz))
                     .line_height(px(lh))
-                    .text_color(line_num_color)
+                    .font_weight(font_weight)
+                    .text_color(text_color)
                     .w_full()
                     .flex()
                     .justify_end()
