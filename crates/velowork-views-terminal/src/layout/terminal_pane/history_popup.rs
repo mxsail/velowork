@@ -2,10 +2,12 @@
 
 use gpui::prelude::*;
 use gpui::*;
-use velowork_ui::theme::{surface_bg_t, with_alpha, ThemeColors};
+use velowork_i18n::i18n;
+use velowork_ui::theme::{surface_bg_t, ThemeColors};
 use velowork_ui::tokens::{
-    ui_font_family, RADIUS_MD, RADIUS_STD, SPACE_SM, SPACE_XS,
+    ui_text_xs, RADIUS_MD, RADIUS_STD, SPACE_SM, SPACE_XS,
 };
+use velowork_ui::tooltip::Tooltip;
 use velowork_ui::tree::tree_row_appearance;
 use velowork_ui::{h_flex, v_flex};
 use velowork_workspace::repositories::HistoryEntry;
@@ -21,18 +23,24 @@ pub fn render_history_popup(
     let on_select = std::sync::Arc::new(on_select);
     let ap = tree_row_appearance(t, cx);
 
+    let tooltip_time_label = i18n!(cx, "panel.command_history.tooltip_time");
+    let tooltip_count_label = i18n!(cx, "panel.command_history.tooltip_count");
+    let times_suffix = i18n!(cx, "command_history.executed_times");
+
     let (left, top) = match cursor_pos {
         Some(pos) => (pos.x.max(px(4.0)), (pos.y + px(4.0)).max(px(4.0))),
         None => (px(8.0), px(36.0)),
     };
 
     div()
+        .id("terminal-history-popup")
+        .occlude()
         .absolute()
         .left(left)
         .top(top)
         .min_w(px(240.0))
         .max_w(px(600.0))
-        .max_h(px(200.0))
+        .max_h(px(240.0))
         .bg(surface_bg_t(t.bg_panel, t))
         .border_1()
         .border_color(rgb(t.border))
@@ -43,12 +51,35 @@ pub fn render_history_popup(
         .child(
             v_flex()
                 .w_full()
-                .gap(px(1.0))
+                .gap(px(2.0))
                 .children(items.iter().enumerate().map(|(idx, entry)| {
                     let is_selected = selected_index == Some(idx);
                     let row_id = format!("hist-pop-{}", entry.id);
                     let cb = on_select.clone();
-                    let t_color = t.clone();
+                    let t_color = *t;
+
+                    let lines: Vec<&str> = entry.command.lines().collect();
+                    let first_line = lines
+                        .iter()
+                        .find(|l| !l.trim().is_empty())
+                        .copied()
+                        .unwrap_or(&entry.command);
+                    let is_multiline = lines.len() > 1;
+                    let extra_lines_count = lines.len().saturating_sub(1);
+
+                    let tip_text = if entry.timestamp.is_empty() {
+                        entry.command.clone()
+                    } else {
+                        format!(
+                            "{}\n{}: {}\n{}: {} {}",
+                            entry.command,
+                            tooltip_time_label,
+                            format_full_timestamp(&entry.timestamp),
+                            tooltip_count_label,
+                            entry.execution_count,
+                            times_suffix,
+                        )
+                    };
 
                     h_flex()
                         .id(ElementId::Name(row_id.into()))
@@ -78,7 +109,12 @@ pub fn render_history_popup(
                                 s
                             }
                         })
+                        .tooltip(move |_, cx| {
+                            let tip = tip_text.clone();
+                            cx.new(|_| Tooltip::new(tip)).into()
+                        })
                         .on_click(move |_, _window, cx| {
+                            cx.stop_propagation();
                             cb(idx, cx);
                         })
                         .child(
@@ -91,39 +127,30 @@ pub fn render_history_popup(
                                 } else {
                                     rgb(t.text_secondary)
                                 })
-                                .font_family(ui_font_family(cx))
+                                .font_family(".SystemMonoFont")
                                 .overflow_hidden()
                                 .whitespace_nowrap()
                                 .text_ellipsis()
-                                .child(entry.command.clone()),
+                                .child(first_line.to_string()),
                         )
-                        .child(
-                            h_flex()
-                                .items_center()
-                                .gap(SPACE_XS)
-                                .flex_shrink_0()
-                                .when(entry.execution_count > 1, |d| {
-                                    d.child(
-                                        div()
-                                            .px(px(4.0))
-                                            .py(px(1.0))
-                                            .rounded(px(3.0))
-                                            .bg(if is_selected {
-                                                with_alpha(t.border_active, 0.25)
-                                            } else {
-                                                surface_bg_t(t.bg_hover, t)
-                                            })
-                                            .text_color(if is_selected {
-                                                rgb(t.text_primary)
-                                            } else {
-                                                rgb(t.text_muted)
-                                            })
-                                            .text_size(px(10.0))
-                                            .child(format!("{}×", entry.execution_count)),
-                                    )
-                                }),
-                        )
+                        .when(is_multiline, |d| {
+                            d.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(ui_text_xs(cx))
+                                    .text_color(rgb(t.text_muted))
+                                    .child(format!("+{}", extra_lines_count)),
+                            )
+                        })
                 })),
         )
         .into_any_element()
+}
+
+fn format_full_timestamp(ts: &str) -> String {
+    if ts.len() >= 19 {
+        ts[..19].replace('T', " ")
+    } else {
+        ts.to_string()
+    }
 }
