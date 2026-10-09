@@ -39,7 +39,10 @@ impl<'a> TerminalPainter<'a> {
         }
 
         // 3. Paint URL hover underlines
-        if self.options.show_url_decorations && !self.model.url_matches.is_empty() {
+        if self.options.show_url_decorations
+            && self.model.hovered_url_group.is_some()
+            && !self.model.url_matches.is_empty()
+        {
             self.paint_urls(window);
         }
 
@@ -377,7 +380,7 @@ impl<'a> TerminalPainter<'a> {
 
         for url_match in self.model.url_matches.iter() {
             let is_hovered = self.model.hovered_url_group == Some(url_match.link_group);
-            if url_match.line < 0 || url_match.line >= screen_lines as i32 {
+            if !is_hovered || url_match.line < 0 || url_match.line >= screen_lines as i32 {
                 continue;
             }
 
@@ -385,40 +388,25 @@ impl<'a> TerminalPainter<'a> {
             let url_y = origin.y + line_height * url_match.line as f32;
             let url_width = px((cell_width_f * url_match.len as f32).ceil());
 
-            if is_hovered {
-                let hover_bg = Hsla::from(Rgba {
-                    r: 0.0,
-                    g: 0.48,
-                    b: 0.8,
-                    a: 0.2,
-                });
-                let hover_bounds = Bounds {
-                    origin: point(url_x, url_y),
-                    size: size(url_width, line_height),
-                };
-                window.paint_quad(fill(hover_bounds, hover_bg));
+            let hover_bg = Hsla::from(Rgba {
+                r: 0.0,
+                g: 0.48,
+                b: 0.8,
+                a: 0.2,
+            });
+            let hover_bounds = Bounds {
+                origin: point(url_x, url_y),
+                size: size(url_width, line_height),
+            };
+            window.paint_quad(fill(hover_bounds, hover_bg));
 
-                let underline_color = rgb(t.border_active);
-                let underline_y = url_y + line_height - px(2.0);
-                let underline_bounds = Bounds {
-                    origin: point(url_x, underline_y),
-                    size: size(url_width, px(1.0)),
-                };
-                window.paint_quad(fill(underline_bounds, underline_color));
-            } else {
-                let underline_color = Hsla::from(Rgba {
-                    r: 0.5,
-                    g: 0.5,
-                    b: 0.5,
-                    a: 0.5,
-                });
-                let underline_y = url_y + line_height - px(2.0);
-                let underline_bounds = Bounds {
-                    origin: point(url_x, underline_y),
-                    size: size(url_width, px(1.0)),
-                };
-                window.paint_quad(fill(underline_bounds, underline_color));
-            }
+            let underline_color = rgb(t.border_active);
+            let underline_y = url_y + line_height - px(2.0);
+            let underline_bounds = Bounds {
+                origin: point(url_x, underline_y),
+                size: size(url_width, px(1.0)),
+            };
+            window.paint_quad(fill(underline_bounds, underline_color));
         }
     }
 

@@ -628,8 +628,13 @@ impl TerminalContent {
     }
 
     fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
-        if let Some((col, row, _side)) = self.cell_at(event.position, cx) {
-            if self.url_detector.update_hover(col, row) {
+        let has_cmd_or_ctrl = event.modifiers.platform || event.modifiers.control;
+        if has_cmd_or_ctrl && !self.is_selecting {
+            if let Some((col, row, _side)) = self.cell_at(event.position, cx) {
+                if self.url_detector.update_hover(col, row) {
+                    cx.notify();
+                }
+            } else if self.url_detector.clear_hover() {
                 cx.notify();
             }
         } else if self.url_detector.clear_hover() {
@@ -852,12 +857,19 @@ impl Render for TerminalContent {
             .when(self.bottom_right_radius > 0.0, |d| {
                 d.rounded_br(px(self.bottom_right_radius))
             })
-            .cursor(CursorStyle::Arrow)
+            .cursor(if self.url_detector.hovered_group().is_some() {
+                CursorStyle::PointingHand
+            } else {
+                CursorStyle::Arrow
+            })
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                 let hovered = *hovered;
                 this.scrollbar.update(cx, |scrollbar, cx| {
                     scrollbar.set_content_hovered(hovered, cx);
                 });
+                if !hovered && this.url_detector.clear_hover() {
+                    cx.notify();
+                }
             }))
             .on_mouse_down(
                 MouseButton::Left,
