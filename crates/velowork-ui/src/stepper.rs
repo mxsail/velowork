@@ -181,7 +181,7 @@ impl NumberStepper {
 impl RenderOnce for NumberStepper {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let t = self.t;
-        let p = SemanticPalette::from_theme(&t);
+        let p = SemanticPalette::from_context(cx);
         let id = self.id.clone();
         let input_state = self.input_state.clone();
         let on_commit = self.on_commit;
@@ -270,41 +270,43 @@ impl RenderOnce for NumberStepper {
             input_box = input_box.flex_1().w_full();
         }
 
+        let divider_color = if is_focused {
+            p.border_active.opacity(0.3)
+        } else {
+            p.border_subtle
+        };
+
         let left_divider = div()
             .w(px(1.0))
             .h(ctrl_h)
-            .bg(if is_focused {
-                p.border_active.opacity(0.3)
-            } else {
-                p.border_subtle
-            })
+            .bg(divider_color)
             .flex_shrink_0();
 
         let right_divider = div()
             .w(px(1.0))
             .h(ctrl_h)
-            .bg(if is_focused {
-                p.border_active.opacity(0.3)
-            } else {
-                p.border_subtle
-            })
+            .bg(divider_color)
             .flex_shrink_0();
+
+        let border_color = if is_focused {
+            p.border_active
+        } else {
+            p.border_subtle
+        };
+
+        let bg_color = if is_focused {
+            p.surface_hover
+        } else {
+            p.surface_card
+        };
 
         let mut container = h_flex()
             .items_center()
             .h(ctrl_h)
             .rounded(RADIUS_MD)
-            .bg(if is_focused {
-                p.surface_hover
-            } else {
-                p.surface_card
-            })
+            .bg(bg_color)
             .border_1()
-            .border_color(if is_focused {
-                p.border_active
-            } else {
-                p.border_subtle
-            })
+            .border_color(border_color)
             .when(is_focused, |s| s.shadow(ring))
             .when(!is_focused, |s| {
                 s.hover(|h| {

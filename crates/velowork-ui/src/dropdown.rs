@@ -5,7 +5,7 @@
 use crate::design::semantic::SemanticPalette;
 use crate::input::focus_ring_shadows;
 use crate::theme::ThemeColors;
-use crate::tokens::{ui_text_md, ui_text_sm, RADIUS_LG, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS};
+use crate::tokens::{ui_text_md, ui_text_sm, RADIUS_LG, RADIUS_MD, RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS};
 use gpui::*;
 use crate::behavior::{HoverBehavior, SelectedBehavior, StatefulElementBehaviorExt};
 use gpui::prelude::*;
@@ -53,7 +53,7 @@ pub fn dropdown_button_sized(
         .min_w(px(140.0))
         .h(px(28.0))
         .px(px(10.0))
-        .rounded(RADIUS_STD)
+        .rounded(RADIUS_MD)
         .bg(if is_open { p.surface_hover } else { p.surface_card })
         .border_1()
         .border_color(if is_open { p.border_active } else { p.border_subtle })
