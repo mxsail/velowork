@@ -36,7 +36,7 @@ use velowork_ui::scrollable::ScrollableElement;
 use velowork_ui::simple_input::{
     InputChangedEvent, SimpleInput, SimpleInputState,
 };
-use velowork_ui::theme::{theme, surface_bg_t};
+use velowork_ui::theme::{theme, surface_bg_t, with_alpha};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::tokens::{ui_font_family, ui_text_md, ui_text_ms, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_MD, ICON_SM, ICON_STD};
 use velowork_ui::syntax::map_extension_to_syntax;
@@ -1532,7 +1532,7 @@ impl BottomPanel {
             .id("sftp-header-row")
             .px(SPACE_LG)
             .py(SPACE_XS)
-            .bg(surface_bg_t(t.bg_header, &t))
+            .bg(with_alpha(t.text_primary, 0.03))
             .items_center()
             .on_mouse_down(
                 MouseButton::Right,
