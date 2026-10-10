@@ -68,7 +68,6 @@ pub(super) fn build_bottom_dock(
         let overlay_reg = overlay_registry.clone();
         cx.new(move |cx| CommandsPanel::new(ts, ws, fm, Some(overlay_reg.clone()), cx))
     };
-    cx.observe(&commands_panel, |_, _, cx| cx.notify()).detach();
 
     // Self-contained SFTP panel that dynamically binds to the active terminal's
     // live SSH session.
@@ -81,8 +80,6 @@ pub(super) fn build_bottom_dock(
         cx.new(move |cx| BottomPanel::new(ws, fm, be, cp, ts, cx))
     };
 
-    // Bottom DockPanel hosting SFTP and Commands tabs. Uses the same DockPanel
-    // container as the right sidebar for consistent structure.
     let bottom_dock = {
         let sftp = sftp_panel.clone();
         let cmd = commands_panel.clone();
@@ -119,6 +116,15 @@ pub(super) fn build_bottom_dock(
         })
     };
     cx.observe(&bottom_dock, |_, _, cx| cx.notify()).detach();
+
+    let bottom_dock_w = bottom_dock.downgrade();
+    cx.observe(&commands_panel, move |_, _, cx| {
+        if let Some(bd) = bottom_dock_w.upgrade() {
+            bd.update(cx, |_, cx| cx.notify());
+        }
+        cx.notify();
+    })
+    .detach();
 
     // Hand the overlay registry to the bottom dock + SFTP panel so their menus
     // / dialogs register for centralized click-outside dismissal.

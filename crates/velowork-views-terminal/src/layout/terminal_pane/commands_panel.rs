@@ -162,6 +162,24 @@ impl CommandsPanel {
         })
         .detach();
 
+        // Re-evaluate run button enabled state whenever input text changes
+        cx.observe(&command_input, |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
+
+        // Re-evaluate when terminal focus or project changes
+        cx.observe(&focus_manager, |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
+
+        // Re-evaluate when workspace layouts/sessions change
+        cx.observe(&workspace, |_, _, cx| {
+            cx.notify();
+        })
+        .detach();
+
         let target_select = cx.new(|cx| {
             SelectState::new(cx)
                 .options(vec![
@@ -391,22 +409,8 @@ impl CommandsPanel {
 
 
 
-    fn run_commands(&mut self, cx: &mut Context<Self>) {
-        if self.cmd_state == CommandExecutionState::Paused {
-            self.resume_commands(cx);
-            return;
-        }
-
-        if self.cmd_state == CommandExecutionState::Running {
-            return;
-        }
-
-        let cmd = self.command_input.read(cx).value().trim().to_string();
-        if cmd.is_empty() {
-            return;
-        }
-
-        // Get target terminals
+    /// Resolves target terminal IDs according to the current `target_mode`.
+    pub fn resolve_target_terminal_ids(&self, cx: &App) -> Vec<String> {
         let mut target_ids = Vec::new();
         match self.target_mode.as_str() {
             "Current Terminal" => {
@@ -446,7 +450,46 @@ impl CommandsPanel {
                 target_ids = terminals.keys().cloned().collect();
             }
         }
+        target_ids
+    }
 
+    /// Check if there is at least one active, live terminal connected matching the target mode.
+    pub fn has_active_target_terminals(&self, cx: &App) -> bool {
+        let target_ids = self.resolve_target_terminal_ids(cx);
+        if target_ids.is_empty() {
+            return false;
+        }
+        let terminals = self.terminals.lock();
+        target_ids.iter().any(|id| terminals.contains_key(id))
+    }
+
+    /// Whether the "Run command" button is enabled:
+    /// 1. Not currently running
+    /// 2. Command input is not empty
+    /// 3. At least one target terminal session is active and connected
+    pub fn is_run_enabled(&self, cx: &App) -> bool {
+        if self.cmd_state == CommandExecutionState::Running {
+            return false;
+        }
+        let cmd = self.command_input.read(cx).value();
+        if cmd.trim().is_empty() {
+            return false;
+        }
+        self.has_active_target_terminals(cx)
+    }
+
+    fn run_commands(&mut self, cx: &mut Context<Self>) {
+        if self.cmd_state == CommandExecutionState::Paused {
+            self.resume_commands(cx);
+            return;
+        }
+
+        if !self.is_run_enabled(cx) {
+            return;
+        }
+
+        let cmd = self.command_input.read(cx).value().trim().to_string();
+        let target_ids = self.resolve_target_terminal_ids(cx);
         if target_ids.is_empty() {
             return;
         }
@@ -653,7 +696,7 @@ impl CommandsPanel {
 
     pub fn render_header_controls(&self, t: &ThemeColors, cx: &mut Context<Self>) -> AnyElement {
         let p = SemanticPalette::from_theme(t);
-        let play_enabled = self.cmd_state != CommandExecutionState::Running;
+        let play_enabled = self.is_run_enabled(cx);
         let play_tooltip = i18n!(cx, "sftp.commands.tooltip.run");
         let play_btn =
             div()
@@ -1157,7 +1200,7 @@ impl CommandsPanel {
         }
 
         // ─── Header (always visible while the panel is open) ───
-        let play_enabled = self.cmd_state != CommandExecutionState::Running;
+        let play_enabled = self.is_run_enabled(cx);
         let play_tooltip = i18n!(cx, "sftp.commands.tooltip.run");
         let play_btn =
             div()
@@ -1617,7 +1660,7 @@ impl Panel for CommandsPanel {
     fn toolbar_elements(&self, cx: &App) -> Vec<ToolbarItem> {
         let this = self.self_weak.clone();
 
-        let play_enabled = self.cmd_state != CommandExecutionState::Running;
+        let play_enabled = self.is_run_enabled(cx);
         let pause_enabled = self.cmd_state == CommandExecutionState::Running;
         let stop_enabled = self.cmd_state != CommandExecutionState::Idle;
 

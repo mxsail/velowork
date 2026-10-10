@@ -1864,7 +1864,11 @@ impl Render for DockPanel {
 
                     let neutral: u32 = if en { t.text_secondary } else { t.text_muted };
                     let group_id = SharedString::from(format!("toolbar-btn-{tb_idx}"));
-                    let icon_el: AnyElement = if let Some(ac) = accent_color {
+                    let icon_el: AnyElement = if !en {
+                        ico.size(ui_icon_std_ts(cx))
+                            .text_color(rgb(neutral))
+                            .into_any_element()
+                    } else if let Some(ac) = accent_color {
                         let _tint = (ac << 8) | 0x26u32;
                         let _tint_hover = (ac << 8) | 0x40u32;
                         let anim_id = format!("tb-icon-{tb_idx}-{}", active as u8);
@@ -1890,38 +1894,43 @@ impl Render for DockPanel {
                     let btn = div()
                         .id(group_id.clone())
                         .group(group_id)
-                        .cursor_pointer()
                         .p(SPACE_XS)
                         .rounded(RADIUS_STD)
                         .relative();
 
-                    let btn = if let Some(ac) = accent_color {
+                    let btn = if !en {
+                        btn.cursor_default()
+                            .opacity(0.45)
+                            .child(icon_el)
+                    } else if let Some(ac) = accent_color {
                         let tint = (ac << 8) | 0x26u32;
                         let tint_hover = (ac << 8) | 0x40u32;
                         let bg_anim_id = format!("tb-bg-{tb_idx}-{}", active as u8);
                         let bg_from = if active { 0x00000000u32 } else { tint };
                         let bg_to = if active { tint } else { 0x00000000u32 };
-                        btn.stateful_behavior(HoverBehavior {
-                            hover_bg: rgba(tint_hover).into(),
-                            ..Default::default()
-                        })
-                        .child(
-                            div()
-                                .absolute()
-                                .inset_0()
-                                .rounded(RADIUS_STD)
-                                .with_animation(
-                                    bg_anim_id,
-                                    Animation::new(Duration::from_millis(90))
-                                        .with_easing(|d| 1.0 - (1.0 - d).powi(3)),
-                                    move |this, delta| {
-                                        this.bg(rgba(lerp_rgba(bg_from, bg_to, delta)))
-                                    },
-                                ),
-                        )
-                        .child(icon_el)
+                        btn.cursor_pointer()
+                            .stateful_behavior(HoverBehavior {
+                                hover_bg: rgba(tint_hover).into(),
+                                ..Default::default()
+                            })
+                            .child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .rounded(RADIUS_STD)
+                                    .with_animation(
+                                        bg_anim_id,
+                                        Animation::new(Duration::from_millis(90))
+                                            .with_easing(|d| 1.0 - (1.0 - d).powi(3)),
+                                        move |this, delta| {
+                                            this.bg(rgba(lerp_rgba(bg_from, bg_to, delta)))
+                                        },
+                                    ),
+                            )
+                            .child(icon_el)
                     } else {
-                        btn.hover(move |s| s.bg(p.surface_hover))
+                        btn.cursor_pointer()
+                            .hover(move |s| s.bg(p.surface_hover))
                             .child(icon_el)
                     };
 
