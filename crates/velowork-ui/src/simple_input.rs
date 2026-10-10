@@ -122,6 +122,7 @@ pub struct SimpleInputState {
     container_height: bool, // When true (single-line), skip fixed height and let parent container control sizing
     password: bool,
     show_gutter: bool,
+    show_gutter_border: bool,
     text_align: TextAlign,
     marked_range: Option<Range<usize>>, // UTF-8 byte range
 
@@ -195,6 +196,7 @@ impl SimpleInputState {
             container_height: false,
             password: false,
             show_gutter: false,
+            show_gutter_border: false,
             text_align: TextAlign::Left,
             marked_range: None,
             follow_cursor: true,
@@ -540,6 +542,15 @@ impl SimpleInputState {
 
     pub fn set_show_gutter(&mut self, show: bool) {
         self.show_gutter = show;
+    }
+
+    pub fn set_show_gutter_border(&mut self, show: bool) {
+        self.show_gutter_border = show;
+    }
+
+    pub fn show_gutter_border(mut self, show: bool) -> Self {
+        self.show_gutter_border = show;
+        self
     }
 
     pub fn masked(mut self, masked: bool) -> Self {
@@ -3060,8 +3071,9 @@ impl Render for SimpleInputState {
                     .w(px(gutter_w))
                     .h_full()
                     .overflow_hidden()
-                    .border_r_1()
-                    .border_color(border)
+                    .when(self.show_gutter_border, |d| {
+                        d.border_r_1().border_color(border)
+                    })
                         .child(
                             // Paint the line numbers exactly like the text body:
                             // shaped with the *same* font + font size, and painted

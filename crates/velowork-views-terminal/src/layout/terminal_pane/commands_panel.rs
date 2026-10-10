@@ -46,7 +46,7 @@ use velowork_ui::simple_input::{InputFocusedEvent, SimpleInput, SimpleInputState
 use velowork_ui::theme::{surface_bg, theme};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::tokens::{
-    ui_text_md, ui_icon_std_ts, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_XL, RADIUS_MD, RADIUS_STD, ICON_SM,
+    ui_text_md, ui_icon_std_ts, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_XL, RADIUS_SM, RADIUS_STD, ICON_SM,
 };
 use velowork_workspace::focus::FocusManager;
 use velowork_workspace::state::{LayoutNode, Workspace};
@@ -61,7 +61,7 @@ use gpui::*;
 use std::collections::HashMap;
 use std::sync::Arc;
 use velowork_ui::h_flex;
-use velowork_ui::scrollable::ScrollableElement;
+use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::tooltip::Tooltip;
 
 /// Execution lifecycle for a (possibly repeating) command broadcast.
@@ -117,9 +117,12 @@ pub struct CommandsPanel {
     panel_height: f32,
     _height_anim_task: Option<Task<()>>,
     resize_dragging: Option<ResizeDragState>,
+    sessions_panel_width: f32,
+    sessions_resize_dragging: Option<ResizeDragState>,
     commands_focus_pending: bool,
 
     focus_handle: FocusHandle,
+    sessions_scroll_handle: ScrollHandle,
 
     /// Registry for centralized click-outside dismissal of the target-host
     /// dropdown. `None` keeps the legacy local-backdrop behavior.
@@ -144,6 +147,7 @@ impl CommandsPanel {
                 .syntax_language(Some("bash"));
             state.set_fill_height(true);
             state.set_show_gutter(true);
+            state.set_show_gutter_border(false);
             // Enable soft-wrap so long commands fold to multiple visual rows
             // instead of scrolling off the right edge. The wrap width is derived
             // from the input's live bounds, so it tracks the panel/dock resize.
@@ -223,8 +227,11 @@ impl CommandsPanel {
             panel_height: 180.0,
             _height_anim_task: None,
             resize_dragging: None,
+            sessions_panel_width: 240.0,
+            sessions_resize_dragging: None,
             commands_focus_pending: false,
             focus_handle: cx.focus_handle(),
+            sessions_scroll_handle: ScrollHandle::default(),
             overlay_registry,
             self_weak: cx.entity().downgrade(),
         }
@@ -929,7 +936,6 @@ impl CommandsPanel {
 
         let body = h_flex()
             .size_full()
-            .gap(SPACE_XL)
             .child(
                 div()
                     .flex_1()
@@ -938,6 +944,7 @@ impl CommandsPanel {
                     .flex_col()
                     .min_h(px(0.0))
                     .overflow_hidden()
+                    .when(self.target_mode != "Selected Sessions", |c| c.pr(SPACE_XL))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, window, cx| {
@@ -960,89 +967,190 @@ impl CommandsPanel {
                     ),
             )
             .when(self.target_mode == "Selected Sessions", |el| {
+                let drag_entity_sessions = cx.entity().downgrade();
+                let resize_sessions_handle = ResizeHandle::new(false, t.border, t.border_active, move |pos, app_cx| {
+                    if let Some(entity) = drag_entity_sessions.upgrade() {
+                        entity.update(app_cx, |this, cx| {
+                            this.sessions_resize_dragging = Some(ResizeDragState {
+                                start_y: f32::from(pos.x),
+                                start_height: this.sessions_panel_width,
+                            });
+                            cx.notify();
+                        });
+                    }
+                })
+                .with_size(0.0)
+                .with_idle_line(false);
+
                 el.child(
-                    div()
-                        .w(px(240.0))
+                    h_flex()
                         .h_full()
-                        .bg(surface_bg(t.bg_secondary, cx))
-                        .flex()
-                        .flex_col()
+                        .child(resize_sessions_handle)
                         .child(
                             div()
-                                .flex_1()
+                                .w(px(self.sessions_panel_width))
+                                .h_full()
+                                .bg(surface_bg(t.bg_secondary, cx))
                                 .flex()
                                 .flex_col()
-                                .overflow_y_scrollbar()
-                                .children({
-                                    let session_order = self.session_order(cx);
+                            .child(
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .w_full()
+                                    .min_h(px(0.0))
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .id("commands-sessions-scroll-dropdown")
+                                            .size_full()
+                                            .track_scroll(&self.sessions_scroll_handle)
+                                            .overflow_y_scroll()
+                                            .flex()
+                                            .flex_col()
+                                            .children({
+                                                let session_order = self.session_order(cx);
 
-                                    session_order.into_iter().enumerate().map(|(idx, tid)| {
-                                        let is_checked = self.selected_sessions.contains(&tid);
-                                        let display = conn_names
-                                            .get(&tid)
-                                            .cloned()
-                                            .unwrap_or_else(|| tid.clone());
-                                        let tid_clone = tid.clone();
+                                                session_order.into_iter().enumerate().map(|(idx, tid)| {
+                                                    let is_checked = self.selected_sessions.contains(&tid);
+                                                    let display = conn_names
+                                                        .get(&tid)
+                                                        .cloned()
+                                                        .unwrap_or_else(|| tid.clone());
+                                                    let tid_clone = tid.clone();
+                                                    let tip_display = display.clone();
 
-                                        h_flex()
-                                            .id(ElementId::Name(
-                                                format!("session-chk-{}", idx).into(),
-                                            ))
-                                            .px(SPACE_MD)
-                                            .py(SPACE_XS)
-                                            .gap(SPACE_MD)
-                                            .items_center()
-                                            .cursor_pointer()
-                                            .hover(|s| s.bg(rgb(t.bg_hover)))
-                                            .child(
-                                                div()
-                                                    .w(px(14.0))
-                                                    .h(px(14.0))
-                                                    .border_1()
-                                                    .border_color(p.border_subtle)
-                                                    .rounded(RADIUS_MD)
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .bg(rgb(if is_checked {
-                                                        t.bg_selection
+                                                    let box_bg = if is_checked {
+                                                        p.surface_accent
                                                     } else {
-                                                        t.bg_primary
-                                                    }))
-                                                    .when(is_checked, |el| {
-                                                        el.child(
-                                                                AppIcon::Check
-                                                                .size(ICON_SM)
-                                                                .text_color(p.text_primary),
+                                                        p.surface_card
+                                                    };
+                                                    let box_border = if is_checked {
+                                                        p.border_active
+                                                    } else {
+                                                        p.border_subtle
+                                                    };
+
+                                                    h_flex()
+                                                        .id(ElementId::Name(
+                                                            format!("session-chk-{}", idx).into(),
+                                                        ))
+                                                        .px(SPACE_MD)
+                                                        .py(SPACE_XS)
+                                                        .gap(SPACE_SM)
+                                                        .items_center()
+                                                        .cursor_pointer()
+                                                        .hover(|s| s.bg(rgb(t.bg_hover)))
+                                                        .tooltip(move |_, cx| {
+                                                            let tip = tip_display.clone();
+                                                            cx.new(|_| Tooltip::new(tip)).into()
+                                                        })
+                                                        .child(
+                                                            div()
+                                                                .size(px(16.0))
+                                                                .flex_shrink_0()
+                                                                .rounded(RADIUS_SM)
+                                                                .border_1()
+                                                                .border_color(box_border)
+                                                                .bg(box_bg)
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .when(is_checked, |el| {
+                                                                    el.child(
+                                                                        AppIcon::Check
+                                                                            .size(ICON_SM)
+                                                                            .text_color(p.text_on_accent),
+                                                                    )
+                                                                }),
                                                         )
-                                                    }),
-                                            )
+                                                        .child(
+                                                            div()
+                                                                .flex_1()
+                                                                .min_w(px(0.0))
+                                                                .overflow_hidden()
+                                                                .whitespace_nowrap()
+                                                                .text_ellipsis()
+                                                                .text_size(ui_text_md(cx))
+                                                                .text_color(p.text_primary)
+                                                                .child(display),
+                                                        )
+                                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                                            if this.selected_sessions.contains(&tid_clone) {
+                                                                this.selected_sessions.remove(&tid_clone);
+                                                            } else {
+                                                                this.selected_sessions
+                                                                    .insert(tid_clone.clone());
+                                                            }
+                                                            cx.notify();
+                                                        }))
+                                                })
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .bottom_0()
+                                            .left_0()
+                                            .right_0()
                                             .child(
-                                                div()
-                                                    .flex_1()
-                                                    .text_size(ui_text_md(cx))
-                                                    .text_color(p.text_primary)
-                                                    .child(display),
-                                            )
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                if this.selected_sessions.contains(&tid_clone) {
-                                                    this.selected_sessions.remove(&tid_clone);
-                                                } else {
-                                                    this.selected_sessions
-                                                        .insert(tid_clone.clone());
-                                                }
-                                                cx.notify();
-                                            }))
-                                    })
-                                }),
-                        ),
+                                                Scrollbar::vertical(&self.sessions_scroll_handle)
+                                                    .scrollbar_show(ScrollbarShow::Hover),
+                                            ),
+                                    ),
+                            )
+                        )
                 )
             });
 
+        let drag_entity_body = cx.entity().downgrade();
         div()
             .size_full()
             .relative()
             .child(body)
+            .child(
+                canvas(|_bounds, _window, _cx| {}, {
+                    let ent = drag_entity_body.clone();
+                    move |_bounds, _prepaint, window, _cx| {
+                        let ent_move = ent.clone();
+                        window.on_mouse_event(move |e: &MouseMoveEvent, phase, _window, cx| {
+                            if phase != DispatchPhase::Bubble {
+                                return;
+                            }
+                            if let Some(entity) = ent_move.upgrade() {
+                                entity.update(cx, |this, cx| {
+                                    if let Some(drag) = this.sessions_resize_dragging {
+                                        let delta = drag.start_y - f32::from(e.position.x);
+                                        let new_w = (drag.start_height + delta).clamp(160.0, 500.0);
+                                        this.sessions_panel_width = new_w;
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        });
+                        let ent_up = ent.clone();
+                        window.on_mouse_event(move |e: &MouseUpEvent, phase, _window, cx| {
+                            if phase != DispatchPhase::Bubble {
+                                return;
+                            }
+                            if e.button != MouseButton::Left {
+                                return;
+                            }
+                            if let Some(entity) = ent_up.upgrade() {
+                                entity.update(cx, |this, cx| {
+                                    if this.sessions_resize_dragging.is_some() {
+                                        this.sessions_resize_dragging = None;
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        });
+                    }
+                })
+                .absolute()
+                .size_full(),
+            )
             .into_any_element()
     }
 
@@ -1428,7 +1536,6 @@ impl CommandsPanel {
         // ─── Body: command input + (optional) session picker ───
         let body = h_flex()
             .size_full()
-            .gap(SPACE_XL)
             .child(
                 div()
                     .flex_1()
@@ -1437,6 +1544,7 @@ impl CommandsPanel {
                     .flex_col()
                     .min_h(px(0.0))
                     .overflow_hidden()
+                    .when(self.target_mode != "Selected Sessions", |c| c.pr(SPACE_XL))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _event, window, cx| {
@@ -1459,82 +1567,140 @@ impl CommandsPanel {
                     ),
             )
             .when(self.target_mode == "Selected Sessions", |el| {
+                let drag_entity_sessions = cx.entity().downgrade();
+                let resize_sessions_handle = ResizeHandle::new(false, t.border, t.border_active, move |pos, app_cx| {
+                    if let Some(entity) = drag_entity_sessions.upgrade() {
+                        entity.update(app_cx, |this, cx| {
+                            this.sessions_resize_dragging = Some(ResizeDragState {
+                                start_y: f32::from(pos.x),
+                                start_height: this.sessions_panel_width,
+                            });
+                            cx.notify();
+                        });
+                    }
+                })
+                .with_size(0.0)
+                .with_idle_line(false);
+
                 el.child(
-                    div()
-                        .w(px(240.0))
+                    h_flex()
                         .h_full()
-                        .bg(surface_bg(t.bg_secondary, cx))
-                        .flex()
-                        .flex_col()
+                        .child(resize_sessions_handle)
                         .child(
                             div()
-                                .flex_1()
+                                .w(px(self.sessions_panel_width))
+                                .h_full()
+                                .bg(surface_bg(t.bg_secondary, cx))
                                 .flex()
                                 .flex_col()
-                                .overflow_y_scrollbar()
-                                .children({
-                                    let session_order = self.session_order(cx);
+                            .child(
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .w_full()
+                                    .min_h(px(0.0))
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .id("commands-sessions-scroll-panel")
+                                            .size_full()
+                                            .track_scroll(&self.sessions_scroll_handle)
+                                            .overflow_y_scroll()
+                                            .flex()
+                                            .flex_col()
+                                            .children({
+                                                let session_order = self.session_order(cx);
 
-                                    session_order.into_iter().enumerate().map(|(idx, tid)| {
-                                        let is_checked = self.selected_sessions.contains(&tid);
-                                        let display = conn_names
-                                            .get(&tid)
-                                            .cloned()
-                                            .unwrap_or_else(|| tid.clone());
-                                        let tid_clone = tid.clone();
+                                                session_order.into_iter().enumerate().map(|(idx, tid)| {
+                                                    let is_checked = self.selected_sessions.contains(&tid);
+                                                    let display = conn_names
+                                                        .get(&tid)
+                                                        .cloned()
+                                                        .unwrap_or_else(|| tid.clone());
+                                                    let tid_clone = tid.clone();
+                                                    let tip_display = display.clone();
 
-                                        h_flex()
-                                            .id(ElementId::Name(
-                                                format!("session-chk-{}", idx).into(),
-                                            ))
-                                            .px(SPACE_MD)
-                                            .py(SPACE_XS)
-                                            .gap(SPACE_MD)
-                                            .items_center()
-                                            .cursor_pointer()
-                                            .hover(|s| s.bg(rgb(t.bg_hover)))
-                                            .child(
-                                                div()
-                                                    .w(px(14.0))
-                                                    .h(px(14.0))
-                                                    .border_1()
-                                                    .border_color(p.border_subtle)
-                                                    .rounded(RADIUS_MD)
-                                                    .flex()
-                                                    .items_center()
-                                                    .justify_center()
-                                                    .bg(rgb(if is_checked {
-                                                        t.bg_selection
+                                                    let box_bg = if is_checked {
+                                                        p.surface_accent
                                                     } else {
-                                                        t.bg_primary
-                                                    }))
-                                                    .when(is_checked, |el| {
-                                                        el.child(
-                                                                AppIcon::Check
-                                                                .size(ICON_SM)
-                                                                .text_color(p.text_primary),
+                                                        p.surface_card
+                                                    };
+                                                    let box_border = if is_checked {
+                                                        p.border_active
+                                                    } else {
+                                                        p.border_subtle
+                                                    };
+
+                                                    h_flex()
+                                                        .id(ElementId::Name(
+                                                            format!("session-chk-{}", idx).into(),
+                                                        ))
+                                                        .px(SPACE_MD)
+                                                        .py(SPACE_XS)
+                                                        .gap(SPACE_SM)
+                                                        .items_center()
+                                                        .cursor_pointer()
+                                                        .hover(|s| s.bg(rgb(t.bg_hover)))
+                                                        .tooltip(move |_, cx| {
+                                                            let tip = tip_display.clone();
+                                                            cx.new(|_| Tooltip::new(tip)).into()
+                                                        })
+                                                        .child(
+                                                            div()
+                                                                .size(px(16.0))
+                                                                .flex_shrink_0()
+                                                                .rounded(RADIUS_SM)
+                                                                .border_1()
+                                                                .border_color(box_border)
+                                                                .bg(box_bg)
+                                                                .flex()
+                                                                .items_center()
+                                                                .justify_center()
+                                                                .when(is_checked, |el| {
+                                                                    el.child(
+                                                                        AppIcon::Check
+                                                                            .size(ICON_SM)
+                                                                            .text_color(p.text_on_accent),
+                                                                    )
+                                                                }),
                                                         )
-                                                    }),
-                                            )
+                                                        .child(
+                                                            div()
+                                                                .flex_1()
+                                                                .min_w(px(0.0))
+                                                                .overflow_hidden()
+                                                                .whitespace_nowrap()
+                                                                .text_ellipsis()
+                                                                .text_size(ui_text_md(cx))
+                                                                .text_color(p.text_primary)
+                                                                .child(display),
+                                                        )
+                                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                                            if this.selected_sessions.contains(&tid_clone) {
+                                                                this.selected_sessions.remove(&tid_clone);
+                                                            } else {
+                                                                this.selected_sessions
+                                                                    .insert(tid_clone.clone());
+                                                            }
+                                                            cx.notify();
+                                                        }))
+                                                })
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .bottom_0()
+                                            .left_0()
+                                            .right_0()
                                             .child(
-                                                div()
-                                                    .flex_1()
-                                                    .text_size(ui_text_md(cx))
-                                                    .text_color(p.text_primary)
-                                                    .child(display),
-                                            )
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                if this.selected_sessions.contains(&tid_clone) {
-                                                    this.selected_sessions.remove(&tid_clone);
-                                                } else {
-                                                    this.selected_sessions
-                                                        .insert(tid_clone.clone());
-                                                }
-                                                cx.notify();
-                                            }))
-                                    })
-                                }),
-                        ),
+                                                Scrollbar::vertical(&self.sessions_scroll_handle)
+                                                    .scrollbar_show(ScrollbarShow::Hover),
+                                            ),
+                                    ),
+                            )
+                        )
                 )
             })
             .into_any_element();
@@ -1589,6 +1755,12 @@ impl CommandsPanel {
                                         this.panel_height = new_h;
                                         cx.notify();
                                     }
+                                    if let Some(drag) = this.sessions_resize_dragging {
+                                        let delta = drag.start_y - f32::from(e.position.x);
+                                        let new_w = (drag.start_height + delta).clamp(160.0, 500.0);
+                                        this.sessions_panel_width = new_w;
+                                        cx.notify();
+                                    }
                                 });
                             }
                         });
@@ -1602,8 +1774,16 @@ impl CommandsPanel {
                             }
                             if let Some(entity) = ent_up.upgrade() {
                                 entity.update(cx, |this, cx| {
+                                    let mut changed = false;
                                     if this.resize_dragging.is_some() {
                                         this.resize_dragging = None;
+                                        changed = true;
+                                    }
+                                    if this.sessions_resize_dragging.is_some() {
+                                        this.sessions_resize_dragging = None;
+                                        changed = true;
+                                    }
+                                    if changed {
                                         cx.notify();
                                     }
                                 });
@@ -1615,7 +1795,11 @@ impl CommandsPanel {
                 .top_0()
                 .left_0()
                 .right_0()
-                .h(SPACE_XS),
+                .when_else(
+                    self.sessions_resize_dragging.is_some(),
+                    |c| c.bottom_0(),
+                    |c| c.h(SPACE_XS),
+                ),
             )
             .into_any_element()
     }
@@ -1875,7 +2059,6 @@ impl Render for CommandsPanel {
         let body = {
             let inner = h_flex()
                 .size_full()
-                .gap(SPACE_XL)
                 .child(
                     div()
                         .flex_1()
@@ -1906,102 +2089,201 @@ impl Render for CommandsPanel {
                         ),
                 )
                 .when(self.target_mode == "Selected Sessions", |el| {
+                    let drag_entity_sessions = cx.entity().downgrade();
+                    let resize_sessions_handle = ResizeHandle::new(false, t.border, t.border_active, move |pos, app_cx| {
+                        if let Some(entity) = drag_entity_sessions.upgrade() {
+                            entity.update(app_cx, |this, cx| {
+                                this.sessions_resize_dragging = Some(ResizeDragState {
+                                    start_y: f32::from(pos.x),
+                                    start_height: this.sessions_panel_width,
+                                });
+                                cx.notify();
+                            });
+                        }
+                    })
+                    .with_size(0.0)
+                    .with_idle_line(false);
+
                     el.child(
-                        div()
-                            .w(px(240.0))
+                        h_flex()
                             .h_full()
-                            .bg(surface_bg(t.bg_secondary, cx))
-                            .flex()
-                            .flex_col()
+                            .child(resize_sessions_handle)
                             .child(
                                 div()
+                                    .w(px(self.sessions_panel_width))
+                                    .h_full()
+                                .bg(surface_bg(t.bg_secondary, cx))
+                                .flex()
+                                .flex_col()
+                            .child(
+                                div()
+                                    .relative()
                                     .flex_1()
-                                    .flex()
-                                    .flex_col()
-                                    .overflow_y_scrollbar()
-                                    .children({
-                                        let session_order = self.session_order(cx);
+                                    .w_full()
+                                    .min_h(px(0.0))
+                                    .overflow_hidden()
+                                    .child(
+                                        div()
+                                            .id("commands-sessions-scroll")
+                                            .size_full()
+                                            .track_scroll(&self.sessions_scroll_handle)
+                                            .overflow_y_scroll()
+                                            .flex()
+                                            .flex_col()
+                                            .children({
+                                                let session_order = self.session_order(cx);
 
-                                        session_order.into_iter().enumerate().map(
-                                            |(idx, tid)| {
-                                                let is_checked =
-                                                    self.selected_sessions.contains(&tid);
-                                                let display = conn_names
-                                                    .get(&tid)
-                                                    .cloned()
-                                                    .unwrap_or_else(|| tid.clone());
-                                                let tid_clone = tid.clone();
+                                                session_order.into_iter().enumerate().map(
+                                                    |(idx, tid)| {
+                                                        let is_checked =
+                                                            self.selected_sessions.contains(&tid);
+                                                        let display = conn_names
+                                                            .get(&tid)
+                                                            .cloned()
+                                                            .unwrap_or_else(|| tid.clone());
+                                                        let tid_clone = tid.clone();
 
-                                                h_flex()
-                                                    .id(ElementId::Name(
-                                                        format!("session-chk-{}", idx).into(),
-                                                    ))
-                                                    .px(SPACE_MD)
-                                                    .py(SPACE_XS)
-                                                    .gap(SPACE_MD)
-                                                    .items_center()
-                                                    .cursor_pointer()
-                                                    .hover(|s| s.bg(rgb(t.bg_hover)))
-                                                    .child(
-                                                        div()
-                                                            .w(px(14.0))
-                                                            .h(px(14.0))
-                                                            .border_1()
-                                                            .border_color(p.border_subtle)
-                                                            .rounded(RADIUS_MD)
-                                                            .flex()
-                                                            .items_center()
-                                                            .justify_center()
-                                                            .bg(rgb(if is_checked {
-                                                                t.bg_selection
-                                                            } else {
-                                                                t.bg_primary
-                                                            }))
-                                                            .when(is_checked, |el| {
-                                                                el.child(
-                                                                        AppIcon::Check
-                                                                        .size(ICON_SM)
-                                                                        .text_color(rgb(
-                                                                            t.text_primary
-                                                                        )),
-                                                                )
-                                                            }),
-                                                    )
-                                                    .child(
-                                                        div()
-                                                            .flex_1()
-                                                            .text_size(ui_text_md(cx))
-                                                            .text_color(p.text_primary)
-                                                            .child(display),
-                                                    )
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if this
-                                                            .selected_sessions
-                                                            .contains(&tid_clone)
-                                                        {
-                                                            this.selected_sessions
-                                                                .remove(&tid_clone);
+                                                        let tip_display = display.clone();
+                                                        let box_bg = if is_checked {
+                                                            p.surface_accent
                                                         } else {
-                                                            this.selected_sessions
-                                                                .insert(tid_clone.clone());
-                                                        }
-                                                        cx.notify();
-                                                    }))
-                                            },
-                                        )
-                                    }),
-                            ),
-                    )
-                });
+                                                            p.surface_card
+                                                        };
+                                                        let box_border = if is_checked {
+                                                            p.border_active
+                                                        } else {
+                                                            p.border_subtle
+                                                        };
+
+                                                        h_flex()
+                                                            .id(ElementId::Name(
+                                                                format!("session-chk-{}", idx).into(),
+                                                            ))
+                                                            .px(SPACE_MD)
+                                                            .py(SPACE_XS)
+                                                            .gap(SPACE_SM)
+                                                            .items_center()
+                                                            .cursor_pointer()
+                                                            .hover(|s| s.bg(rgb(t.bg_hover)))
+                                                            .tooltip(move |_, cx| {
+                                                                let tip = tip_display.clone();
+                                                                cx.new(|_| Tooltip::new(tip)).into()
+                                                            })
+                                                            .child(
+                                                                div()
+                                                                    .size(px(16.0))
+                                                                    .flex_shrink_0()
+                                                                    .rounded(RADIUS_SM)
+                                                                    .border_1()
+                                                                    .border_color(box_border)
+                                                                    .bg(box_bg)
+                                                                    .flex()
+                                                                    .items_center()
+                                                                    .justify_center()
+                                                                    .when(is_checked, |el| {
+                                                                        el.child(
+                                                                            AppIcon::Check
+                                                                                .size(ICON_SM)
+                                                                                .text_color(p.text_on_accent),
+                                                                        )
+                                                                    }),
+                                                            )
+                                                            .child(
+                                                                div()
+                                                                    .flex_1()
+                                                                    .min_w(px(0.0))
+                                                                    .overflow_hidden()
+                                                                    .whitespace_nowrap()
+                                                                    .text_ellipsis()
+                                                                    .text_size(ui_text_md(cx))
+                                                                    .text_color(p.text_primary)
+                                                                    .child(display),
+                                                            )
+                                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                                                if this
+                                                                    .selected_sessions
+                                                                    .contains(&tid_clone)
+                                                                {
+                                                                    this.selected_sessions
+                                                                        .remove(&tid_clone);
+                                                                } else {
+                                                                    this.selected_sessions
+                                                                        .insert(tid_clone.clone());
+                                                                }
+                                                                cx.notify();
+                                                            }))
+                                                    },
+                                                )
+                                            }),
+                                    )
+                                    .child(
+                                        div()
+                                            .absolute()
+                                            .top_0()
+                                            .bottom_0()
+                                            .left_0()
+                                            .right_0()
+                                            .child(
+                                                Scrollbar::vertical(&self.sessions_scroll_handle)
+                                                    .scrollbar_show(ScrollbarShow::Hover),
+                                            ),
+                                    ),
+                            )
+                        )
+                )
+            });
             inner.into_any_element()
         };
 
+        let drag_entity_render = cx.entity().downgrade();
         div()
             .size_full()
             .relative()
             .flex()
             .flex_col()
             .child(div().flex_1().w_full().min_h(px(0.0)).child(body))
+            .child(
+                canvas(|_bounds, _window, _cx| {}, {
+                    let ent = drag_entity_render.clone();
+                    move |_bounds, _prepaint, window, _cx| {
+                        let ent_move = ent.clone();
+                        window.on_mouse_event(move |e: &MouseMoveEvent, phase, _window, cx| {
+                            if phase != DispatchPhase::Bubble {
+                                return;
+                            }
+                            if let Some(entity) = ent_move.upgrade() {
+                                entity.update(cx, |this, cx| {
+                                    if let Some(drag) = this.sessions_resize_dragging {
+                                        let delta = drag.start_y - f32::from(e.position.x);
+                                        let new_w = (drag.start_height + delta).clamp(160.0, 500.0);
+                                        this.sessions_panel_width = new_w;
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        });
+                        let ent_up = ent.clone();
+                        window.on_mouse_event(move |e: &MouseUpEvent, phase, _window, cx| {
+                            if phase != DispatchPhase::Bubble {
+                                return;
+                            }
+                            if e.button != MouseButton::Left {
+                                return;
+                            }
+                            if let Some(entity) = ent_up.upgrade() {
+                                entity.update(cx, |this, cx| {
+                                    if this.sessions_resize_dragging.is_some() {
+                                        this.sessions_resize_dragging = None;
+                                        cx.notify();
+                                    }
+                                });
+                            }
+                        });
+                    }
+                })
+                .absolute()
+                .size_full(),
+            )
     }
 }
 

@@ -15,6 +15,7 @@ pub struct ResizeHandle {
     border_color: u32,
     border_active_color: u32,
     on_drag_start: DragStartCallback,
+    show_idle_line: bool,
 }
 
 impl ResizeHandle {
@@ -30,11 +31,17 @@ impl ResizeHandle {
             border_color,
             border_active_color,
             on_drag_start: Rc::new(RefCell::new(Some(Box::new(on_drag_start)))),
+            show_idle_line: true,
         }
     }
 
     pub fn with_size(mut self, size: f32) -> Self {
         self.divider_size = size;
+        self
+    }
+
+    pub fn with_idle_line(mut self, show: bool) -> Self {
+        self.show_idle_line = show;
         self
     }
 }
@@ -128,12 +135,26 @@ impl Element for ResizeHandle {
         let is_hovered = hitbox.is_hovered(window);
         if self.divider_size <= 2.0 {
             // Tight split line within a card
-            let color = if is_hovered {
-                rgb(self.border_active_color)
-            } else {
-                rgb(self.border_color)
-            };
-            window.paint_quad(fill(bounds, color));
+            if is_hovered {
+                let draw_bounds = if self.divider_size < 1.0 {
+                    if self.is_horizontal {
+                        Bounds::new(
+                            point(bounds.origin.x, bounds.origin.y - px(1.0)),
+                            size(bounds.size.width, px(2.0)),
+                        )
+                    } else {
+                        Bounds::new(
+                            point(bounds.origin.x - px(1.0), bounds.origin.y),
+                            size(px(2.0), bounds.size.height),
+                        )
+                    }
+                } else {
+                    bounds
+                };
+                window.paint_quad(fill(draw_bounds, rgb(self.border_active_color)));
+            } else if self.show_idle_line {
+                window.paint_quad(fill(bounds, rgb(self.border_color)));
+            }
         } else if is_hovered {
             // Floating gap indicator between cards
             let indicator_bounds = if self.is_horizontal {
