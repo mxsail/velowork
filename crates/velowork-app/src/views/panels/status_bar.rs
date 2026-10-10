@@ -2,7 +2,7 @@ use crate::keybindings::{ToggleCommandsPanel, ToggleLeftDock, ToggleRightToolbar
 use crate::settings::settings_entity;
 use crate::theme::{ThemeColors, surface_bg, theme};
 use crate::ui::tokens::{
-    ICON_LG, ICON_MD, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_STD,
+    ICON_LG, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_STD,
     RADIUS_XS, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
     ui_height_status_bar, ui_space_card_gap, ui_space_window_padding, ui_text, ui_text_md, ui_text_ms, ui_text_sm,
 };
@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 use velowork_core::shell::ShellType;
 use velowork_extensions::{ExtensionInstance, ExtensionRegistry};
+use velowork_ui::tab_style;
 use velowork_i18n::i18n;
 use velowork_updater::{GlobalUpdateInfo, UpdateStatus};
 use velowork_monitor::{MonitorCollector, MonitorOptions, MonitorSnapshot};
@@ -2323,7 +2324,6 @@ impl StatusBar {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let p = SemanticPalette::from_context(cx);
-        let title = i18n!(cx, "status.monitor.title");
         let close_label = i18n!(cx, "common.action.close");
         let now = format_datetime();
 
@@ -2799,33 +2799,20 @@ impl StatusBar {
             .child(top_handle)
             .child(left_handle)
             .child(top_left_handle)
-            // Header (fixed at top, not scrolled)
+            // Header & Tab bar merged into a single row
             .child(
                 div()
                     .flex_shrink_0()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .px(SPACE_LG)
-                    .py(SPACE_MD)
+                    .pl(SPACE_SM)
+                    .pr(SPACE_SM)
+                    .pt(SPACE_SM)
+                    .pb(SPACE_SM)
                     .border_b_1()
                     .border_color(p.border_subtle)
-                    .child(
-                        h_flex()
-                            .gap(SPACE_SM)
-                            .items_center()
-                            .child(
-                                AppIcon::SquareActivity
-                                    .size(ICON_MD)
-                                    .text_color(p.status_info),
-                            )
-                            .child(
-                                div()
-                                    .text_size(ui_text_md(cx))
-                                    .text_color(rgb(t.text_primary))
-                                    .child(title),
-                            ),
-                    )
+                    .child(self.monitor_tab_bar(t, cx))
                     .child({
                         let close_trigger =
                             icon_button("monitor-panel-close", AppIcon::Close, &t, cx).on_click(
@@ -2842,8 +2829,6 @@ impl StatusBar {
                         })
                     }),
             )
-            // Tab bar (fixed below header, not scrolled)
-            .child(div().flex_shrink_0().child(self.monitor_tab_bar(t, cx)))
             // Scrollable Body area (with vertical Scrollbar overlay)
             .child(
                 div()
@@ -2939,7 +2924,6 @@ impl StatusBar {
     /// Tab bar at the top of the merged monitor popup, switching between the
     /// Resources and Services views.
     fn monitor_tab_bar(&self, t: &ThemeColors, cx: &Context<Self>) -> impl IntoElement {
-        let p = SemanticPalette::from_context(cx);
         let tabs: [(MonitorTab, String, AppIcon); 2] = [
             (
                 MonitorTab::Resource,
@@ -2954,46 +2938,35 @@ impl StatusBar {
         ];
         h_flex()
             .id("monitor-tab-bar")
-            .gap(SPACE_2XS)
-            .px(SPACE_MD)
-            .py(SPACE_XS)
-            .border_b_1()
-            .border_color(p.border_subtle)
+            .gap(SPACE_XS)
+            .items_center()
             .children(tabs.into_iter().map(|(tab, label, icon)| {
                 let active = self.monitor_tab == tab;
                 let id = match tab {
                     MonitorTab::Resource => "monitor-tab-resource",
                     MonitorTab::Service => "monitor-tab-service",
                 };
-                h_flex()
-                    .id(id)
-                    .cursor_pointer()
-                    .gap(SPACE_SM)
-                    .items_center()
-                    .px(SPACE_MD)
-                    .py(SPACE_XS)
-                    .rounded(RADIUS_STD)
-                    .when(active, |el| el.bg(surface_bg(t.bg_selection, cx)))
-                    .child(icon.size(ICON_STD).text_color(if active {
-                        rgb(t.accent)
-                    } else {
-                        rgb(t.text_muted)
-                    }))
-                    .child(
-                        div()
-                            .text_size(ui_text_md(cx))
-                            .text_color(if active {
-                                rgb(t.text_primary)
-                            } else {
-                                rgb(t.text_muted)
-                            })
-                            .child(label),
-                    )
-                    .on_click(cx.listener(move |this, _ev, _w, cx| {
-                        this.monitor_tab = tab;
-                        cx.notify();
-                    }))
-                    .into_any_element()
+                tab_style(
+                    div().id(id),
+                    t,
+                    active,
+                    cx,
+                )
+                .gap(SPACE_SM)
+                .child(icon.size(ICON_STD).text_color(if active {
+                    rgb(t.accent)
+                } else {
+                    rgb(t.text_muted)
+                }))
+                .child(
+                    div()
+                        .child(label),
+                )
+                .on_click(cx.listener(move |this, _ev, _w, cx| {
+                    this.monitor_tab = tab;
+                    cx.notify();
+                }))
+                .into_any_element()
             }))
     }
 
