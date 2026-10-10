@@ -1,7 +1,7 @@
 use crate::settings::settings_entity;
 use crate::theme::theme;
 use crate::workspace::settings::{
-    ColorSchema, ColorTheme, CustomTitlebarPosition, CustomTitlebarPreset, TabWidthMode, TitlebarStyle,
+    ColorSchema, ColorTheme, CustomTitlebarPosition, CustomTitlebarPreset, StatusBarMode, TabWidthMode, TitlebarStyle,
 };
 use gpui::prelude::*;
 use gpui::*;
@@ -133,6 +133,7 @@ impl SettingsPanel {
                 })
                 .child(self.render_ui_density_row(s.ui_density, cx))
                 .child(self.render_tab_width_mode_row(s.tab_width_mode, cx))
+                .child(self.render_status_bar_mode_row(s.status_bar_mode, cx))
                 .child(self.render_toggle_with_desc(
                     "enable-tab-preview",
                     &i18n!(cx, "settings.appearance.enable_tab_preview"),
@@ -262,6 +263,34 @@ impl SettingsPanel {
                 .on_change(move |&mode, _, cx| {
                     settings_entity(cx).update(cx, |state, cx| {
                         state.set_tab_width_mode(mode, cx);
+                    });
+                }),
+        )
+    }
+
+    fn render_status_bar_mode_row(
+        &mut self,
+        current: StatusBarMode,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let t = theme(cx);
+        let label = i18n!(cx, "settings.status_bar_mode.label");
+        let focus_handle = self.get_or_create_radio_focus_handle("status-bar-mode", cx);
+
+        settings_row("status-bar-mode".to_string(), &label, &t, cx, true).child(
+            RadioGroup::new("status-bar-mode-radio")
+                .focus(&focus_handle)
+                .mode(RadioMode::Button)
+                .selected(Some(current))
+                .options(
+                    StatusBarMode::all_variants()
+                        .iter()
+                        .map(|&mode| RadioOption::new(mode, i18n!(cx, mode.translation_key())))
+                        .collect(),
+                )
+                .on_change(move |&mode, _, cx| {
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_status_bar_mode(mode, cx);
                     });
                 }),
         )

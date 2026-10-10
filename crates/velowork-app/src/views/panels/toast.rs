@@ -1,5 +1,6 @@
 pub use crate::workspace::toast::{Toast, ToastAction, ToastActionStyle, ToastLevel, ToastManager};
 
+use crate::settings::settings_entity;
 use crate::theme::theme;
 use crate::ui::tokens::{
     ICON_SM, RADIUS_LG, RADIUS_MD, RADIUS_STD, SPACE_MD, SPACE_SM, SPACE_XS,
@@ -13,6 +14,7 @@ use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::icon::AppIcon;
 use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::tooltip::Tooltip;
+use velowork_workspace::settings::StatusBarMode;
 
 /// Emitted when a clickable toast action is clicked. The owning view (WindowView)
 /// subscribes and routes it (e.g. soft-close undo / close-now).
@@ -156,7 +158,12 @@ impl Render for ToastOverlay {
         let title_bar_h = titlebar_height(window, cx);
         // Ensure top of expanded panel never overlaps title bar, strictly leaving at least 16px gap below title bar
         let top_safe_limit = title_bar_h + 16.0;
-        let status_bar_h = f32::from(ui_height_status_bar(cx));
+        let status_bar_mode = settings_entity(cx).read(cx).settings.status_bar_mode;
+        let status_bar_h = if status_bar_mode == StatusBarMode::Always {
+            f32::from(ui_height_status_bar(cx))
+        } else {
+            0.0
+        };
         let card_gap = f32::from(ui_space_card_gap(cx));
         let bottom_offset = status_bar_h + card_gap;
         let max_panel_h = px((viewport_h - top_safe_limit - bottom_offset).max(150.0));

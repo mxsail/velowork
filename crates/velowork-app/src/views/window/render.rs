@@ -6,13 +6,14 @@ use crate::keybindings::{
     ShowKeybindings, ShowLogConsole, ShowProfileManager, ShowProjectManageDialog,
     ShowQuickCommandsPanel, ShowServicesPanel, ShowSettings, ShowThemeSelector, ShowTunnelsPanel,
     ShowUpdateDialog, TerminalInlineAi, ToggleCommandsPanel, ToggleLeftDock, ToggleLeftDockAutoHide,
-    TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel,
+    TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel, ToggleStatusBar,
 };
 use crate::settings::{open_settings_file, settings_entity};
 use crate::theme::{surface_bg, theme};
 use crate::ui::tokens::{
-    RADIUS_CARD, ui_right_toolbar_width, ui_space_card_gap, ui_space_window_padding, ui_space_md, ui_space_xs, ui_text_md, ui_text_xl,
+    RADIUS_CARD, RADIUS_MD, ui_height_status_bar, ui_right_toolbar_width, ui_space_card_gap, ui_space_window_padding, ui_space_md, ui_space_xs, ui_text_md, ui_text_xl,
 };
+use velowork_workspace::settings::StatusBarMode;
 use crate::views::layout::navigation::{get_pane_map, prune_pane_map};
 use crate::views::layout::split_pane::{DragState, compute_resize, render_project_divider};
 use gpui::prelude::*;
@@ -25,6 +26,49 @@ use velowork_ui::tooltip::Tooltip;
 use super::WindowView;
 
 impl WindowView {
+    /// Compute the horizontal insets (left, right) of the center terminal area
+    /// Compute the horizontal insets of the center terminal area (left_inset, terminal_right_inset, window_right_inset).
+    /// - `left_inset`: window padding + left dock width (if visible) + dynamic gap
+    /// - `terminal_right_inset`: right dock width + right toolbar width + window padding
+    /// - `window_right_inset`: window padding
+    fn compute_terminal_horizontal_insets(&self, cx: &App) -> (f32, f32) {
+        let win_pad = f32::from(ui_space_window_padding(cx));
+        let card_gap = f32::from(ui_space_card_gap(cx));
+
+        // Left inset: window padding + left dock (if rendered) + dynamic gap
+        let is_left_dock_visible = self.left_dock_ctrl.should_render() || {
+            let mode = self.left_dock.read(cx).mode;
+            mode == velowork_ui::dock::PanelMode::Maximized
+                || mode == velowork_ui::dock::PanelMode::Fullscreen
+        };
+        let left_inset = if is_left_dock_visible {
+            let sidebar_w = self.left_dock_ctrl.current_width();
+            let dynamic_gap = self.left_dock_ctrl.animation() * card_gap;
+            win_pad + sidebar_w + dynamic_gap
+        } else {
+            win_pad
+        };
+
+        // Right inset for terminal trigger strip: excludes right dock & toolbar
+        let show_right_dock = self.right_dock_ctrl.should_render() && self.right_dock.is_some();
+        let show_right_toolbar = self.right_toolbar_open;
+        let right_dock_w = if show_right_dock {
+            let w = self.right_dock_ctrl.current_width();
+            let dynamic_gap = self.right_dock_ctrl.animation() * card_gap;
+            w + dynamic_gap
+        } else {
+            0.0
+        };
+        let right_tb_w = if show_right_toolbar {
+            f32::from(ui_right_toolbar_width(cx)) + card_gap
+        } else {
+            0.0
+        };
+        let terminal_right_inset = win_pad + right_dock_w + right_tb_w;
+
+        (left_inset, terminal_right_inset)
+    }
+
     /// Normalize raw project widths to percentages summing to 100%.
     fn normalize_widths(raw_widths: &[f32]) -> Vec<f32> {
         let total: f32 = raw_widths.iter().sum();
@@ -1002,6 +1046,36 @@ impl Render for WindowView {
                             this.hide_sidebar_on_leave(cx);
                         }
                     }
+
+                    // Handle status bar auto-hide mouse coordinate tracking:
+                    // Constrained exclusively to the terminal area (never conflicts with left dock / toolbar footers)
+                    let status_bar_mode = settings_entity(cx).read(cx).settings.status_bar_mode;
+                    if status_bar_mode == StatusBarMode::AutoHide {
+                        let win_h = f32::from(window.viewport_size().height);
+                        let win_w = f32::from(window.viewport_size().width);
+                        let mouse_x = f32::from(event.position.x);
+                        let mouse_y = f32::from(event.position.y);
+                        let status_bar_h = f32::from(ui_height_status_bar(cx));
+                        let win_pad = f32::from(ui_space_window_padding(cx));
+                        let card_top = win_h - (status_bar_h + win_pad + 16.0);
+                        let trigger_zone = 14.0;
+
+                        let (left_inset, terminal_right_inset) = this.compute_terminal_horizontal_insets(cx);
+                        // Trigger hot-zone strictly under the terminal area (never conflicts with left dock / right toolbar footers)
+                        let in_trigger_x = mouse_x >= left_inset && mouse_x <= win_w - terminal_right_inset;
+                        // Expanded floating card covers from terminal left edge to the right window padding
+                        let in_card_x = mouse_x >= left_inset && mouse_x <= win_w - win_pad;
+
+                        if this.status_bar_hovered || this.status_bar_anim_progress > 0.001 {
+                            if mouse_y < card_top || !in_card_x {
+                                this.schedule_status_bar_hide(cx);
+                            } else {
+                                this.status_bar_hide_task = None;
+                            }
+                        } else if in_trigger_x && mouse_y >= win_h - trigger_zone {
+                            this.on_status_bar_hover_enter(cx);
+                        }
+                    }
                 }
             }))
             // Global mouse up handler to end resize (registered via window event
@@ -1158,6 +1232,10 @@ impl Render for WindowView {
             // Handle toggle left dock auto-hide action
             .on_action(cx.listener(|this, _: &ToggleLeftDockAutoHide, _window, cx| {
                 this.toggle_sidebar_auto_hide(cx);
+            }))
+            // Handle toggle status bar mode action
+            .on_action(cx.listener(|this, _: &ToggleStatusBar, _window, cx| {
+                this.toggle_status_bar(cx);
             }))
             // Handle equalize layout action
             .on_action(cx.listener(|this, _: &EqualizeLayout, _window, cx| {
@@ -1534,13 +1612,18 @@ impl Render for WindowView {
                             }
                         },
                     )
-                    // Center column: main area + bottom dock (vertical layout)
+                    // Main workspace: center column + right dock/toolbar + status bar
                     .when(!{
+                        let mode = self.left_dock.read(cx).mode;
+                        mode == velowork_ui::dock::PanelMode::Maximized
+                            || mode == velowork_ui::dock::PanelMode::Fullscreen
+                    }, |d| {
                         let is_left_dock_maximized = {
                             let mode = self.left_dock.read(cx).mode;
                             mode == velowork_ui::dock::PanelMode::Maximized
                                 || mode == velowork_ui::dock::PanelMode::Fullscreen
                         };
+                        let bottom_fullscreen = self.is_bottom_dock_fullscreen(cx);
                         let right_fullscreen = {
                             let mode = self
                                 .right_dock
@@ -1550,54 +1633,61 @@ impl Render for WindowView {
                             mode == velowork_ui::dock::PanelMode::Maximized
                                 || mode == velowork_ui::dock::PanelMode::Fullscreen
                         };
-                        is_left_dock_maximized || right_fullscreen
-                    }, |d| {
-                        let bottom_fullscreen = self.is_bottom_dock_fullscreen(cx);
                         let terminal_fullscreen = self.focus_manager().read(cx).has_fullscreen();
-                        let show_bottom_dock = self.bottom_dock_ctrl.should_render() || bottom_fullscreen;
+                        let is_any_fullscreen = is_left_dock_maximized || right_fullscreen || bottom_fullscreen || terminal_fullscreen;
 
-                        d.child(
-                            div()
-                                .id("center-column")
-                                .flex_1()
-                                .flex()
-                                .flex_col()
-                                .min_h_0()
-                                .min_w_0()
-                                .overflow_hidden()
-                                // When bottom dock is fullscreen, hide projects grid
-                                .when(!bottom_fullscreen, |d| {
-                                    d.child(
-                                        div()
-                                            .id("projects-container")
-                                            .flex_1()
-                                            .min_h_0()
-                                            .min_w_0()
-                                            .overflow_hidden()
-                                            .child(self.render_projects_grid(window, cx)),
-                                    )
-                                })
-                                // When a terminal is fullscreen, hide the bottom dock so the
-                                // zoomed terminal can fill the whole center column.
-                                .when(!terminal_fullscreen && show_bottom_dock, |d| {
-                                    d.child(self.render_bottom_dock_container(window, cx))
-                                })
-                        )
-                    })
-                    // Right Sidebar & Toolbar container (conditional mount)
-                    .when(
-                        !{
-                            let is_left_dock_maximized = {
-                                let mode = self.left_dock.read(cx).mode;
-                                mode == velowork_ui::dock::PanelMode::Maximized
-                                    || mode == velowork_ui::dock::PanelMode::Fullscreen
-                            };
-                            let bottom_fullscreen = self.is_bottom_dock_fullscreen(cx);
-                            let terminal_fullscreen =
-                                self.focus_manager().read(cx).has_fullscreen();
-                            is_left_dock_maximized || bottom_fullscreen || terminal_fullscreen
-                        },
-                        |d| {
+                        let mut main_workspace = div()
+                            .id("main-workspace")
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .min_h_0()
+                            .min_w_0()
+                            .h_full()
+                            .relative();
+
+                        // 1. Center column & Right Sidebar/Toolbar (horizontal row)
+                        let mut center_and_right = div()
+                            .id("center-and-right-container")
+                            .flex_1()
+                            .flex()
+                            .min_h_0()
+                            .min_w_0();
+
+                        // Add Center column
+                        center_and_right = center_and_right.when(!right_fullscreen, |d| {
+                            let show_bottom_dock = self.bottom_dock_ctrl.should_render() || bottom_fullscreen;
+                            d.child(
+                                div()
+                                    .id("center-column")
+                                    .flex_1()
+                                    .flex()
+                                    .flex_col()
+                                    .min_h_0()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    // When bottom dock is fullscreen, hide projects grid
+                                    .when(!bottom_fullscreen, |d| {
+                                        d.child(
+                                            div()
+                                                .id("projects-container")
+                                                .flex_1()
+                                                .min_h_0()
+                                                .min_w_0()
+                                                .overflow_hidden()
+                                                .child(self.render_projects_grid(window, cx)),
+                                        )
+                                    })
+                                    // When a terminal is fullscreen, hide the bottom dock so the
+                                    // zoomed terminal can fill the whole center column.
+                                    .when(!terminal_fullscreen && show_bottom_dock, |d| {
+                                        d.child(self.render_bottom_dock_container(window, cx))
+                                    }),
+                            )
+                        });
+
+                        // Add Right Sidebar & Toolbar
+                        center_and_right = center_and_right.when(!bottom_fullscreen && !terminal_fullscreen, |d| {
                             let mode = self
                                 .right_dock
                                 .as_ref()
@@ -1766,34 +1856,114 @@ impl Render for WindowView {
                                 ),
                                 (None, None) => d,
                             }
-                        },
-                    ),
-                    ) // end of content-area .child()
-                    // Status bar at the bottom (hidden when any panel/dock/terminal is fullscreen)
-                    .when(!{
-                        let is_left_dock_maximized = {
-                            let mode = self.left_dock.read(cx).mode;
-                            mode == velowork_ui::dock::PanelMode::Maximized
-                                || mode == velowork_ui::dock::PanelMode::Fullscreen
-                        };
-                        let is_right_dock_maximized = {
-                            let mode = self
-                                .right_dock
-                                .as_ref()
-                                .map(|d| d.read(cx).mode)
-                                .unwrap_or(velowork_ui::dock::PanelMode::Normal);
-                            mode == velowork_ui::dock::PanelMode::Maximized
-                                || mode == velowork_ui::dock::PanelMode::Fullscreen
-                        };
-                        let bottom_fullscreen = self.is_bottom_dock_fullscreen(cx);
-                        let terminal_fullscreen = self.focus_manager().read(cx).has_fullscreen();
-                        is_left_dock_maximized
-                            || is_right_dock_maximized
-                            || bottom_fullscreen
-                            || terminal_fullscreen
-                    }, |d| {
-                        d.child(self.status_bar.clone())
+                        });
+
+                        main_workspace = main_workspace.child(center_and_right);
+
+                        // 2. Status bar inside main_workspace (Always or AutoHide)
+                        main_workspace = main_workspace.when(!is_any_fullscreen, |mut d| {
+                            let status_bar_mode = settings_entity(cx).read(cx).settings.status_bar_mode;
+                            match status_bar_mode {
+                                StatusBarMode::Always => {
+                                    d.child(
+                                        div()
+                                            .id("status-bar-wrapper")
+                                            .w_full()
+                                            .mt(ui_space_card_gap(cx))
+                                            .child(self.status_bar.clone()),
+                                    )
+                                }
+                                StatusBarMode::Never => d,
+                                StatusBarMode::AutoHide => {
+                                    let is_pinned = self.status_bar.read(cx).is_pinned(cx);
+                                    let anim_progress = if is_pinned {
+                                        1.0
+                                    } else {
+                                        self.status_bar_anim_progress
+                                    };
+                                    let should_render_overlay = anim_progress > 0.001 || self.status_bar_hovered || is_pinned;
+
+                                    if should_render_overlay {
+                                        let p = SemanticPalette::from_context(cx);
+                                        // 300ms smooth vertical slide: offset down from 0px up to ~44px
+                                        let slide_offset = (1.0 - anim_progress) * 44.0;
+                                        d = d.child(
+                                            div()
+                                                .id("status-bar-overlay-hit-area")
+                                                .absolute()
+                                                .left_0()
+                                                .right_0()
+                                                .bottom_0()
+                                                .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                                                    if *hovered {
+                                                        this.on_status_bar_hover_enter(cx);
+                                                    }
+                                                }))
+                                                .child(
+                                                    div()
+                                                        .id("status-bar-floating-card")
+                                                        .occlude()
+                                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                                            cx.stop_propagation();
+                                                        })
+                                                        .on_mouse_down(MouseButton::Right, |_, _, cx| {
+                                                            cx.stop_propagation();
+                                                        })
+                                                        .w_full()
+                                                        .rounded(RADIUS_MD)
+                                                        .border_1()
+                                                        .border_color(p.border_subtle)
+                                                        .bg(p.surface_overlay)
+                                                        .shadow_lg()
+                                                        .overflow_hidden()
+                                                        .relative()
+                                                        .bottom(px(-slide_offset))
+                                                        .opacity(anim_progress)
+                                                        .child(self.status_bar.clone()),
+                                                ),
+                                        );
+                                    } else {
+                                        let card_gap = f32::from(ui_space_card_gap(cx));
+                                        let show_right_dock = self.right_dock_ctrl.should_render() && self.right_dock.is_some();
+                                        let show_right_toolbar = self.is_right_toolbar_open() && !right_fullscreen;
+                                        let right_dock_w = if show_right_dock {
+                                            let w = self.right_dock_ctrl.current_width();
+                                            let dynamic_gap = self.right_dock_ctrl.animation() * card_gap;
+                                            w + dynamic_gap
+                                        } else {
+                                            0.0
+                                        };
+                                        let right_tb_w = if show_right_toolbar {
+                                            f32::from(ui_right_toolbar_width(cx)) + card_gap
+                                        } else {
+                                            0.0
+                                        };
+                                        let right_inset_within_main = right_dock_w + right_tb_w;
+
+                                        // Completely collapsed: render bottom trigger strip strictly under terminal area (14px height)
+                                        d = d.child(
+                                            div()
+                                                .id("status-bar-trigger-strip")
+                                                .absolute()
+                                                .left_0()
+                                                .right(px(right_inset_within_main))
+                                                .bottom_0()
+                                                .h(px(14.0))
+                                                .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                                                    if *hovered {
+                                                        this.on_status_bar_hover_enter(cx);
+                                                    }
+                                                })),
+                                        );
+                                    }
+                                    d
+                                }
+                            }
+                        });
+
+                        d.child(main_workspace)
                     })
+                    ) // end of content-area .child()
                     // Content modal overlays — positioned relative to content-root,
                     // so they cover the content area + status bar but NOT the titlebar.
                     // Stacked modal overlays (renders bottom-to-top so child modals layer over parent modals).

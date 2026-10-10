@@ -273,8 +273,34 @@ impl CustomTitlebarPosition {
     }
 }
 
+/// Status bar display mode (Always, AutoHide, Never)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatusBarMode {
+    #[default]
+    Always,
+    AutoHide,
+    Never,
+}
 
-/// Tab width mode
+impl StatusBarMode {
+    pub fn translation_key(self) -> &'static str {
+        match self {
+            StatusBarMode::Always => "settings.status_bar_mode.always",
+            StatusBarMode::AutoHide => "settings.status_bar_mode.auto_hide",
+            StatusBarMode::Never => "settings.status_bar_mode.never",
+        }
+    }
+
+    pub fn all_variants() -> &'static [StatusBarMode] {
+        &[
+            StatusBarMode::Always,
+            StatusBarMode::AutoHide,
+            StatusBarMode::Never,
+        ]
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum TabWidthMode {
@@ -830,6 +856,9 @@ pub struct AppSettings {
     /// Whether to show border around focused terminal
     #[serde(default = "default_show_focused_border")]
     pub show_focused_border: bool,
+    /// Status bar display mode (Always, AutoHide, Never)
+    #[serde(default)]
+    pub status_bar_mode: StatusBarMode,
     /// Titlebar style (Custom or Native)
     #[serde(default)]
     pub titlebar_style: TitlebarStyle,
@@ -1417,6 +1446,7 @@ impl Default for AppSettings {
             },
             right_toolbar_open: true,
             show_focused_border: default_show_focused_border(),
+            status_bar_mode: StatusBarMode::default(),
             titlebar_style: TitlebarStyle::default(),
             titlebar_preset: CustomTitlebarPreset::default(),
             titlebar_position: CustomTitlebarPosition::default(),

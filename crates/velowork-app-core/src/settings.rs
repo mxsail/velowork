@@ -521,6 +521,15 @@ impl SettingsState {
         self.save_and_notify(cx);
     }
 
+    /// Set status bar display mode (Always, AutoHide, Never)
+    pub fn set_status_bar_mode(&mut self, mode: velowork_workspace::settings::StatusBarMode, cx: &mut Context<Self>) {
+        if self.settings.status_bar_mode == mode {
+            return;
+        }
+        self.settings.status_bar_mode = mode;
+        self.save_and_notify(cx);
+    }
+
     /// Set right sidebar auto-hide mode
     pub fn set_right_sidebar_auto_hide(&mut self, value: bool, cx: &mut Context<Self>) {
         self.settings.right_sidebar.auto_hide = value;

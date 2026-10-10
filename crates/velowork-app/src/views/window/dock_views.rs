@@ -1,9 +1,11 @@
 use crate::settings::settings_entity;
 use gpui::*;
+use velowork_i18n::i18n;
 use velowork_ui::dock::DockPosition;
 use velowork_workspace::dock_controller::{
     ANIMATION_DURATION_MS, AnimationTarget, DockController, FRAME_TIME_MS,
 };
+use velowork_workspace::settings::StatusBarMode;
 
 use super::WindowView;
 
@@ -572,5 +574,125 @@ impl WindowView {
             DockPosition::Bottom => self.bottom_dock_anim_task = Some(task),
             DockPosition::Top => {}
         }
+    }
+
+    /// Toggle status bar mode (cycles Always -> AutoHide -> Never)
+    pub(super) fn toggle_status_bar(&mut self, cx: &mut Context<Self>) {
+        let current_mode = settings_entity(cx).read(cx).settings.status_bar_mode;
+        let next_mode = match current_mode {
+            StatusBarMode::Always => StatusBarMode::AutoHide,
+            StatusBarMode::AutoHide => StatusBarMode::Never,
+            StatusBarMode::Never => StatusBarMode::Always,
+        };
+        self.status_bar_hovered = false;
+        self.status_bar_hide_task = None;
+        self.status_bar_anim_task = None;
+        match next_mode {
+            StatusBarMode::Always => {
+                self.status_bar_anim_progress = 1.0;
+                self.status_bar_anim_target = 1.0;
+            }
+            StatusBarMode::AutoHide | StatusBarMode::Never => {
+                self.status_bar_anim_progress = 0.0;
+                self.status_bar_anim_target = 0.0;
+            }
+        }
+        settings_entity(cx).update(cx, |s, cx| {
+            s.set_status_bar_mode(next_mode, cx);
+        });
+        let msg = match next_mode {
+            StatusBarMode::Always => i18n!(cx, "settings.status_bar_mode.always"),
+            StatusBarMode::AutoHide => i18n!(cx, "settings.status_bar_mode.auto_hide"),
+            StatusBarMode::Never => i18n!(cx, "settings.status_bar_mode.never"),
+        };
+        let label = i18n!(cx, "settings.status_bar_mode.label");
+        crate::views::panels::toast::ToastManager::info(format!("{}: {}", label, msg), cx);
+        cx.notify();
+    }
+
+    /// Animate status bar slide to target (0.0 = hidden, 1.0 = visible) over ~300ms
+    pub(super) fn animate_status_bar_to(&mut self, target: f32, cx: &mut Context<Self>) {
+        if (self.status_bar_anim_target - target).abs() < 0.001
+            && (self.status_bar_anim_progress - target).abs() < 0.001
+        {
+            return;
+        }
+
+        // If an animation is already running towards this exact target, do not interrupt or restart it
+        if (self.status_bar_anim_target - target).abs() < 0.001 && self.status_bar_anim_task.is_some() {
+            return;
+        }
+
+        self.status_bar_anim_target = target;
+        self.status_bar_anim_seq = self.status_bar_anim_seq.wrapping_add(1);
+        let seq = self.status_bar_anim_seq;
+        let current = self.status_bar_anim_progress;
+        let duration = std::time::Duration::from_millis(300);
+        let step_duration = std::time::Duration::from_millis(16);
+
+        let task = cx.spawn(async move |this: WeakEntity<WindowView>, cx| {
+            let start = std::time::Instant::now();
+            loop {
+                smol::Timer::after(step_duration).await;
+                let elapsed = start.elapsed();
+                let ratio = (elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0);
+                let progress = DockController::ease_progress_ratio(current, target, ratio);
+
+                let cont = this.update(cx, |this, cx| {
+                    if this.status_bar_anim_seq != seq {
+                        return false;
+                    }
+                    this.status_bar_anim_progress = progress;
+                    cx.notify();
+                    ratio < 1.0
+                });
+
+                if !matches!(cont, Ok(true)) {
+                    break;
+                }
+            }
+
+            let _ = this.update(cx, |this, cx| {
+                if this.status_bar_anim_seq == seq {
+                    this.status_bar_anim_progress = target;
+                    this.status_bar_anim_task = None;
+                    cx.notify();
+                }
+            });
+        });
+
+        self.status_bar_anim_task = Some(task);
+    }
+
+    /// Mouse entered the status bar trigger hot-strip or floating card
+    pub(super) fn on_status_bar_hover_enter(&mut self, cx: &mut Context<Self>) {
+        self.status_bar_hovered = true;
+        self.status_bar_hide_task = None;
+        if (self.status_bar_anim_target - 1.0).abs() > 0.001 || self.status_bar_anim_progress < 0.001 {
+            self.animate_status_bar_to(1.0, cx);
+        }
+    }
+
+    /// Schedule smooth dismissal of the floating status bar with 200ms leave delay buffer
+    pub(super) fn schedule_status_bar_hide(&mut self, cx: &mut Context<Self>) {
+        if self.status_bar_hide_task.is_some() || !self.status_bar_hovered {
+            return;
+        }
+        // Do not allow hide scheduling while the bar is still animating open
+        if (self.status_bar_anim_target - 1.0).abs() < 0.001 && self.status_bar_anim_progress < 0.95 {
+            return;
+        }
+
+        self.status_bar_hide_task = Some(cx.spawn(async move |this: WeakEntity<WindowView>, cx| {
+            smol::Timer::after(std::time::Duration::from_millis(200)).await;
+            let _ = this.update(cx, |this, cx| {
+                this.status_bar_hide_task = None;
+                let is_pinned = this.status_bar.read(cx).is_pinned(cx);
+                if !is_pinned {
+                    this.status_bar_hovered = false;
+                    this.animate_status_bar_to(0.0, cx);
+                }
+            });
+        }));
     }
 }

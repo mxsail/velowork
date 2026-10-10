@@ -146,6 +146,12 @@
     },
     "file_opener": "打开文件的程序",
     "show_focus_border": "显示聚焦边框",
+    "status_bar_mode": {
+      "label": "底部状态栏",
+      "always": "始终显示",
+      "auto_hide": "自动隐藏",
+      "never": "完全关闭"
+    },
     "color_tinted_bg": "彩色背景色调",
     "detached_overlays": "默认分离浮窗",
     "ui_density": {
@@ -2105,6 +2111,10 @@
     "toggle_left_dock_auto_hide": {
       "label": "切换自动隐藏",
       "description": "启用或禁用左侧 Dock 自动隐藏"
+    },
+    "toggle_status_bar": {
+      "label": "切换底部状态栏",
+      "description": "切换底部状态栏显示、自动隐藏与完全关闭"
     },
     "toggle_commands_panel": {
       "label": "切换命令面板",

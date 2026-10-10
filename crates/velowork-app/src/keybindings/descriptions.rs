@@ -13,7 +13,7 @@ use super::{
     ShowProfileManager, ShowProjectManageDialog, ShowQuickCommandsPanel, ShowServicesPanel,
     ShowSettings, ShowThemeSelector, ShowTunnelsPanel, ShowUpdateDialog, SplitHorizontal,
     SplitVertical, TerminalInlineAi, ToggleCommandsPanel, ToggleFullscreen, ToggleLeftDock, ToggleLeftDockAutoHide,
-    TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel, ZoomIn, ZoomOut,
+    TogglePaneSwitcher, ToggleRightDock, ToggleRightToolbar, ToggleSftpPanel, ToggleStatusBar, ZoomIn, ZoomOut,
 };
 
 /// Get human-readable descriptions for all actions
@@ -141,6 +141,18 @@ pub fn get_action_descriptions() -> HashMap<&'static str, ActionDescription> {
             scope: ActionScope::Global,
             show_in_palette: true,
             factory: || Box::new(ToggleSftpPanel),
+        },
+    );
+    map.insert(
+        "ToggleStatusBar",
+        ActionDescription {
+            id: "toggle_status_bar",
+            name: "Toggle Bottom Status Bar",
+            description: "Cycle bottom status bar between visible, auto-hide, and hidden",
+            category: "View",
+            scope: ActionScope::Global,
+            show_in_palette: true,
+            factory: || Box::new(ToggleStatusBar),
         },
     );
     map.insert(

@@ -110,6 +110,14 @@ impl KeybindingConfig {
                 KeybindingEntry::new("ctrl-shift-f", None),
             ],
         );
+        // Status bar toggle
+        bindings.insert(
+            "ToggleStatusBar".to_string(),
+            vec![
+                KeybindingEntry::new("cmd-j", None),
+                KeybindingEntry::new("ctrl-j", None),
+            ],
+        );
         bindings.insert(
             "ShowSettings".to_string(),
             vec![

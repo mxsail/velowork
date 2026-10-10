@@ -146,6 +146,12 @@
     },
     "file_opener": "Open File With",
     "show_focus_border": "Show Focus Border",
+    "status_bar_mode": {
+      "label": "Bottom Status Bar",
+      "always": "Always Visible",
+      "auto_hide": "Auto-hide",
+      "never": "Never Visible"
+    },
     "color_tinted_bg": "Color Tinted Background",
     "detached_overlays": "Detached Overlays by Default",
     "ui_density": {
@@ -2105,6 +2111,10 @@
     "toggle_left_dock_auto_hide": {
       "label": "Toggle Auto-Hide",
       "description": "Enable or disable left dock auto-hide mode"
+    },
+    "toggle_status_bar": {
+      "label": "Toggle Bottom Status Bar",
+      "description": "Cycle bottom status bar between visible, auto-hide, and hidden"
     },
     "toggle_commands_panel": {
       "label": "Toggle Commands Panel",

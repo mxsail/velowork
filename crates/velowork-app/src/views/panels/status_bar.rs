@@ -2,7 +2,7 @@ use crate::keybindings::{ToggleCommandsPanel, ToggleLeftDock, ToggleRightToolbar
 use crate::settings::settings_entity;
 use crate::theme::{ThemeColors, surface_bg, theme};
 use crate::ui::tokens::{
-    ICON_LG, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_LG, RADIUS_MD, RADIUS_STD,
+    ICON_LG, ICON_MICRO, ICON_SM, ICON_STD, RADIUS_CARD, RADIUS_LG, RADIUS_MD, RADIUS_STD,
     RADIUS_XS, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL, SPACE_XS,
     ui_height_status_bar, ui_space_card_gap, ui_space_window_padding, ui_text, ui_text_md, ui_text_ms, ui_text_sm,
 };
@@ -655,6 +655,16 @@ impl StatusBar {
             self.right_sidebar_covering = right;
             cx.notify();
         }
+    }
+
+    /// Whether the status bar must stay pinned open (e.g. monitor popup open,
+    /// monitor panel being dragged, column resize drag, or transfer/service popups open).
+    pub fn is_pinned(&self, cx: &App) -> bool {
+        self.monitor_open
+            || self.monitor_panel_drag.is_some()
+            || self.disk_col_drag.is_some()
+            || self.overlay_manager.read(cx).has_transfer_popup()
+            || self.overlay_manager.read(cx).has_service_context_menu()
     }
 
     /// Trigger the arrival elastic bounce animation on the transfer icon.
@@ -1446,22 +1456,6 @@ impl Render for StatusBar {
             None
         };
 
-        let is_custom_titlebar = if cfg!(target_os = "macos") || cfg!(target_os = "windows") {
-            settings_entity(cx).read(cx).settings.titlebar_style
-                == velowork_workspace::settings::TitlebarStyle::Custom
-        } else {
-            matches!(
-                window.window_decorations(),
-                gpui::Decorations::Client { .. }
-            )
-        };
-        let window_corner_radius = settings_entity(cx).read(cx).settings.window_corner_radius;
-        let is_maximized = window.is_maximized();
-        let is_fullscreen = window.is_fullscreen();
-        let has_rounded_corners =
-            is_custom_titlebar && !is_maximized && !is_fullscreen && window_corner_radius > 0.0;
-        let radius = px(window_corner_radius);
-
         let p = SemanticPalette::from_context(cx);
 
         let sb_bounds = self.status_bar_bounds.clone();
@@ -1483,9 +1477,7 @@ impl Render for StatusBar {
                 .absolute()
                 .size_full(),
             )
-            .when(has_rounded_corners, |d| {
-                d.rounded_bl(radius).rounded_br(radius)
-            })
+            .rounded(RADIUS_CARD)
             .child(left_area)
             .child(right_area)
             .when_some(drag_overlay, |el, d| el.child(d))

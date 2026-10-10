@@ -223,6 +223,18 @@ pub struct WindowView {
     pub(crate) allow_force_quit: bool,
     /// Whether the window/app is currently in a locked state (screen lock).
     pub(crate) is_locked: bool,
+    /// Whether the status bar is currently hovered (for AutoHide mode).
+    pub(crate) status_bar_hovered: bool,
+    /// Delayed task to smoothly hide the status bar after mouse leaves.
+    pub(crate) status_bar_hide_task: Option<gpui::Task<()>>,
+    /// Status bar slide animation progress (0.0 = hidden, 1.0 = visible).
+    pub(crate) status_bar_anim_progress: f32,
+    /// Target animation progress.
+    pub(crate) status_bar_anim_target: f32,
+    /// Animation sequence counter to cancel obsolete frames.
+    pub(crate) status_bar_anim_seq: u64,
+    /// Background animation task for status bar slide.
+    pub(crate) status_bar_anim_task: Option<gpui::Task<()>>,
 }
 
 impl WindowView {
@@ -703,6 +715,18 @@ impl WindowView {
             initial_focus_done: false,
             allow_force_quit: false,
             is_locked: false,
+            status_bar_hovered: false,
+            status_bar_hide_task: None,
+            status_bar_anim_progress: match app_settings.status_bar_mode {
+                velowork_workspace::settings::StatusBarMode::Always => 1.0,
+                _ => 0.0,
+            },
+            status_bar_anim_target: match app_settings.status_bar_mode {
+                velowork_workspace::settings::StatusBarMode::Always => 1.0,
+                _ => 0.0,
+            },
+            status_bar_anim_seq: 0,
+            status_bar_anim_task: None,
         };
 
         // Slice 07 cri 7: persist OS bounds back into this window's
