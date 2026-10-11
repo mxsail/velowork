@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.14] - 2026-10-11
+
+### Added / 新增
+- **滚动边缘自适应平滑淡出组件 (Scroll Fade Edge Component)**：
+  - **多面板全面接入**：会话树（Session Panel）、服务（Services）、隧道（Tunnels）、快捷命令（Quick Commands）、AI 助手聊天记录（AI Assistant）及通用虚拟列表（VirtualList）全面接入平滑滚动边缘淡出，向上/向下滚动时内容优雅融入背景。
+  - **终端视口历史回溯渐变**：终端主视口（TerminalContent）在向上回溯历史日志时，自动呈现顶部与底部平滑消融渐变，并自动抵消字符网格整除留白余量（Grid Bottom Inset）。
+  *(Reusable ScrollFade component integrated across panels and terminal viewport with smooth easing curves).*
+
+### Improved / 优化
+- **三段连续缓动切片架构 (3-Contiguous Easing Slices)**：
+  - 针对 GPUI 原生双 Stop 限制，采用三段连续几何切片（$35\% + 35\% + 30\%$）拟合平滑缓动曲线，端点连续且在内容端一阶导数平缓归零，消除传统线性插值的折痕与 Mach Band 视觉效应。
+  *(Multi-slice easing curve eliminating linear interpolation creases).*
+
+### Fixed / 修复
+- **半透明窗口二次 Alpha 复合防护 (Alpha Compounding Fallback)**：
+  - 解决窗口透明度低于 100%（如 46% 等半透明/毛玻璃模式）时，渐变遮罩因二次 Alpha 复合在接壤处产生明暗切边的问题。当检测到窗口非实心背景时，自动静默关闭遮罩层，确保毛玻璃通透无瑕、零矩形色块。
+  *(Gracefully disable scroll fade overlay when background opacity is under 100% to prevent alpha compounding seams).*
+
 ## [0.1.0-beta.13] - 2026-10-09
 
 ### Added / 新增
