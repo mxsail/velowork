@@ -2142,6 +2142,7 @@ impl Render for TunnelsPanel {
                                     )),
                             ),
                     )
+                    .child(velowork_ui::ScrollFade::vertical(&self.tunnel_scroll_handle, surface_bg(t.bg_panel, cx)))
                     .child(
                         div()
                             .absolute()

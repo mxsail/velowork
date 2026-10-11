@@ -43,6 +43,7 @@ use velowork_ui::input::{InputEvent, InputState};
 use velowork_ui::overlay_registry::OverlayRegistry;
 use velowork_ui::radio::{RadioGroup, RadioMode, RadioOption};
 use velowork_ui::simple_input::{InputFocusedEvent, SimpleInput, SimpleInputState};
+use velowork_ui::ScrollFade;
 use velowork_ui::theme::{surface_bg, theme};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::tokens::{
@@ -1087,6 +1088,7 @@ impl CommandsPanel {
                                                 })
                                             }),
                                     )
+                                    .child(ScrollFade::vertical(&self.sessions_scroll_handle, surface_bg(t.bg_secondary, cx)))
                                     .child(
                                         div()
                                             .absolute()
@@ -1687,6 +1689,7 @@ impl CommandsPanel {
                                                 })
                                             }),
                                     )
+                                    .child(ScrollFade::vertical(&self.sessions_scroll_handle, surface_bg(t.bg_secondary, cx)))
                                     .child(
                                         div()
                                             .absolute()
@@ -2216,6 +2219,7 @@ impl Render for CommandsPanel {
                                                 )
                                             }),
                                     )
+                                    .child(ScrollFade::vertical(&self.sessions_scroll_handle, surface_bg(t.bg_secondary, cx)))
                                     .child(
                                         div()
                                             .absolute()

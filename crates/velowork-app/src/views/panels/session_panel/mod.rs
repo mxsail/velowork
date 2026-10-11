@@ -36,6 +36,7 @@ use velowork_ui::button::{button, button_primary};
 use velowork_ui::h_flex;
 use velowork_ui::menu::{ContextMenu, PopupMenu, PopupMenuItem};
 use velowork_ui::overlay_registry::OverlayRegistry;
+use velowork_ui::ScrollFade;
 use velowork_ui::scrollable::{ScrollableElement, Scrollbar};
 use velowork_ui::tooltip::{Tooltip, TooltipDirection};
 use velowork_workspace::focus::FocusManager;
@@ -9024,6 +9025,7 @@ impl Render for SessionPanel {
                                     ))
                             }),
                     )
+                    .child(ScrollFade::vertical(&self.tree_scroll_handle, surface_bg(t.bg_panel, cx)))
                     .child(
                         div()
                             .absolute()

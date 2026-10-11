@@ -1903,7 +1903,8 @@ impl Render for ServiceMonitorPanel {
                                         this.drop_node_to_root(drag, cx);
                                     })),
                             ),
-                    ),
+                    )
+                    .child(velowork_ui::ScrollFade::vertical(&self.service_scroll_handle, surface_bg(t.bg_panel, cx))),
             )
     }
 }

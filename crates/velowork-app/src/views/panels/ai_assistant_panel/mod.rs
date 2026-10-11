@@ -38,7 +38,7 @@ use velowork_ui::tokens::{
     ui_text_xs, use_custom_markdown_font, use_custom_ui_font,
 };
 use velowork_ui::tooltip::Tooltip;
-use velowork_ui::{Button, ProgressRing, button_primary, format_token_count, h_flex, v_flex};
+use velowork_ui::{Button, ProgressRing, ScrollFade, button_primary, format_token_count, h_flex, v_flex};
 use velowork_workspace::focus::FocusManager;
 use velowork_workspace::repositories::AiConversationRow;
 use velowork_workspace::settings::AiModelConfig;
@@ -5863,6 +5863,7 @@ impl AiAssistantPanel {
                                         ),
                                 ),
                         )
+                        .child(ScrollFade::vertical(&self.list_state, surface_bg(t.bg_panel, cx)))
                         .child(
                             div()
                                 .absolute()

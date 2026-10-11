@@ -222,6 +222,7 @@ where
         .min_h(px(0.0))
         .min_w(px(0.0))
         .child(list)
+        .child(crate::ScrollFade::vertical_themed(scroll_handle))
         .child(
             div()
                 .absolute()

@@ -2167,6 +2167,7 @@ impl Render for QuickCommandsPanel {
                                     })),
                             ),
                     )
+                    .child(velowork_ui::ScrollFade::vertical(&self.qc_scroll_handle, surface_bg(t.bg_panel, cx)))
                     .child(
                         div()
                             .absolute()

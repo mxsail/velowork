@@ -1042,7 +1042,132 @@ impl Render for TerminalContent {
                                     .with_font_family(effective_config.font_family.clone())
                                     .with_font_size(effective_config.font_size)
                                     .with_color_scheme(effective_config.color_scheme.clone()),
-                            ),
+                            )
+                            .child({
+                                let (total_lines, visible_lines, display_offset) = terminal.scroll_info();
+                                let history_size = total_lines.saturating_sub(visible_lines);
+                                let can_scroll_up = (display_offset as usize) < history_size;
+                                let can_scroll_down = display_offset > 0;
+                                let global_op = velowork_ui::theme::bg_opacity(cx);
+                                if global_op < 1.0 {
+                                    div()
+                                } else {
+                                    let base_hsla: Hsla = rgb(effective_bg).into();
+                                    let a0 = 1.0;
+                                    let a1 = 0.45;
+                                    let a2 = 0.10;
+                                    let a3 = 0.0;
+                                    let fade_size = px(42.0);
+                                    let h0 = fade_size * 0.35;
+                                    let h1 = fade_size * 0.35;
+                                    let h2 = fade_size - h0 - h1;
+
+                                    // 计算终端字符网格实际渲染的底部偏移，消除由于行高整数整除产生的底部留白余量
+                                    let font_sz = effective_config.font_size * zoom_level * velowork_ui::tokens::ui_scale_factor(cx);
+                                    let lh = font_sz * render_settings.line_height;
+                                    let grid_bottom_inset = if let Some(bounds) = self.element_bounds {
+                                        if lh > 0.0 {
+                                            let avail_h = f32::from(bounds.size.height);
+                                            let rows = ((avail_h - 0.5) / lh).floor().max(1.0);
+                                            let grid_h = rows * lh;
+                                            px((avail_h - grid_h).max(0.0))
+                                        } else {
+                                            px(0.0)
+                                        }
+                                    } else {
+                                        px(0.0)
+                                    };
+
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .right_0()
+                                        .bottom_0()
+                                        .when(can_scroll_up, |el| {
+                                            el.child(
+                                                div()
+                                                    .absolute()
+                                                    .top_0()
+                                                    .left_0()
+                                                    .right_0()
+                                                    .h(h0)
+                                                    .bg(linear_gradient(
+                                                        180.0,
+                                                        linear_color_stop(Hsla { a: a0, ..base_hsla }, 0.0),
+                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 1.0),
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .absolute()
+                                                    .top(h0)
+                                                    .left_0()
+                                                    .right_0()
+                                                    .h(h1)
+                                                    .bg(linear_gradient(
+                                                        180.0,
+                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 0.0),
+                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 1.0),
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .absolute()
+                                                    .top(h0 + h1)
+                                                    .left_0()
+                                                    .right_0()
+                                                    .h(h2)
+                                                    .bg(linear_gradient(
+                                                        180.0,
+                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 0.0),
+                                                        linear_color_stop(Hsla { a: a3, ..base_hsla }, 1.0),
+                                                    )),
+                                            )
+                                        })
+                                        .when(can_scroll_down, |el| {
+                                            el.child(
+                                                div()
+                                                    .absolute()
+                                                    .bottom(grid_bottom_inset)
+                                                    .left_0()
+                                                    .right_0()
+                                                    .h(h0)
+                                                    .bg(linear_gradient(
+                                                        0.0,
+                                                        linear_color_stop(Hsla { a: a0, ..base_hsla }, 0.0),
+                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 1.0),
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .absolute()
+                                                    .bottom(grid_bottom_inset + h0)
+                                                    .left_0()
+                                                    .right_0()
+                                                    .h(h1)
+                                                    .bg(linear_gradient(
+                                                        0.0,
+                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 0.0),
+                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 1.0),
+                                                    )),
+                                            )
+                                            .child(
+                                                div()
+                                                    .absolute()
+                                                    .bottom(grid_bottom_inset + h0 + h1)
+                                                    .left_0()
+                                                    .right_0()
+                                                    .h(h2)
+                                                    .bg(linear_gradient(
+                                                        0.0,
+                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 0.0),
+                                                        linear_color_stop(Hsla { a: a3, ..base_hsla }, 1.0),
+                                                    )),
+                                            )
+                                        })
+                                }
+                            }),
                     )
             })
             .child(self.scrollbar.clone())
