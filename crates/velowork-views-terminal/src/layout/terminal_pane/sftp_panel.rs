@@ -16,11 +16,11 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use velowork_core::theme::ThemeColors;
 use velowork_i18n::i18n;
 use velowork_terminal::TerminalsRegistry;
 use velowork_terminal::backend::TerminalBackend;
 use velowork_ui::button::{button, button_primary};
+use velowork_ui::checkbox::Checkbox;
 use velowork_ui::confirm_dialog::{ConfirmDialog, ConfirmDialogEvent};
 use velowork_ui::context_menu_backdrop::context_menu_backdrop;
 use velowork_ui::h_flex;
@@ -30,15 +30,18 @@ use velowork_ui::menu::{
     context_menu_panel, menu_item, menu_item_conditional, menu_item_conditional_with_shortcut,
     menu_item_with_shortcut, menu_separator,
 };
+use velowork_ui::Cancel as UiCancel;
+use crate::actions::Cancel as TermCancel;
 use velowork_ui::overlay::{modal_backdrop, modal_content, modal_header};
 use velowork_ui::overlay_registry::OverlayRegistry;
+use velowork_ui::radio::{RadioGroup, RadioMode, RadioOption};
 use velowork_ui::scrollable::ScrollableElement;
 use velowork_ui::simple_input::{
-    InputChangedEvent, SimpleInput, SimpleInputState,
+    InputChangedEvent, InputEvent as SimpleInputEvent, SimpleInput, SimpleInputState,
 };
 use velowork_ui::theme::{theme, surface_bg_t, with_alpha};
 use velowork_ui::design::semantic::SemanticPalette;
-use velowork_ui::tokens::{ui_font_family, ui_text_md, ui_text_ms, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, RADIUS_MD, ICON_SM, ICON_STD};
+use velowork_ui::tokens::{ui_font_family, ui_text_md, ui_text_ms, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, ICON_STD};
 use velowork_ui::syntax::map_extension_to_syntax;
 use velowork_ui::virtual_list::{ListSelection, scroll_to_row, virtual_list};
 use velowork_workspace::focus::FocusManager;
@@ -197,15 +200,22 @@ pub struct SftpMoveState {
     pub address_input: Entity<SimpleInputState>,
 }
 
+/// Type of link to create in the SFTP panel.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SftpLinkType {
+    Symlink,
+    Hardlink,
+}
+
 /// "New Link" dialog state (centered modal).
 #[derive(Clone, Debug)]
 pub struct SftpLinkState {
+    pub link_type: SftpLinkType,
     pub name_input: Entity<SimpleInputState>,
     pub target_input: Entity<SimpleInputState>,
 }
 
-/// "Properties" snapshot (centered modal). `ctime` is `None` because the SFTP
-/// protocol does not expose file creation time.
+/// "Properties" snapshot (centered modal).
 #[derive(Clone, Debug)]
 pub struct SftpPropertiesState {
     pub name: String,
@@ -213,7 +223,7 @@ pub struct SftpPropertiesState {
     pub path: String,
     pub size: u64,
     pub mtime: u32,
-    pub ctime: Option<u32>,
+    pub focus_handle: FocusHandle,
 }
 
 /// Centered modal kinds for the SFTP file manager.
@@ -298,6 +308,7 @@ pub struct BottomPanel {
     /// Used to auto-focus the first input of a freshly opened dialog so it is
     /// immediately editable (mirrors `AddProjectDialog`'s focus-on-open pattern).
     dialog_focus_target: Option<Entity<SimpleInputState>>,
+    dialog_focus_handle_target: Option<FocusHandle>,
     dialog_focus_pending: bool,
     /// When set, the panel's own `focus_handle` is refocused on the next render.
     /// Used to restore keyboard navigation after an inline rename is committed or
@@ -440,6 +451,7 @@ impl BottomPanel {
             inline_rename: None,
             focus_handle: cx.focus_handle(),
             dialog_focus_target: None,
+            dialog_focus_handle_target: None,
             dialog_focus_pending: false,
             focus_self_pending: false,
             active_tab: BottomPanelTab::Sftp,
@@ -1253,6 +1265,13 @@ impl BottomPanel {
             }
         })
         .detach();
+        // 按 Esc 键快速关闭弹窗。
+        cx.subscribe(&name_input, |this, _, event: &SimpleInputEvent, cx| {
+            if let SimpleInputEvent::PressEscape = event {
+                this.close_active_dialog(cx);
+            }
+        })
+        .detach();
         let default_mode = if is_dir {
             Self::parse_mode_string(&velowork_app_core::settings::settings(cx).sftp_default_dir_mode)
         } else {
@@ -1674,6 +1693,9 @@ impl BottomPanel {
     fn close_active_dialog(&mut self, cx: &mut Context<Self>) {
         if self.active_dialog.is_some() {
             self.active_dialog = None;
+            self.dialog_focus_target = None;
+            self.dialog_focus_handle_target = None;
+            self.focus_self_pending = true;
             self.focus_manager.update(cx, |fm, cx| {
                 self.workspace.update(cx, |ws, cx| {
                     ws.restore_focused_terminal(fm, cx);
@@ -1686,6 +1708,9 @@ impl BottomPanel {
     fn close_modal(&mut self, cx: &mut Context<Self>) {
         if self.modal.is_some() {
             self.modal = None;
+            self.dialog_focus_target = None;
+            self.dialog_focus_handle_target = None;
+            self.focus_self_pending = true;
             self.focus_manager.update(cx, |fm, cx| {
                 self.workspace.update(cx, |ws, cx| {
                     ws.restore_focused_terminal(fm, cx);
@@ -1914,6 +1939,12 @@ impl BottomPanel {
                 .placeholder("Target directory...")
                 .default_value(current.clone())
         });
+        cx.subscribe(&address_input, |this, _, event: &SimpleInputEvent, cx| {
+            if let SimpleInputEvent::PressEscape = event {
+                this.close_modal(cx);
+            }
+        })
+        .detach();
         self.modal = Some(SftpModal::Move(SftpMoveState {
             idx,
             old_path,
@@ -2047,11 +2078,26 @@ impl BottomPanel {
         .detach();
     }
 
-    // ─── New Link (symlink) ────────────────────────────────────────────────────
+    // ─── New Link (symlink / hardlink) ────────────────────────────────────────
     fn open_link_dialog(&mut self, cx: &mut Context<Self>) {
-        let name_input = cx.new(|cx| SimpleInputState::new(cx).placeholder("Link name..."));
-        let target_input = cx.new(|cx| SimpleInputState::new(cx).placeholder("Target path..."));
+        let name_placeholder = i18n!(cx, "sftp.dialog.link_name_placeholder");
+        let target_placeholder = i18n!(cx, "sftp.dialog.link_target_placeholder");
+        let name_input = cx.new(|cx| SimpleInputState::new(cx).placeholder(name_placeholder));
+        let target_input = cx.new(|cx| SimpleInputState::new(cx).placeholder(target_placeholder));
+        cx.subscribe(&name_input, |this, _, event: &SimpleInputEvent, cx| {
+            if let SimpleInputEvent::PressEscape = event {
+                this.close_modal(cx);
+            }
+        })
+        .detach();
+        cx.subscribe(&target_input, |this, _, event: &SimpleInputEvent, cx| {
+            if let SimpleInputEvent::PressEscape = event {
+                this.close_modal(cx);
+            }
+        })
+        .detach();
         self.modal = Some(SftpModal::Link(SftpLinkState {
+            link_type: SftpLinkType::Symlink,
             name_input: name_input.clone(),
             target_input,
         }));
@@ -2066,7 +2112,7 @@ impl BottomPanel {
     }
 
     fn submit_link(&mut self, cx: &mut Context<Self>) {
-        let (sftp, link_path, target_path) = match &self.modal {
+        let (sftp, link_type, link_path, target_path, name) = match &self.modal {
             Some(SftpModal::Link(s)) => {
                 let name = s.name_input.read(cx).value().trim().to_string();
                 let target = s.target_input.read(cx).value().trim().to_string();
@@ -2079,20 +2125,51 @@ impl BottomPanel {
                         SftpConnectionState::Connected { conn, .. } => conn.sftp.clone(),
                         _ => return,
                     },
+                    s.link_type,
                     join_path(&dir, &name),
                     target,
+                    name,
                 )
             }
             _ => return,
         };
         cx.spawn(async move |this: WeakEntity<BottomPanel>, cx| {
-            // symlink(linkpath, targetpath): create `link_path` pointing at `target_path`.
-            let res = run_in_tokio(async move { sftp.symlink(link_path, target_path).await }).await;
+            let res: Result<(), String> = run_in_tokio(async move {
+                match link_type {
+                    SftpLinkType::Symlink => {
+                        // symlink(linkpath, targetpath): create `link_path` pointing at `target_path`.
+                        sftp.symlink(link_path, target_path)
+                            .await
+                            .map_err(|e| e.to_string())
+                    }
+                    SftpLinkType::Hardlink => {
+                        // hardlink(oldpath, newpath): create `link_path` (newpath) pointing at `target_path` (oldpath).
+                        match sftp.hardlink(target_path, link_path).await {
+                            Ok(true) => Ok(()),
+                            Ok(false) => Err("hardlink_extension_unsupported".to_string()),
+                            Err(e) => Err(e.to_string()),
+                        }
+                    }
+                }
+            })
+            .await;
             let _ = this.update(cx, |this, cx| {
-                if res.is_ok() {
-                    this.close_modal(cx);
-                    this.context_menu = None;
-                    this.refresh(cx);
+                match res {
+                    Ok(()) => {
+                        this.close_modal(cx);
+                        this.context_menu = None;
+                        this.refresh(cx);
+                    }
+                    Err(err_msg) => {
+                        let msg = if err_msg == "hardlink_extension_unsupported" {
+                            i18n!(cx, "sftp.dialog.hardlink_unsupported")
+                        } else {
+                            i18n!(cx, "sftp.dialog.create_failed")
+                                .replace("{name}", &name)
+                                .replace("{error}", &err_msg)
+                        };
+                        velowork_workspace::toast::ToastManager::error(msg, cx);
+                    }
                 }
             });
         })
@@ -2188,26 +2265,44 @@ impl BottomPanel {
 
     // ─── Properties ────────────────────────────────────────────────────────────
     fn show_properties_of(&mut self, idx: usize, cx: &mut Context<Self>) {
-        let info = match self.abs_path(idx) {
-            Some((path, is_dir, is_parent)) => {
-                let (name, size, mtime) = if is_parent {
-                    ("..".to_string(), 0, 0)
-                } else {
-                    let f = &self.filtered_files()[idx - 1];
-                    (f.name.clone(), f.size, f.mtime)
-                };
-                SftpPropertiesState {
-                    name,
-                    is_dir,
-                    path,
-                    size,
-                    mtime,
-                    ctime: None,
+        let (name, is_dir, path, size, mtime) = if idx == 0 {
+            let dir = self.current_dir();
+            let display_name = if dir == "/" || dir.is_empty() {
+                "/".to_string()
+            } else {
+                dir.trim_end_matches('/')
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&dir)
+                    .to_string()
+            };
+            (display_name, true, dir, 0, 0)
+        } else {
+            match self.abs_path(idx) {
+                Some((path, _is_dir, is_parent)) => {
+                    if is_parent {
+                        ("..".to_string(), true, path, 0, 0)
+                    } else {
+                        let f = &self.filtered_files()[idx - 1];
+                        (f.name.clone(), f.is_dir, path, f.size, f.mtime)
+                    }
                 }
+                None => return,
             }
-            None => return,
         };
-        self.modal = Some(SftpModal::Properties(info));
+
+        let target_path = path.clone();
+        self.modal = Some(SftpModal::Properties(SftpPropertiesState {
+            name,
+            is_dir,
+            path,
+            size,
+            mtime,
+            focus_handle: self.focus_handle.clone(),
+        }));
+        self.dialog_focus_target = None;
+        self.dialog_focus_handle_target = None;
+        self.focus_self_pending = true;
         self.context_menu = None;
         self.focus_manager.update(cx, |fm, cx| {
             self.workspace.update(cx, |ws, cx| {
@@ -2215,6 +2310,29 @@ impl BottomPanel {
             });
         });
         cx.notify();
+
+        if let SftpConnectionState::Connected { conn, .. } = &self.connection_state {
+            let sftp = conn.sftp.clone();
+            cx.spawn(async move |this: WeakEntity<BottomPanel>, cx| {
+                let meta_res = run_in_tokio(async move {
+                    sftp.metadata(target_path).await
+                }).await;
+                if let Ok(meta) = meta_res {
+                    let _ = this.update(cx, |this, cx| {
+                        if let Some(SftpModal::Properties(ref mut p)) = this.modal {
+                            if let Some(m) = meta.mtime {
+                                p.mtime = m;
+                            }
+                            if let Some(sz) = meta.size {
+                                p.size = sz;
+                            }
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .detach();
+        }
     }
 
     fn trigger_upload(&mut self, cx: &mut Context<Self>) {
@@ -2873,6 +2991,7 @@ impl BottomPanel {
         });
     }
 
+
     /// Download a remote file into a per-connection temp directory and then
     /// open it:
     /// - `use_editor == false` → open with the OS default program
@@ -3110,31 +3229,63 @@ impl BottomPanel {
             .await;
 
             if res {
-                UrlDetector::open_file(&local_display_io, None, None, &opener_io);
-
-                // ── Watch the local temp copy; offer to upload back on save ──
+                // Baseline = state right after the download write, before launching
+                // the external program, to avoid race conditions with fast-opening editors.
                 let watch_local = local_path.clone();
                 let watch_remote = remote_path.clone();
                 let watch_sftp = sftp_for_watch.clone();
+
+                let initial_meta = std::fs::metadata(&watch_local)
+                    .ok()
+                    .map(|m| (m.modified().ok(), m.len()));
+                let initial_fingerprint = compute_file_fingerprint(&watch_local);
+
+                UrlDetector::open_file(&local_display_io, None, None, &opener_io);
+
+                // ── Watch the local temp copy; offer to upload back on save ──
                 cx.spawn(async move |cx| {
-                    // Baseline = state right after the download write, so the
-                    // initial open doesn't count as a "change".
-                    let mut baseline = std::fs::metadata(&watch_local)
-                        .ok()
-                        .map(|m| (m.modified().ok(), m.len()));
+                    let mut baseline_meta = initial_meta;
+                    let mut baseline_fingerprint = initial_fingerprint;
+                    let mut missing_count = 0;
+
                     loop {
                         smol::Timer::after(Duration::from_secs(1)).await;
                         let meta = match std::fs::metadata(&watch_local) {
-                            Ok(m) => m,
-                            Err(_) => break, // temp file removed → stop watching
+                            Ok(m) => {
+                                missing_count = 0;
+                                m
+                            }
+                            Err(_) => {
+                                missing_count += 1;
+                                // Allow up to 5 seconds of transient missing state to tolerate
+                                // atomic save/rename writes by editors like VS Code, Vim, Nano.
+                                if missing_count >= 5 {
+                                    break;
+                                }
+                                continue;
+                            }
                         };
-                        let changed = match baseline {
+
+                        // Check if metadata hints at a potential change
+                        let meta_changed = match baseline_meta {
                             Some((Some(bt), bl)) => {
                                 meta.modified().ok() != Some(bt) || meta.len() != bl
                             }
-                            _ => false,
+                            _ => true,
                         };
-                        if changed {
+
+                        if meta_changed {
+                            // Verify whether content fingerprint ACTUALLY changed to eliminate
+                            // false alarms caused by access-time touches, filesystem flush lags, etc.
+                            let current_fingerprint = compute_file_fingerprint(&watch_local);
+                            if current_fingerprint.is_some() && current_fingerprint == baseline_fingerprint {
+                                // Content is identical! Only metadata touched.
+                                // Silently sync baseline metadata and do NOT prompt.
+                                baseline_meta = Some((meta.modified().ok(), meta.len()));
+                                continue;
+                            }
+
+                            // Content genuinely changed!
                             let dialog_open = panel
                                 .update(cx, |this, _cx| this.confirm_dialog.is_some())
                                 .unwrap_or(false);
@@ -3150,8 +3301,9 @@ impl BottomPanel {
                                     })
                                     .ok();
                             }
-                            // Reset baseline so the same save doesn't re-prompt.
-                            baseline = Some((meta.modified().ok(), meta.len()));
+                            // Reset baselines so this save doesn't re-prompt
+                            baseline_meta = Some((meta.modified().ok(), meta.len()));
+                            baseline_fingerprint = current_fingerprint;
                         }
                     }
                 })
@@ -3384,7 +3536,7 @@ impl BottomPanel {
 
         let card = modal_content("sftp-create-modal", cx)
             .relative()
-            .w(px(320.0))
+            .w(px(380.0))
             .child(modal_header(
                 title,
                 None::<&str>,
@@ -3422,153 +3574,159 @@ impl BottomPanel {
                     )
                     .child(
                         h_flex()
-                            .gap(px(10.0))
+                            .w_full()
+                            .items_center()
                             .child(
                                 div()
-                                    .w(px(50.0))
+                                    .w(px(68.0))
+                                    .flex_shrink_0()
+                                    .whitespace_nowrap()
                                     .text_size(ui_text_md(cx))
                                     .text_color(p.text_muted)
                                     .child(i18n!(cx, "sftp.dialog.owner")),
                             )
-                            .child(checkbox(
-                                "perm-u-r",
-                                dialog.perm_user.0,
-                                i18n!(cx, "sftp.dialog.read"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_user.0 = !d.perm_user.0;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            ))
-                            .child(checkbox(
-                                "perm-u-w",
-                                dialog.perm_user.1,
-                                i18n!(cx, "sftp.dialog.write"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_user.1 = !d.perm_user.1;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            ))
-                            .child(checkbox(
-                                "perm-u-x",
-                                dialog.perm_user.2,
-                                i18n!(cx, "sftp.dialog.execute"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_user.2 = !d.perm_user.2;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            )),
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .justify_between()
+                                    .child(
+                                        Checkbox::new("perm-u-r")
+                                            .checked(dialog.perm_user.0)
+                                            .label(i18n!(cx, "sftp.dialog.read"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_user.0 = !d.perm_user.0;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                    .child(
+                                        Checkbox::new("perm-u-w")
+                                            .checked(dialog.perm_user.1)
+                                            .label(i18n!(cx, "sftp.dialog.write"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_user.1 = !d.perm_user.1;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                    .child(
+                                        Checkbox::new("perm-u-x")
+                                            .checked(dialog.perm_user.2)
+                                            .label(i18n!(cx, "sftp.dialog.execute"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_user.2 = !d.perm_user.2;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    ),
+                            ),
                     )
                     .child(
                         h_flex()
-                            .gap(px(10.0))
+                            .w_full()
+                            .items_center()
                             .child(
                                 div()
-                                    .w(px(50.0))
+                                    .w(px(68.0))
+                                    .flex_shrink_0()
+                                    .whitespace_nowrap()
                                     .text_size(ui_text_md(cx))
                                     .text_color(p.text_muted)
                                     .child(i18n!(cx, "sftp.dialog.group")),
                             )
-                            .child(checkbox(
-                                "perm-g-r",
-                                dialog.perm_group.0,
-                                i18n!(cx, "sftp.dialog.read"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_group.0 = !d.perm_group.0;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            ))
-                            .child(checkbox(
-                                "perm-g-w",
-                                dialog.perm_group.1,
-                                i18n!(cx, "sftp.dialog.write"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_group.1 = !d.perm_group.1;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            ))
-                            .child(checkbox(
-                                "perm-g-x",
-                                dialog.perm_group.2,
-                                i18n!(cx, "sftp.dialog.execute"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_group.2 = !d.perm_group.2;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            )),
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .justify_between()
+                                    .child(
+                                        Checkbox::new("perm-g-r")
+                                            .checked(dialog.perm_group.0)
+                                            .label(i18n!(cx, "sftp.dialog.read"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_group.0 = !d.perm_group.0;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                    .child(
+                                        Checkbox::new("perm-g-w")
+                                            .checked(dialog.perm_group.1)
+                                            .label(i18n!(cx, "sftp.dialog.write"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_group.1 = !d.perm_group.1;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                    .child(
+                                        Checkbox::new("perm-g-x")
+                                            .checked(dialog.perm_group.2)
+                                            .label(i18n!(cx, "sftp.dialog.execute"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_group.2 = !d.perm_group.2;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    ),
+                            ),
                     )
                     .child(
                         h_flex()
-                            .gap(px(10.0))
+                            .w_full()
+                            .items_center()
                             .child(
                                 div()
-                                    .w(px(50.0))
+                                    .w(px(68.0))
+                                    .flex_shrink_0()
+                                    .whitespace_nowrap()
                                     .text_size(ui_text_md(cx))
                                     .text_color(p.text_muted)
                                     .child(i18n!(cx, "sftp.dialog.others")),
                             )
-                            .child(checkbox(
-                                "perm-o-r",
-                                dialog.perm_other.0,
-                                i18n!(cx, "sftp.dialog.read"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_other.0 = !d.perm_other.0;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            ))
-                            .child(checkbox(
-                                "perm-o-w",
-                                dialog.perm_other.1,
-                                i18n!(cx, "sftp.dialog.write"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_other.1 = !d.perm_other.1;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            ))
-                            .child(checkbox(
-                                "perm-o-x",
-                                dialog.perm_other.2,
-                                i18n!(cx, "sftp.dialog.execute"),
-                                &t,
-                                cx.listener(|this, _, _, cx| {
-                                    if let Some(ref mut d) = this.active_dialog {
-                                        d.perm_other.2 = !d.perm_other.2;
-                                        cx.notify();
-                                    }
-                                }),
-                                cx,
-                            )),
+                            .child(
+                                h_flex()
+                                    .flex_1()
+                                    .justify_between()
+                                    .child(
+                                        Checkbox::new("perm-o-r")
+                                            .checked(dialog.perm_other.0)
+                                            .label(i18n!(cx, "sftp.dialog.read"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_other.0 = !d.perm_other.0;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                    .child(
+                                        Checkbox::new("perm-o-w")
+                                            .checked(dialog.perm_other.1)
+                                            .label(i18n!(cx, "sftp.dialog.write"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_other.1 = !d.perm_other.1;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    )
+                                    .child(
+                                        Checkbox::new("perm-o-x")
+                                            .checked(dialog.perm_other.2)
+                                            .label(i18n!(cx, "sftp.dialog.execute"))
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                if let Some(ref mut d) = this.active_dialog {
+                                                    d.perm_other.2 = !d.perm_other.2;
+                                                    cx.notify();
+                                                }
+                                            })),
+                                    ),
+                            ),
                     ),
             )
             .child(
@@ -3595,6 +3753,21 @@ impl BottomPanel {
 
         modal_backdrop("sftp-create-backdrop", &t, cx)
             .items_center()
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_active_dialog(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_active_dialog(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    this.close_active_dialog(cx);
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -3679,6 +3852,21 @@ impl BottomPanel {
 
         modal_backdrop("sftp-rename-backdrop", &t, cx)
             .items_center()
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    this.close_modal(cx);
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -3842,6 +4030,21 @@ impl BottomPanel {
 
         modal_backdrop("sftp-move-backdrop", &t, cx)
             .items_center()
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    this.close_modal(cx);
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -3860,9 +4063,28 @@ impl BottomPanel {
         let p = SemanticPalette::from_theme(&t);
         let title: SharedString = i18n!(cx, "sftp.dialog.new_link").into();
 
+        let link_type = state.link_type;
+
+        let type_switcher = RadioGroup::new("sftp-link-type-radio")
+            .mode(RadioMode::Button)
+            .full_width(true)
+            .options(vec![
+                RadioOption::new(SftpLinkType::Symlink, i18n!(cx, "sftp.dialog.link_type_soft")),
+                RadioOption::new(SftpLinkType::Hardlink, i18n!(cx, "sftp.dialog.link_type_hard")),
+            ])
+            .selected(Some(link_type))
+            .on_change(cx.listener(|this, val: &SftpLinkType, _, cx| {
+                if let Some(SftpModal::Link(ref mut s)) = this.modal {
+                    if s.link_type != *val {
+                        s.link_type = *val;
+                        cx.notify();
+                    }
+                }
+            }));
+
         let card = modal_content("sftp-link-modal", cx)
             .relative()
-            .w(px(360.0))
+            .w(px(380.0))
             .child(modal_header(
                 title,
                 None::<&str>,
@@ -3879,6 +4101,9 @@ impl BottomPanel {
                     .flex_col()
                     .gap(SPACE_SM)
                     .child(
+                        labeled_input(&i18n!(cx, "sftp.dialog.link_type"), &t, cx).child(type_switcher),
+                    )
+                    .child(
                         labeled_input(&i18n!(cx, "sftp.dialog.link_name"), &t, cx).child(
                             SimpleInput::new(&state.name_input).text_size(ui_text_md(cx)),
                         ),
@@ -3887,12 +4112,6 @@ impl BottomPanel {
                         labeled_input(&i18n!(cx, "sftp.dialog.link_target"), &t, cx).child(
                             SimpleInput::new(&state.target_input).text_size(ui_text_md(cx)),
                         ),
-                    )
-                    .child(
-                        div()
-                            .text_size(ui_text_ms(cx))
-                            .text_color(p.text_muted)
-                            .child(i18n!(cx, "sftp.dialog.link_hint")),
                     ),
             )
             .child(
@@ -3919,6 +4138,21 @@ impl BottomPanel {
 
         modal_backdrop("sftp-link-backdrop", &t, cx)
             .items_center()
+            .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    this.close_modal(cx);
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -3940,10 +4174,6 @@ impl BottomPanel {
         } else {
             i18n!(cx, "sftp.props.name")
         };
-        let ctime_str = match state.ctime {
-            Some(c) => format_time(c),
-            None => i18n!(cx, "sftp.props.ctime_na"),
-        };
         let row = |label: &str, value: String| {
             h_flex()
                 .justify_between()
@@ -3964,6 +4194,21 @@ impl BottomPanel {
         };
 
         let card = modal_content("sftp-properties-modal", cx)
+            .track_focus(&state.focus_handle)
+            .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    this.close_modal(cx);
+                }
+            }))
             .relative()
             .w(px(380.0))
             .child(modal_header(
@@ -3988,8 +4233,7 @@ impl BottomPanel {
                     .child(row(
                         &i18n!(cx, "sftp.props.modified"),
                         format_time(state.mtime),
-                    ))
-                    .child(row(&i18n!(cx, "sftp.props.created"), ctime_str)),
+                    )),
             )
             .child(
                 h_flex()
@@ -4008,6 +4252,21 @@ impl BottomPanel {
 
         modal_backdrop("sftp-properties-backdrop", &t, cx)
             .items_center()
+            .track_focus(&state.focus_handle)
+            .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
+                cx.stop_propagation();
+                this.close_modal(cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    this.close_modal(cx);
+                }
+            }))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
@@ -4209,13 +4468,17 @@ impl Render for BottomPanel {
             }
         }
 
-        // Auto-focus the first input of a freshly opened dialog/modal so it is
-        // immediately editable (new file/dir, rename, move, new link).
+        // Auto-focus the first input or card handle of a freshly opened dialog/modal
+        // so it is immediately editable or responsive to Esc (new file/dir, rename, move, new link, properties).
         if self.dialog_focus_pending {
             if let Some(target) = &self.dialog_focus_target {
                 let fh = target.read(cx).focus_handle(cx);
                 if !fh.is_focused(window) {
                     window.focus(&fh, cx);
+                }
+            } else if let Some(target_fh) = &self.dialog_focus_handle_target {
+                if !target_fh.is_focused(window) {
+                    window.focus(target_fh, cx);
                 }
             }
             self.dialog_focus_pending = false;
@@ -4481,6 +4744,32 @@ impl Render for BottomPanel {
         div()
             .id("bottom-panel-root")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
+                if this.inline_rename.is_some() {
+                    this.inline_rename = None;
+                    this.focus_self_pending = true;
+                    cx.notify();
+                } else if this.modal.is_some() || this.active_dialog.is_some() {
+                    this.close_modal(cx);
+                    this.close_active_dialog(cx);
+                } else if !this.selection.is_empty() {
+                    this.selection.clear();
+                    cx.notify();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
+                if this.inline_rename.is_some() {
+                    this.inline_rename = None;
+                    this.focus_self_pending = true;
+                    cx.notify();
+                } else if this.modal.is_some() || this.active_dialog.is_some() {
+                    this.close_modal(cx);
+                    this.close_active_dialog(cx);
+                } else if !this.selection.is_empty() {
+                    this.selection.clear();
+                    cx.notify();
+                }
+            }))
             .on_key_down(cx.listener(|this, event, _, cx| {
                 this.handle_key(event, cx);
             }))
@@ -4874,6 +5163,33 @@ impl Render for BottomPanel {
             .when_some(self.confirm_dialog.clone(), |el, dialog| {
                 let backdrop = modal_backdrop("sftp-confirm-backdrop", &t, cx)
                     .items_center()
+                    .track_focus(&self.focus_handle)
+                    .on_action(cx.listener(|this, _: &UiCancel, window, cx| {
+                        cx.stop_propagation();
+                        if let Some(d) = this.confirm_dialog.as_ref() {
+                            d.update(cx, |d, cx| {
+                                d.cancel(window, cx);
+                            });
+                        }
+                    }))
+                    .on_action(cx.listener(|this, _: &TermCancel, window, cx| {
+                        cx.stop_propagation();
+                        if let Some(d) = this.confirm_dialog.as_ref() {
+                            d.update(cx, |d, cx| {
+                                d.cancel(window, cx);
+                            });
+                        }
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.key.as_str() == "escape" {
+                            cx.stop_propagation();
+                            if let Some(d) = this.confirm_dialog.as_ref() {
+                                d.update(cx, |d, cx| {
+                                    d.cancel(window, cx);
+                                });
+                            }
+                        }
+                    }))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, _, window, cx| {
@@ -4891,51 +5207,40 @@ impl Render for BottomPanel {
     }
 }
 
-fn checkbox(
-    id: impl Into<ElementId>,
-    checked: bool,
-    label: impl Into<SharedString>,
-    t: &ThemeColors,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-    cx: &App,
-) -> impl IntoElement {
-    let id = id.into();
-    let p = SemanticPalette::from_theme(t);
-    h_flex()
-        .id(id)
-        .gap(SPACE_XS)
-        .items_center()
-        .cursor_pointer()
-        .on_click(on_click)
-        .child(
-            div()
-                .w(px(14.0))
-                .h(px(14.0))
-                .border_1()
-                .border_color(p.border_subtle)
-                .rounded(RADIUS_MD)
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(surface_bg_t(if checked {
-                    t.bg_selection
-                } else {
-                    t.bg_primary
-                }, &t))
-                .when(checked, |el| {
-                    el.child(
-                        AppIcon::Check
-                            .size(ICON_SM)
-                            .text_color(p.text_primary),
-                    )
-                }),
-        )
-        .child(
-            div()
-                .text_size(ui_text_md(cx))
-                .text_color(p.text_secondary)
-                .child(label.into()),
-        )
+/// Compute a lightweight 64-bit fingerprint of a file's content to accurately detect
+/// real user saves without false alarms from access time touches or metadata flushes.
+/// For files <= 8MB: reads the full file.
+/// For files > 8MB: reads the head 4MB + tail 4MB and hashes along with total file length.
+fn compute_file_fingerprint(path: &std::path::Path) -> Option<u64> {
+    use std::fs::File;
+    use std::hash::Hasher;
+    use std::io::{Read, Seek, SeekFrom};
+
+    let mut file = File::open(path).ok()?;
+    let meta = file.metadata().ok()?;
+    let len = meta.len();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hasher.write_u64(len);
+
+    const CHUNK_LIMIT: u64 = 8 * 1024 * 1024; // 8MB
+    const SLICE_SIZE: usize = 4 * 1024 * 1024; // 4MB
+
+    if len <= CHUNK_LIMIT {
+        let mut buf = Vec::with_capacity(len as usize);
+        file.read_to_end(&mut buf).ok()?;
+        hasher.write(&buf);
+    } else {
+        let mut head = vec![0u8; SLICE_SIZE];
+        file.read_exact(&mut head).ok()?;
+        hasher.write(&head);
+
+        file.seek(SeekFrom::End(-(SLICE_SIZE as i64))).ok()?;
+        let mut tail = vec![0u8; SLICE_SIZE];
+        file.read_exact(&mut tail).ok()?;
+        hasher.write(&tail);
+    }
+
+    Some(hasher.finish())
 }
 
 fn mode_from_permissions(
