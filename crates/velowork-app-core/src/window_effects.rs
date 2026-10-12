@@ -85,58 +85,63 @@ impl WindowEffectCapabilities {
 
 #[cfg(target_os = "windows")]
 fn detect_windows_material_capabilities() -> (Capability, Capability, Capability) {
-    #[repr(C)]
-    struct OsVersionInfoExW {
-        dw_os_version_info_size: u32,
-        dw_major_version: u32,
-        dw_minor_version: u32,
-        dw_build_number: u32,
-        dw_platform_id: u32,
-        sz_csd_version: [u16; 128],
-        w_service_pack_major: u16,
-        w_service_pack_minor: u16,
-        w_suite_mask: u16,
-        w_product_type: u8,
-        w_reserved: u8,
-    }
+    use std::sync::OnceLock;
+    static CAPABILITIES: OnceLock<(Capability, Capability, Capability)> = OnceLock::new();
 
-    type RtlGetVersionFn = unsafe extern "system" fn(*mut OsVersionInfoExW) -> i32;
+    *CAPABILITIES.get_or_init(|| {
+        #[repr(C)]
+        struct OsVersionInfoExW {
+            dw_os_version_info_size: u32,
+            dw_major_version: u32,
+            dw_minor_version: u32,
+            dw_build_number: u32,
+            dw_platform_id: u32,
+            sz_csd_version: [u16; 128],
+            w_service_pack_major: u16,
+            w_service_pack_minor: u16,
+            w_suite_mask: u16,
+            w_product_type: u8,
+            w_reserved: u8,
+        }
 
-    let build_number = unsafe {
-        use windows::core::PCSTR;
-        use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+        type RtlGetVersionFn = unsafe extern "system" fn(*mut OsVersionInfoExW) -> i32;
 
-        let module_name = PCSTR::from_raw(c"ntdll.dll".as_ptr() as *const u8);
-        if let Ok(ntdll) = GetModuleHandleA(module_name) {
-            let func_name = PCSTR::from_raw(c"RtlGetVersion".as_ptr() as *const u8);
-            if let Some(raw_proc) = GetProcAddress(ntdll, func_name) {
-                let rtl_get_version: RtlGetVersionFn = std::mem::transmute(raw_proc);
-                let mut info = std::mem::zeroed::<OsVersionInfoExW>();
-                info.dw_os_version_info_size = std::mem::size_of::<OsVersionInfoExW>() as u32;
-                if rtl_get_version(&mut info) == 0 {
-                    info.dw_build_number
+        let build_number = unsafe {
+            use windows::core::PCSTR;
+            use windows::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+
+            let module_name = PCSTR::from_raw(c"ntdll.dll".as_ptr() as *const u8);
+            if let Ok(ntdll) = GetModuleHandleA(module_name) {
+                let func_name = PCSTR::from_raw(c"RtlGetVersion".as_ptr() as *const u8);
+                if let Some(raw_proc) = GetProcAddress(ntdll, func_name) {
+                    let rtl_get_version: RtlGetVersionFn = std::mem::transmute(raw_proc);
+                    let mut info = std::mem::zeroed::<OsVersionInfoExW>();
+                    info.dw_os_version_info_size = std::mem::size_of::<OsVersionInfoExW>() as u32;
+                    if rtl_get_version(&mut info) == 0 {
+                        info.dw_build_number
+                    } else {
+                        0
+                    }
                 } else {
                     0
                 }
             } else {
                 0
             }
+        };
+
+        log::info!("[windows-dwm] Detected Windows build number: {}", build_number);
+
+        // Build 22621+: Windows 11 22H2+, native support for Mica, Mica Alt, and Acrylic backdrops
+        if build_number >= 22621 {
+            (Capability::Supported, Capability::Supported, Capability::Supported)
+        } else if build_number >= 17763 {
+            // Windows 10 1809+ / Windows 11 21H2, Acrylic blur via SetWindowCompositionAttribute
+            (Capability::Unsupported, Capability::Unsupported, Capability::Supported)
         } else {
-            0
+            (Capability::Unsupported, Capability::Unsupported, Capability::Unsupported)
         }
-    };
-
-    log::info!("[windows-dwm] Detected Windows build number: {}", build_number);
-
-    // Build 22621+: Windows 11 22H2+, native support for Mica, Mica Alt, and Acrylic backdrops
-    if build_number >= 22621 {
-        (Capability::Supported, Capability::Supported, Capability::Supported)
-    } else if build_number >= 17763 {
-        // Windows 10 1809+ / Windows 11 21H2, Acrylic blur via SetWindowCompositionAttribute
-        (Capability::Unsupported, Capability::Unsupported, Capability::Supported)
-    } else {
-        (Capability::Unsupported, Capability::Unsupported, Capability::Unsupported)
-    }
+    })
 }
 
 /// 合成策略
