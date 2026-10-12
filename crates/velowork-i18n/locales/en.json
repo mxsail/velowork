@@ -957,6 +957,14 @@
     }
   },
   "dialog": {
+    "discard_changes_title": "Discard unsaved changes?",
+    "discard_changes_desc": "You have unsaved changes in this form. Leaving will lose them.",
+    "discard_changes_confirm": "Discard Changes",
+    "discard_changes_cancel": "Keep Editing",
+    "task_running_title": "Task in progress",
+    "task_running_desc": "A background task is currently running. Exiting now may leave data incomplete. Do you want to abort the task?",
+    "task_abort_confirm": "Abort Task",
+    "task_abort_cancel": "Keep Waiting",
     "color_picker": {
       "presets": "Preset Colors",
       "hex_code": "Hex Color Code"
@@ -1253,6 +1261,10 @@
       "failed": "Connection Failed: "
     },
     "dialog": {
+      "discard_create_title": "Discard creation?",
+      "discard_create_desc": "Entered name and permission settings will be lost. Discard anyway?",
+      "discard_link_title": "Discard link creation?",
+      "discard_link_desc": "Entered link settings will be lost. Discard anyway?",
       "create_file": "Create File",
       "name": "Name",
       "dir_name_placeholder": "Directory name",

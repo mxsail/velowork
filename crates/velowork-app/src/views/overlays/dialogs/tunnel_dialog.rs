@@ -90,6 +90,37 @@ pub enum TunnelDialogEvent {
 
 impl EventEmitter<TunnelDialogEvent> for TunnelDialog {}
 
+impl velowork_ui::overlay::DirtyAware for TunnelDialog {
+    fn is_dirty(&self, cx: &App) -> bool {
+        if let Some(ref inp) = self.name_input {
+            if inp.read(cx).text() != self.prefill_name {
+                return true;
+            }
+        }
+        if let Some(ref inp) = self.bind_port_input {
+            if inp.read(cx).text() != self.prefill_bind_port {
+                return true;
+            }
+        }
+        if let Some(ref inp) = self.target_host_input {
+            if inp.read(cx).text() != self.prefill_target_host {
+                return true;
+            }
+        }
+        if let Some(ref inp) = self.target_port_input {
+            if inp.read(cx).text() != self.prefill_target_port {
+                return true;
+            }
+        }
+        if let Some(ref inp) = self.description_input {
+            if inp.read(cx).text() != self.prefill_desc {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl TunnelDialog {
     pub fn new(
         mode: TunnelDialogMode,

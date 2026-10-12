@@ -222,14 +222,14 @@ impl SettingsPanel {
             self.search_dialog_save_focus.clone(),
         ]);
 
-        // Backdrop
+        // Backdrop (Block outside click to avoid accidental dismissal)
         let weak = cx.weak_entity();
         let weak_cancel = weak.clone();
         let weak_save = weak.clone();
         modal_backdrop("search-engine-dialog-backdrop", &t, cx)
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                this.close_search_dialog(Some(window), cx);
-            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
             .tab_cycle(&focus_group)
             .child(
                 modal_content("search-engine-dialog", cx)

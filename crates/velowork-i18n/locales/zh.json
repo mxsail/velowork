@@ -957,6 +957,14 @@
     }
   },
   "dialog": {
+    "discard_changes_title": "放弃未保存的修改？",
+    "discard_changes_desc": "当前表单中有未保存的配置信息，退出将丢失这些修改。",
+    "discard_changes_confirm": "放弃修改",
+    "discard_changes_cancel": "继续编辑",
+    "task_running_title": "任务正在进行中",
+    "task_running_desc": "当前正在执行后台任务，强行退出可能导致数据不完整。确定要中止任务吗？",
+    "task_abort_confirm": "中止任务",
+    "task_abort_cancel": "继续等待",
     "color_picker": {
       "presets": "预设颜色",
       "hex_code": "Hex 颜色代码"
@@ -1253,6 +1261,10 @@
       "failed": "连接失败："
     },
     "dialog": {
+      "discard_create_title": "放弃创建？",
+      "discard_create_desc": "已输入的名称及权限配置将丢失，确定退出吗？",
+      "discard_link_title": "放弃创建链接？",
+      "discard_link_desc": "已输入的链接配置将丢失，确定退出吗？",
       "create_file": "新建文件",
       "name": "名称",
       "dir_name_placeholder": "目录名称",

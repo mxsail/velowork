@@ -40,6 +40,22 @@ pub enum ServiceDialogEvent {
 
 impl EventEmitter<ServiceDialogEvent> for ServiceDialog {}
 
+impl velowork_ui::overlay::DirtyAware for ServiceDialog {
+    fn is_dirty(&self, cx: &App) -> bool {
+        if let Some(ref inp) = self.name_input {
+            if inp.read(cx).text() != self.def.name {
+                return true;
+            }
+        }
+        if let Some(ref inp) = self.alive_input {
+            if inp.read(cx).text() != self.def.alive_command {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 pub struct ServiceDialog {
     mode: ServiceDialogMode,
     def: ServiceDefinition,

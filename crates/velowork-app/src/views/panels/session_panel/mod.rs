@@ -7527,13 +7527,40 @@ impl SessionPanel {
         self.dialog_notify(cx);
     }
 
+    /// 检查当前会话弹窗是否有未保存的修改
+    pub fn is_session_dialog_dirty(&self) -> bool {
+        if let Some(m) = self.ssh_dialog() {
+            return m.is_dirty();
+        }
+        false
+    }
+
     /// 包含窗口物理焦点回溯的弹窗关闭入口：
     /// 优先安全归还历史焦点，若原焦点已失效则兜底回弹至会话树自身。
+    /// 若有未保存内容，则通过 OverlayManager 弹出二次确认框。
     pub fn dialog_request_close_with_window(
         &mut self,
         window: Option<&mut Window>,
         cx: &mut Context<Self>,
     ) {
+        if self.is_session_dialog_dirty() {
+            if let Some(om) = &self.overlay_manager {
+                let this_handle = cx.entity().downgrade();
+                om.update(cx, |om, cx| {
+                    om.show_discard_draft_confirm(
+                        None,
+                        move |_om, cx| {
+                            let _ = this_handle.update(cx, |this, cx| {
+                                this.dialog_request_close(cx);
+                            });
+                        },
+                        cx,
+                    );
+                });
+                return;
+            }
+        }
+
         if let Some(window) = window {
             let mut restored = false;
             if let Some(prev) = self.dialog_previous_focus.take() {
@@ -7689,9 +7716,8 @@ impl SessionPanel {
                 .p(velowork_ui::tokens::SPACE_LG)
                 .on_mouse_down(
                     MouseButton::Left,
-                    cx.listener(|this, _, window, cx| {
+                    cx.listener(|_, _, _, cx| {
                         cx.stop_propagation();
-                        this.dialog_request_close_with_window(Some(window), cx);
                     }),
                 )
                 .child(card_container);
@@ -7704,9 +7730,8 @@ impl SessionPanel {
             .opacity(motion_values.backdrop_opacity)
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, window, cx| {
+                cx.listener(|_, _, _, cx| {
                     cx.stop_propagation();
-                    this.dialog_request_close_with_window(Some(window), cx);
                 }),
             );
 

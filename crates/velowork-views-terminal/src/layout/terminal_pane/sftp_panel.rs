@@ -1265,10 +1265,10 @@ impl BottomPanel {
             }
         })
         .detach();
-        // 按 Esc 键快速关闭弹窗。
+        // 按 Esc 键关闭弹窗（若有未保存输入则二次确认）。
         cx.subscribe(&name_input, |this, _, event: &SimpleInputEvent, cx| {
             if let SimpleInputEvent::PressEscape = event {
-                this.close_active_dialog(cx);
+                this.request_close_active_dialog(cx);
             }
         })
         .detach();
@@ -1690,6 +1690,56 @@ impl BottomPanel {
         None
     }
 
+    fn is_creation_dirty(&self, cx: &Context<Self>) -> bool {
+        if let Some(ref d) = self.active_dialog {
+            let name = d.name_input.read(cx).value().trim().to_string();
+            if !name.is_empty() {
+                return true;
+            }
+            let default_mode = if d.is_dir {
+                Self::parse_mode_string(&velowork_app_core::settings::settings(cx).sftp_default_dir_mode)
+            } else {
+                Self::parse_mode_string(&velowork_app_core::settings::settings(cx).sftp_default_file_mode)
+            };
+            let (def_u, def_g, def_o) = Self::triples_from_mode(default_mode);
+            if d.perm_user != def_u || d.perm_group != def_g || d.perm_other != def_o {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn request_close_active_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.is_creation_dirty(cx) {
+            let title = i18n!(cx, "sftp.dialog.discard_create_title");
+            let message = i18n!(cx, "sftp.dialog.discard_create_desc");
+            let dialog = cx.new(|cx| {
+                ConfirmDialog::new(
+                    cx,
+                    title,
+                    message,
+                    i18n!(cx, "dialog.discard_changes_confirm"),
+                    i18n!(cx, "common.action.cancel"),
+                    true,
+                    self.overlay_registry.clone(),
+                    "sftp-discard-confirm",
+                )
+            });
+            cx.subscribe(&dialog, |this, _dialog, event, cx| {
+                if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
+                    this.close_active_dialog(cx);
+                }
+                this.confirm_dialog = None;
+                cx.notify();
+            })
+            .detach();
+            self.confirm_dialog = Some(dialog);
+            cx.notify();
+        } else {
+            self.close_active_dialog(cx);
+        }
+    }
+
     fn close_active_dialog(&mut self, cx: &mut Context<Self>) {
         if self.active_dialog.is_some() {
             self.active_dialog = None;
@@ -1702,6 +1752,48 @@ impl BottomPanel {
                 });
             });
             cx.notify();
+        }
+    }
+
+    fn is_link_dirty(&self, cx: &Context<Self>) -> bool {
+        if let Some(SftpModal::Link(ref s)) = self.modal {
+            let name = s.name_input.read(cx).value().trim().to_string();
+            let target = s.target_input.read(cx).value().trim().to_string();
+            if !name.is_empty() || !target.is_empty() {
+                return true;
+            }
+        }
+        false
+    }
+
+    fn request_close_modal(&mut self, cx: &mut Context<Self>) {
+        if self.is_link_dirty(cx) {
+            let title = i18n!(cx, "sftp.dialog.discard_link_title");
+            let message = i18n!(cx, "sftp.dialog.discard_link_desc");
+            let dialog = cx.new(|cx| {
+                ConfirmDialog::new(
+                    cx,
+                    title,
+                    message,
+                    i18n!(cx, "dialog.discard_changes_confirm"),
+                    i18n!(cx, "common.action.cancel"),
+                    true,
+                    self.overlay_registry.clone(),
+                    "sftp-discard-confirm",
+                )
+            });
+            cx.subscribe(&dialog, |this, _dialog, event, cx| {
+                if matches!(event, ConfirmDialogEvent::Confirmed { .. }) {
+                    this.close_modal(cx);
+                }
+                this.confirm_dialog = None;
+                cx.notify();
+            })
+            .detach();
+            self.confirm_dialog = Some(dialog);
+            cx.notify();
+        } else {
+            self.close_modal(cx);
         }
     }
 
@@ -2086,13 +2178,13 @@ impl BottomPanel {
         let target_input = cx.new(|cx| SimpleInputState::new(cx).placeholder(target_placeholder));
         cx.subscribe(&name_input, |this, _, event: &SimpleInputEvent, cx| {
             if let SimpleInputEvent::PressEscape = event {
-                this.close_modal(cx);
+                this.request_close_modal(cx);
             }
         })
         .detach();
         cx.subscribe(&target_input, |this, _, event: &SimpleInputEvent, cx| {
             if let SimpleInputEvent::PressEscape = event {
-                this.close_modal(cx);
+                this.request_close_modal(cx);
             }
         })
         .detach();
@@ -3543,7 +3635,7 @@ impl BottomPanel {
                 &t,
                 cx,
                 cx.listener(|this, _, _, cx| {
-                    this.close_active_dialog(cx);
+                    this.request_close_active_dialog(cx);
                 }),
             ))
             .child(
@@ -3739,7 +3831,7 @@ impl BottomPanel {
                     .child(
                         button("cancel-creation-btn", &i18n!(cx, "common.action.cancel"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
-                                this.close_active_dialog(cx);
+                                this.request_close_active_dialog(cx);
                             }),
                         ),
                     )
@@ -3756,22 +3848,22 @@ impl BottomPanel {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
                 cx.stop_propagation();
-                this.close_active_dialog(cx);
+                this.request_close_active_dialog(cx);
             }))
             .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
                 cx.stop_propagation();
-                this.close_active_dialog(cx);
+                this.request_close_active_dialog(cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key.as_str() == "escape" {
                     cx.stop_propagation();
-                    this.close_active_dialog(cx);
+                    this.request_close_active_dialog(cx);
                 }
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.close_active_dialog(cx);
+                cx.listener(|_, _, _, cx| {
+                    cx.stop_propagation();
                 }),
             )
             .child(card)
@@ -4091,7 +4183,7 @@ impl BottomPanel {
                 &t,
                 cx,
                 cx.listener(|this, _, _, cx| {
-                    this.close_modal(cx);
+                    this.request_close_modal(cx);
                 }),
             ))
             .child(
@@ -4124,7 +4216,7 @@ impl BottomPanel {
                     .child(
                         button("link-cancel", &i18n!(cx, "common.action.cancel"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
-                                this.close_modal(cx);
+                                this.request_close_modal(cx);
                             }),
                         ),
                     )
@@ -4141,22 +4233,22 @@ impl BottomPanel {
             .track_focus(&self.focus_handle)
             .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
                 cx.stop_propagation();
-                this.close_modal(cx);
+                this.request_close_modal(cx);
             }))
             .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
                 cx.stop_propagation();
-                this.close_modal(cx);
+                this.request_close_modal(cx);
             }))
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
                 if event.keystroke.key.as_str() == "escape" {
                     cx.stop_propagation();
-                    this.close_modal(cx);
+                    this.request_close_modal(cx);
                 }
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.close_modal(cx);
+                cx.listener(|_, _, _, cx| {
+                    cx.stop_propagation();
                 }),
             )
             .child(card)
@@ -5192,12 +5284,8 @@ impl Render for BottomPanel {
                     }))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, _, window, cx| {
-                            if let Some(d) = this.confirm_dialog.as_ref() {
-                                d.update(cx, |d, cx| {
-                                    d.cancel(window, cx);
-                                });
-                            }
+                        cx.listener(|_, _, _, cx| {
+                            cx.stop_propagation();
                         }),
                     )
                     .child(dialog);

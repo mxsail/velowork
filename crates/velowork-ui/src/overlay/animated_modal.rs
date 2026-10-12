@@ -10,6 +10,7 @@ use gpui::*;
 
 use crate::motion::{DURATION_MODAL_ENTER, DURATION_MODAL_LEAVE, DURATION_MODAL_MORPH, ModalMotionState};
 use crate::overlay::modal::modal_backdrop;
+use crate::overlay::OutsideClickBehavior;
 use crate::theme::theme;
 use crate::design::semantic::SemanticPalette;
 
@@ -44,6 +45,7 @@ pub struct AnimatedModal {
     motion_state: ModalMotionState,
     _anim_task: Option<Task<()>>,
     dismiss_on_click_outside: bool,
+    outside_click_behavior: OutsideClickBehavior,
     focus_handle: FocusHandle,
     animations_enabled: bool,
     alignment: ModalAlignment,
@@ -79,6 +81,7 @@ impl AnimatedModal {
             },
             _anim_task: None,
             dismiss_on_click_outside: true,
+            outside_click_behavior: OutsideClickBehavior::Dismiss,
             focus_handle: cx.focus_handle(),
             animations_enabled,
             alignment: ModalAlignment::default(),
@@ -113,6 +116,18 @@ impl AnimatedModal {
     /// 设置是否允许点击外部遮罩关闭弹窗（默认为 true）。
     pub fn dismiss_on_click_outside(mut self, enabled: bool) -> Self {
         self.dismiss_on_click_outside = enabled;
+        self.outside_click_behavior = if enabled {
+            OutsideClickBehavior::Dismiss
+        } else {
+            OutsideClickBehavior::Block
+        };
+        self
+    }
+
+    /// 设置弹窗外侧点击行为策略。
+    pub fn with_outside_click_behavior(mut self, behavior: OutsideClickBehavior) -> Self {
+        self.outside_click_behavior = behavior;
+        self.dismiss_on_click_outside = matches!(behavior, OutsideClickBehavior::Dismiss);
         self
     }
 
@@ -384,12 +399,22 @@ impl Render for AnimatedModal {
         let mut backdrop = modal_backdrop("animated-modal-backdrop", &t, cx)
             .opacity(motion_values.backdrop_opacity);
 
-        if self.dismiss_on_click_outside {
+        let should_dismiss_outside = self.dismiss_on_click_outside
+            && self.outside_click_behavior == OutsideClickBehavior::Dismiss;
+
+        if should_dismiss_outside {
             backdrop = backdrop.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     cx.stop_propagation();
                     this.request_close(cx);
+                }),
+            );
+        } else {
+            backdrop = backdrop.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _, _, cx| {
+                    cx.stop_propagation();
                 }),
             );
         }
@@ -412,12 +437,19 @@ impl Render for AnimatedModal {
             }
         }
 
-        if self.dismiss_on_click_outside {
+        if should_dismiss_outside {
             card_wrapper = card_wrapper.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     cx.stop_propagation();
                     this.request_close(cx);
+                }),
+            );
+        } else {
+            card_wrapper = card_wrapper.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_, _, _, cx| {
+                    cx.stop_propagation();
                 }),
             );
         }

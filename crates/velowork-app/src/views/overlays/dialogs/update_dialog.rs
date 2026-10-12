@@ -46,6 +46,12 @@ impl UpdateDialog {
     }
 
     fn close(&self, cx: &mut Context<Self>) {
+        if let Some(g) = cx.try_global::<GlobalUpdateInfo>() {
+            if matches!(g.0.status(), UpdateStatus::Downloading { .. }) {
+                log::warn!("[UpdateDialog] Close requested while update is downloading; ignoring.");
+                return;
+            }
+        }
         cx.emit(UpdateDialogEvent::Close);
     }
 

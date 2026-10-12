@@ -24,6 +24,7 @@ use crate::views::overlays::settings::settings_panel::{SettingsCategory, Setting
 use crate::views::overlays::dialogs::terminal_color_scheme_dialog::{
     TerminalColorSchemeDialog, TerminalColorSchemeDialogEvent,
 };
+use crate::views::overlays::dialogs::attachment_preview_dialog::AttachmentPreviewDialog;
 use crate::views::overlays::dialogs::update_dialog::{UpdateDialog, UpdateDialogEvent};
 use crate::views::overlays::dialogs::about_dialog::{AboutDialog, AboutDialogEvent};
 use crate::views::overlays::dialogs::help_dialog::{HelpDialog, HelpDialogEvent};
@@ -80,7 +81,7 @@ use crate::workspace::requests::SidebarRequest;
 use crate::workspace::state::{WindowId, Workspace};
 
 // Re-export generic overlay utilities from velowork-ui
-pub use velowork_ui::overlay::{CloseEvent, OverlaySlot};
+pub use velowork_ui::overlay::{CloseEvent, DirtyAware, OutsideClickBehavior, OverlaySlot};
 pub use velowork_ui::overlay_registry::{OverlayId, OverlayInfo, OverlayRegistry};
 pub use velowork_ui::{open_overlay, toggle_overlay};
 
@@ -594,6 +595,25 @@ impl OverlayManager {
         self.open_modal_with_click_origin(entity, origin, panel_container, None, cx);
     }
 
+fn outside_click_behavior_for_type<T: 'static>() -> OutsideClickBehavior {
+    let tid = std::any::TypeId::of::<T>();
+    if tid == std::any::TypeId::of::<CommandPalette>()
+        || tid == std::any::TypeId::of::<ShellSelectorOverlay>()
+        || tid == std::any::TypeId::of::<ThemeSelector>()
+        || tid == std::any::TypeId::of::<AboutDialog>()
+        || tid == std::any::TypeId::of::<HelpDialog>()
+        || tid == std::any::TypeId::of::<KeybindingsHelp>()
+        || tid == std::any::TypeId::of::<AttachmentPreviewDialog>()
+        || tid == std::any::TypeId::of::<LogSavedDialog>()
+        || tid == std::any::TypeId::of::<LogConsole>()
+        || tid == std::any::TypeId::of::<SettingsPanel>()
+    {
+        OutsideClickBehavior::Dismiss
+    } else {
+        OutsideClickBehavior::Block
+    }
+}
+
     /// Open a modal with explicit origin focus handles and optional explicit click origin coordinate.
     pub fn open_modal_with_click_origin<T: Render + 'static>(
         &mut self,
@@ -611,12 +631,15 @@ impl OverlayManager {
         let is_top_aligned = std::any::TypeId::of::<T>() == std::any::TypeId::of::<CommandPalette>()
             || std::any::TypeId::of::<T>() == std::any::TypeId::of::<ShellSelectorOverlay>();
 
+        let outside_behavior = Self::outside_click_behavior_for_type::<T>();
+
         // Priority: explicit click origin -> recent recorded click within 500ms -> None (keyboard fallback)
         let click_origin = explicit_click_origin.or_else(|| self.consume_click_origin());
 
         let animated = cx.new(|cx| {
             let mut modal = AnimatedModal::new_with_origin(entity.into(), click_origin, cx)
-                .with_animations(enable_animations, cx);
+                .with_animations(enable_animations, cx)
+                .with_outside_click_behavior(outside_behavior);
             if is_top_aligned {
                 modal = modal.align_top(px(80.0));
             }
@@ -698,6 +721,45 @@ impl OverlayManager {
         if let Some(cb) = &self.on_open_commands_with {
             cb(cmd.to_string(), cx);
         }
+    }
+
+    /// 弹出标准“放弃未保存的修改”二级确认对话框。
+    /// - 确认放弃：执行 `on_discard` 闭包并关闭当前表单；
+    /// - 取消放弃（继续编辑）：关闭确认框，恢复焦点至发起源。
+    pub fn show_discard_draft_confirm(
+        &mut self,
+        origin_focus: Option<FocusHandle>,
+        on_discard: impl Fn(&mut Self, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let dialog = cx.new(|cx| {
+            ConfirmDialog::new(
+                cx,
+                i18n!(cx, "dialog.discard_changes_title"),
+                i18n!(cx, "dialog.discard_changes_desc"),
+                i18n!(cx, "dialog.discard_changes_confirm"),
+                i18n!(cx, "dialog.discard_changes_cancel"),
+                true,
+                Some(self.overlay_registry.clone()),
+                "discard-changes-confirm",
+            )
+            .default_button(velowork_ui::confirm_dialog::ConfirmDialogButton::Cancel)
+        });
+
+        let on_discard = Arc::new(on_discard);
+        let on_discard_clone = on_discard.clone();
+        cx.subscribe(&dialog, move |this, _, event: &ConfirmDialogEvent, cx| match event {
+            ConfirmDialogEvent::Confirmed { .. } => {
+                this.close_modal(cx);
+                on_discard_clone(this, cx);
+            }
+            ConfirmDialogEvent::Cancelled => {
+                this.close_modal(cx);
+            }
+        })
+        .detach();
+
+        self.open_modal_with_origin(dialog, origin_focus, None, cx);
     }
 
     /// Get the active modal for rendering.
@@ -896,11 +958,27 @@ impl OverlayManager {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let workspace = self.workspace.clone();
-        let window_id = self.window_id;
-        toggle_overlay!(self, cx, AddProjectDialog, AddProjectDialogEvent, |cx| {
-            AddProjectDialog::new(workspace, window_id, cx)
-        });
+        if self.is_modal::<AddProjectDialog>() {
+            self.close_modal(cx);
+        } else {
+            let workspace = self.workspace.clone();
+            let window_id = self.window_id;
+            let entity = cx.new(|cx| AddProjectDialog::new(workspace, window_id, cx));
+            let entity_clone = entity.clone();
+            cx.subscribe(&entity, move |this, _, event: &AddProjectDialogEvent, cx| {
+                if event.is_close() {
+                    if entity_clone.read(cx).is_dirty(cx) {
+                        this.show_discard_draft_confirm(None, |this, cx| {
+                            this.close_modal(cx);
+                        }, cx);
+                    } else {
+                        this.close_modal(cx);
+                    }
+                }
+            })
+            .detach();
+            self.open_modal(entity, cx);
+        }
     }
 
     /// Toggle import sessions dialog overlay.
@@ -1136,13 +1214,25 @@ impl OverlayManager {
 
     /// Toggle the terminal color scheme manager dialog overlay.
     pub fn toggle_terminal_color_scheme_dialog(&mut self, cx: &mut Context<Self>) {
-        toggle_overlay!(
-            self,
-            cx,
-            TerminalColorSchemeDialog,
-            TerminalColorSchemeDialogEvent,
-            TerminalColorSchemeDialog::new
-        );
+        if self.is_modal::<TerminalColorSchemeDialog>() {
+            self.close_modal(cx);
+        } else {
+            let entity = cx.new(TerminalColorSchemeDialog::new);
+            let entity_clone = entity.clone();
+            cx.subscribe(&entity, move |this, _, event: &TerminalColorSchemeDialogEvent, cx| {
+                if event.is_close() {
+                    if entity_clone.read(cx).is_dirty(cx) {
+                        this.show_discard_draft_confirm(None, |this, cx| {
+                            this.close_modal(cx);
+                        }, cx);
+                    } else {
+                        this.close_modal(cx);
+                    }
+                }
+            })
+            .detach();
+            self.open_modal(entity, cx);
+        }
     }
 
     /// Toggle the log console overlay (live in-app log viewer as a detached window).
@@ -2341,10 +2431,18 @@ impl OverlayManager {
             )
         });
         entity.update(cx, |this, cx| this.setup_selects(cx));
-        cx.subscribe(&entity, |this, _, event: &QuickCommandDialogEvent, cx| {
+        let origin_focus = origin.clone();
+        let entity_clone = entity.clone();
+        cx.subscribe(&entity, move |this, _, event: &QuickCommandDialogEvent, cx| {
             match event {
                 QuickCommandDialogEvent::Close => {
-                    this.close_modal(cx);
+                    if entity_clone.read(cx).is_dirty(cx) {
+                        this.show_discard_draft_confirm(origin_focus.clone(), |this, cx| {
+                            this.close_modal(cx);
+                        }, cx);
+                    } else {
+                        this.close_modal(cx);
+                    }
                 }
                 QuickCommandDialogEvent::Created { id } => {
                     if let Some(cb) = &this.on_qc_created {
@@ -2983,10 +3081,18 @@ impl OverlayManager {
 
         let entity = cx.new(|cx| TunnelDialog::new(mode, Some(self.overlay_registry.clone()), cx));
         entity.update(cx, |this, cx| this.setup_selects(cx));
-        cx.subscribe(&entity, |this, _, event: &TunnelDialogEvent, cx| {
+        let origin_focus = origin.clone();
+        let entity_clone = entity.clone();
+        cx.subscribe(&entity, move |this, _, event: &TunnelDialogEvent, cx| {
             match event {
                 TunnelDialogEvent::Close => {
-                    this.close_modal(cx);
+                    if entity_clone.read(cx).is_dirty(cx) {
+                        this.show_discard_draft_confirm(origin_focus.clone(), |this, cx| {
+                            this.close_modal(cx);
+                        }, cx);
+                    } else {
+                        this.close_modal(cx);
+                    }
                 }
                 TunnelDialogEvent::Saved { .. } => {
                     this.close_modal(cx);
@@ -3039,9 +3145,17 @@ impl OverlayManager {
             this.setup_selects(cx);
             this.refresh_selects(cx);
         });
-        cx.subscribe(&entity, |this, _, event: &ServiceDialogEvent, cx| match event {
+        let origin_focus = origin.clone();
+        let entity_clone = entity.clone();
+        cx.subscribe(&entity, move |this, _, event: &ServiceDialogEvent, cx| match event {
             ServiceDialogEvent::Close => {
-                this.close_modal(cx);
+                if entity_clone.read(cx).is_dirty(cx) {
+                    this.show_discard_draft_confirm(origin_focus.clone(), |this, cx| {
+                        this.close_modal(cx);
+                    }, cx);
+                } else {
+                    this.close_modal(cx);
+                }
             }
             ServiceDialogEvent::Saved { def } => {
                 let store = cx.try_global::<GlobalServiceStore>().map(|s| s.0.clone());

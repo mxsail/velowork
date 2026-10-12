@@ -44,6 +44,34 @@ impl CloseEvent for TerminalColorSchemeDialogEvent {
 
 impl EventEmitter<TerminalColorSchemeDialogEvent> for TerminalColorSchemeDialog {}
 
+impl velowork_ui::overlay::DirtyAware for TerminalColorSchemeDialog {
+    fn is_dirty(&self, cx: &App) -> bool {
+        // If schemes list was modified (added, deleted)
+        if self.custom_schemes.len() != self.initial_custom_schemes.len() {
+            return true;
+        }
+
+        // Check if currently editing a custom scheme whose draft diverges from saved
+        if !self.is_builtin {
+            if let Some(custom) = self
+                .custom_schemes
+                .iter()
+                .find(|c| c.id == self.selected_scheme_id || c.name == self.selected_scheme_id)
+            {
+                let current_name = self.draft_name.read(cx).value();
+                if current_name != custom.name || self.draft_palette != custom.palette {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        }
+
+        // Check if any existing custom scheme in self.custom_schemes differs from initial snapshot
+        self.custom_schemes != self.initial_custom_schemes
+    }
+}
+
 pub struct TerminalColorSchemeDialog {
     focus_handle: FocusHandle,
     /// Currently selected scheme ID or built-in name
@@ -56,6 +84,8 @@ pub struct TerminalColorSchemeDialog {
     draft_palette: TerminalPalette,
     /// List of custom schemes loaded from settings
     custom_schemes: Vec<CustomTerminalColorScheme>,
+    /// Snapshot of custom schemes at open time to detect additions/deletions/edits
+    initial_custom_schemes: Vec<CustomTerminalColorScheme>,
     /// Global active color scheme name from settings
     active_scheme_name: String,
     /// Active color picker popover instance
@@ -118,7 +148,8 @@ impl TerminalColorSchemeDialog {
             is_builtin,
             draft_name,
             draft_palette,
-            custom_schemes,
+            custom_schemes: custom_schemes.clone(),
+            initial_custom_schemes: custom_schemes,
             active_scheme_name,
             active_picker: None,
             editing_color_key: None,

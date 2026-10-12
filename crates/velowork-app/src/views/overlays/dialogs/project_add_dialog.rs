@@ -78,6 +78,10 @@ pub struct AddProjectDialog {
     pending_focus: Option<PendingFocus>,
     selected_icon: AppIcon,
     selected_color: FolderColor,
+    initial_name: String,
+    initial_desc: String,
+    initial_icon: AppIcon,
+    initial_color: FolderColor,
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +91,17 @@ pub enum AddProjectDialogEvent {
 }
 
 impl EventEmitter<AddProjectDialogEvent> for AddProjectDialog {}
+
+impl velowork_ui::overlay::DirtyAware for AddProjectDialog {
+    fn is_dirty(&self, cx: &App) -> bool {
+        let name = self.name_input.read(cx).text().to_string();
+        let desc = self.desc_input.read(cx).text().to_string();
+        name != self.initial_name
+            || desc != self.initial_desc
+            || self.selected_icon != self.initial_icon
+            || self.selected_color != self.initial_color
+    }
+}
 
 
 impl AddProjectDialog {
@@ -212,6 +227,9 @@ impl AddProjectDialog {
             cx.notify();
         }));
 
+        let initial_name = name_input.read(cx).text().to_string();
+        let initial_desc = desc_input.read(cx).text().to_string();
+
         Self {
             workspace,
             window_id,
@@ -228,6 +246,10 @@ impl AddProjectDialog {
             pending_focus: None,
             selected_icon,
             selected_color,
+            initial_name,
+            initial_desc,
+            initial_icon: selected_icon,
+            initial_color: selected_color,
         }
     }
 

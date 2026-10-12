@@ -424,12 +424,12 @@ impl SettingsPanel {
             self.ai_dialog_save_focus.clone(),
         ]);
 
-        // Backdrop
+        // Backdrop (Block outside click to avoid accidental dismissal)
         let _weak = cx.weak_entity();
         modal_backdrop("ai-model-dialog-backdrop", &t, cx)
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
-                this.close_add_model_dialog(Some(window), cx);
-            }))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                cx.stop_propagation();
+            })
             .tab_cycle(&focus_group)
             .child(
                 modal_content("ai-model-dialog", cx)

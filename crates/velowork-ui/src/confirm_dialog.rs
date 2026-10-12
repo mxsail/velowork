@@ -184,7 +184,7 @@ impl ConfirmDialog {
                         id: overlay_id.clone(),
                         bounds: Bounds::default(),
                         secondary_bounds: None,
-                        close_policy: ClosePolicy::ClickOutside,
+                        close_policy: ClosePolicy::Manual,
                         z_index: 2000,
                     },
                     close,

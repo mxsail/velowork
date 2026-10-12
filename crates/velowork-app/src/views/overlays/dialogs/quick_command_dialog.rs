@@ -110,6 +110,24 @@ impl CloseEvent for QuickCommandDialogEvent {
     }
 }
 
+impl velowork_ui::overlay::DirtyAware for QuickCommandDialog {
+    fn is_dirty(&self, cx: &App) -> bool {
+        if let Some(ref name_inp) = self.name_input {
+            let name = name_inp.read(cx).text().to_string();
+            if name != self.prefill_name {
+                return true;
+            }
+        }
+        if let Some(ref content_inp) = self.content_input {
+            let content = content_inp.read(cx).text().to_string();
+            if content != self.prefill_content {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 impl QuickCommandDialog {
     pub fn new(
         mode: QuickCommandDialogMode,
