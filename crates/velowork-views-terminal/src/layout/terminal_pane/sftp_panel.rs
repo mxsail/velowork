@@ -41,7 +41,10 @@ use velowork_ui::simple_input::{
 };
 use velowork_ui::theme::{theme, surface_bg_t, with_alpha};
 use velowork_ui::design::semantic::SemanticPalette;
-use velowork_ui::tokens::{ui_font_family, ui_text_md, ui_text_ms, SPACE_XS, SPACE_SM, SPACE_MD, SPACE_LG, ICON_STD};
+use velowork_ui::tokens::{
+    ui_font_family, ui_text_md, ui_text_ms, DIALOG_FOOTER_HEIGHT, ICON_STD, SPACE_LG, SPACE_MD,
+    SPACE_SM, SPACE_XS,
+};
 use velowork_ui::syntax::map_extension_to_syntax;
 use velowork_ui::virtual_list::{ListSelection, scroll_to_row, virtual_list};
 use velowork_workspace::focus::FocusManager;
@@ -3823,11 +3826,12 @@ impl BottomPanel {
             )
             .child(
                 h_flex()
-                    .p(SPACE_SM)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
+                    .flex_shrink_0()
+                    .h(DIALOG_FOOTER_HEIGHT)
+                    .items_center()
                     .justify_end()
-                    .gap(SPACE_SM)
+                    .px(SPACE_LG)
+                    .gap(SPACE_MD)
                     .child(
                         button("cancel-creation-btn", &i18n!(cx, "common.action.cancel"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
@@ -3922,11 +3926,12 @@ impl BottomPanel {
                 )
                 .child(
                     h_flex()
-                        .p(SPACE_SM)
-                        .border_t_1()
-                        .border_color(p.border_subtle)
+                        .flex_shrink_0()
+                        .h(DIALOG_FOOTER_HEIGHT)
+                        .items_center()
                         .justify_end()
-                        .gap(SPACE_SM)
+                        .px(SPACE_LG)
+                        .gap(SPACE_MD)
                         .child(
                             button("rename-cancel", &i18n!(cx, "common.action.cancel"), &t).on_click(
                                 cx.listener(|this, _, _, cx| {
@@ -4081,11 +4086,12 @@ impl BottomPanel {
                 )
                 .child(
                     h_flex()
-                        .p(SPACE_SM)
-                        .border_t_1()
-                        .border_color(p.border_subtle)
+                        .flex_shrink_0()
+                        .h(DIALOG_FOOTER_HEIGHT)
+                        .items_center()
                         .justify_between()
-                        .gap(SPACE_SM)
+                        .px(SPACE_LG)
+                        .gap(SPACE_MD)
                         .child(
                             div()
                                 .text_size(ui_text_md(cx))
@@ -4098,7 +4104,8 @@ impl BottomPanel {
                         )
                         .child(
                             h_flex()
-                                .gap(SPACE_SM)
+                                .items_center()
+                                .gap(SPACE_MD)
                                 .child(
                                     button("move-cancel", &i18n!(cx, "common.action.cancel"), &t)
                                         .on_click(cx.listener(|this, _, _, cx| {
@@ -4152,7 +4159,7 @@ impl BottomPanel {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let t = theme(cx);
-        let p = SemanticPalette::from_theme(&t);
+        let _p = SemanticPalette::from_theme(&t);
         let title: SharedString = i18n!(cx, "sftp.dialog.new_link").into();
 
         let link_type = state.link_type;
@@ -4208,11 +4215,12 @@ impl BottomPanel {
             )
             .child(
                 h_flex()
-                    .p(SPACE_SM)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
+                    .flex_shrink_0()
+                    .h(DIALOG_FOOTER_HEIGHT)
+                    .items_center()
                     .justify_end()
-                    .gap(SPACE_SM)
+                    .px(SPACE_LG)
+                    .gap(SPACE_MD)
                     .child(
                         button("link-cancel", &i18n!(cx, "common.action.cancel"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
@@ -4329,10 +4337,11 @@ impl BottomPanel {
             )
             .child(
                 h_flex()
-                    .p(SPACE_MD)
-                    .border_t_1()
-                    .border_color(p.border_subtle)
+                    .flex_shrink_0()
+                    .h(DIALOG_FOOTER_HEIGHT)
+                    .items_center()
                     .justify_end()
+                    .px(SPACE_LG)
                     .child(
                         button("props-close", &i18n!(cx, "common.action.close"), &t).on_click(
                             cx.listener(|this, _, _, cx| {
