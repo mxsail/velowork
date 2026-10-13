@@ -107,6 +107,20 @@ pub fn close_all_detached_windows(cx: &mut App) {
 /// `DetachedHost`, `Entity<DetachedTerminalView>` wrapped in `DetachedHost`,
 /// a file/diff viewer, …) is hosted by `DetachedOverlayView`.
 ///
+/// Format window title to ensure a uniform " - Velowork" suffix across all independent windows.
+pub fn format_window_title(sub_title: &str) -> String {
+    let sub = sub_title.trim();
+    if sub.is_empty() || sub == "Velowork" {
+        "Velowork".to_string()
+    } else if sub.ends_with("- Velowork") {
+        sub.to_string()
+    } else {
+        format!("{} - Velowork", sub)
+    }
+}
+
+/// Open an overlay in its own detached window.
+///
 /// `E` is the content's `CloseEvent` type; it must be `DetachedHostCloseEvent`
 /// for content that doesn't emit one (terminals, dock panels).
 pub fn open_detached_overlay<T, E>(
@@ -119,7 +133,7 @@ where
     T: Render + Focusable + EventEmitter<E> + 'static,
     E: CloseEvent + 'static,
 {
-    let title = title.into();
+    let title: SharedString = format_window_title(&title.into()).into();
     // Wrap `on_close` with an atomic flag to guarantee Exactly-Once execution,
     // avoiding duplicate dock insertion if both OS close and programmatic dismiss occur.
     let on_close = opts.on_close.map(|handler| {

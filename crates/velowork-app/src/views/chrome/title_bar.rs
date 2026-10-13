@@ -17,7 +17,7 @@ use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::h_flex;
 use velowork_ui::icon::AppIcon;
 use velowork_ui::tokens::{RADIUS_LG, RADIUS_MD, SPACE_MD, SPACE_SM, SPACE_XS};
-use velowork_workspace::settings::TitlebarStyle;
+use velowork_workspace::settings::{CustomTitlePosition, TitlebarStyle};
 
 /// Helper to construct `(TitlebarOptions, WindowDecorations)` based on user's `TitlebarStyle` preference.
 pub fn window_decorations_and_titlebar(
@@ -124,6 +124,14 @@ impl TitleBar {
             close_handler: None,
             #[cfg(target_os = "linux")]
             should_move: false,
+        }
+    }
+
+    pub fn set_title(&mut self, title: impl Into<SharedString>, cx: &mut Context<Self>) {
+        let new_title = title.into();
+        if self.title != new_title {
+            self.title = new_title;
+            cx.notify();
         }
     }
 
@@ -759,16 +767,29 @@ impl Render for TitleBar {
                     ),
             )
             .child(
-                // Center - App Title
-                div().flex_1().flex().items_center().justify_center().child(
-                    h_flex().gap(SPACE_XS).items_center().child(
-                        div()
-                            .text_size(ui_text(13.0, cx))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(rgb(t.text_primary))
-                            .child(self.title.clone()),
+                // App Title (Positioned according to settings.title_position)
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .when(settings.title_position == CustomTitlePosition::Center, |d| {
+                        d.justify_center()
+                    })
+                    .when(settings.title_position == CustomTitlePosition::Left, |d| {
+                        d.justify_start().pl(SPACE_XS)
+                    })
+                    .when(settings.title_position == CustomTitlePosition::Right, |d| {
+                        d.justify_end().pr(SPACE_XS)
+                    })
+                    .child(
+                        h_flex().gap(SPACE_XS).items_center().child(
+                            div()
+                                .text_size(ui_text(13.0, cx))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(rgb(t.text_primary))
+                                .child(self.title.clone()),
+                        ),
                     ),
-                ),
             )
             .child(
                 // Right side - Window Controls (if Right position)

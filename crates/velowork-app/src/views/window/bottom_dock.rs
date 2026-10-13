@@ -580,9 +580,9 @@ fn spawn_detached_bottom_tab_window(
     let is_sftp = panel_id == "sftp";
 
     let window_title: SharedString = if is_sftp {
-        "SFTP - Detached".into()
+        velowork_i18n::i18n!(cx, "sftp.title").into()
     } else {
-        "Commands - Detached".into()
+        velowork_i18n::i18n!(cx, "commands.title").into()
     };
 
     let reattach_build = {
@@ -801,7 +801,7 @@ fn spawn_detached_bottom_dock_window(
     let reattach_close = reattach_build.clone();
 
     let _ = open_detached_overlay::<DetachedHost<DockPanel>, DetachedHostCloseEvent>(
-        "Detached Panel",
+        velowork_i18n::i18n!(cx, "dock.bottom"),
         move |_window, overlay_registry, cx| {
             let commands_detached = cx.new(|cx| {
                 CommandsPanel::new(

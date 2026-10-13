@@ -449,6 +449,16 @@
       "left": "左侧",
       "right": "右侧"
     },
+    "titlebar_title_position": {
+      "label": "标题对齐方式",
+      "center": "居中对齐",
+      "left": "靠左对齐",
+      "right": "靠右对齐"
+    },
+    "titlebar_show_active_session": {
+      "label": "标题栏显示当前会话名称",
+      "desc": "启用后标题将格式化为“会话名称 - Velowork”，无活动会话时回退为应用名称"
+    },
     "titlebar_height": "标题栏高度 (px)",
     "window_control_button_gap": "控制按钮间距 (px)",
     "window_control_margin": "控制区域边距 (px)",

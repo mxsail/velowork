@@ -798,6 +798,16 @@ impl Render for WindowView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
 
+        // Sync active window title to both TitleBar and OS platform level (Dual-Track Sync)
+        let target_title = self.current_active_window_title(cx);
+        if self.last_window_title != target_title {
+            self.last_window_title = target_title.clone();
+            self.title_bar.update(cx, |tb, cx| {
+                tb.set_title(target_title.clone(), cx);
+            });
+            window.set_window_title(&target_title);
+        }
+
         // Deferred activation of the AI assistant panel with an injected terminal quote.
         // (Panel activation needs a Window, which is only available here in render.)
         if let Some(quote) = self.pending_ai_interpret.take() {

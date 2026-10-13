@@ -1,7 +1,7 @@
 use crate::settings::settings_entity;
 use crate::theme::theme;
 use crate::workspace::settings::{
-    ColorSchema, ColorTheme, CustomTitlebarPosition, CustomTitlebarPreset, StatusBarMode, TabWidthMode, TitlebarStyle,
+    ColorSchema, ColorTheme, CustomTitlePosition, CustomTitlebarPosition, CustomTitlebarPreset, StatusBarMode, TabWidthMode, TitlebarStyle,
 };
 use gpui::prelude::*;
 use gpui::*;
@@ -83,9 +83,19 @@ impl SettingsPanel {
                     cx,
                 ))
                 .child(self.render_titlebar_style_row(s.titlebar_style, cx))
+                .child(self.render_toggle_with_desc(
+                    "titlebar-show-active-session",
+                    &i18n!(cx, "settings.titlebar_show_active_session.label"),
+                    &i18n!(cx, "settings.titlebar_show_active_session.desc"),
+                    s.show_active_session_in_title,
+                    true,
+                    |state, val, cx| state.set_titlebar_show_active_session(val, cx),
+                    cx,
+                ))
                 .when(s.titlebar_style == TitlebarStyle::Custom, |d| {
                     d.child(self.render_titlebar_preset_row(s.titlebar_preset, cx))
                         .child(self.render_titlebar_position_row(s.titlebar_position, cx))
+                        .child(self.render_titlebar_title_position_row(s.title_position, cx))
                         .child(self.render_number_stepper(
                             "titlebar-height",
                             &i18n!(cx, "settings.titlebar_height"),
@@ -421,6 +431,34 @@ impl SettingsPanel {
                 .on_change(move |&pos, _, cx| {
                     settings_entity(cx).update(cx, |state, cx| {
                         state.set_titlebar_position(pos, cx);
+                    });
+                }),
+        )
+    }
+
+    fn render_titlebar_title_position_row(
+        &mut self,
+        current: CustomTitlePosition,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let t = theme(cx);
+        let label = i18n!(cx, "settings.titlebar_title_position.label");
+        let focus_handle = self.get_or_create_radio_focus_handle("titlebar-title-position", cx);
+
+        settings_row("titlebar-title-position".to_string(), &label, &t, cx, true).child(
+            RadioGroup::new("titlebar-title-position-radio")
+                .focus(&focus_handle)
+                .mode(RadioMode::Button)
+                .selected(Some(current))
+                .options(
+                    CustomTitlePosition::all_variants()
+                        .iter()
+                        .map(|&pos| RadioOption::new(pos, i18n!(cx, pos.translation_key())))
+                        .collect(),
+                )
+                .on_change(move |&pos, _, cx| {
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_titlebar_title_position(pos, cx);
                     });
                 }),
         )

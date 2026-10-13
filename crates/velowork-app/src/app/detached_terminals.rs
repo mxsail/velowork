@@ -69,7 +69,7 @@ impl Velowork {
         let term_id_for_close = terminal_id_owned.clone();
 
         let _ = open_detached_overlay::<DetachedHost<DetachedTerminalView>, DetachedHostCloseEvent>(
-            format!("{} - Detached", terminal_name),
+            terminal_name,
             move |_window, _registry, cx| {
                 let inner = cx.new(|cx| {
                     let mut v = DetachedTerminalView::new(

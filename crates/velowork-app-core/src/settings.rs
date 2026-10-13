@@ -5,7 +5,7 @@
 
 use crate::settings_persister::SettingsPersister;
 use crate::workspace::persistence::{AppSettings, get_settings_path, load_settings, save_settings};
-use velowork_workspace::settings::{CustomTitlebarPosition, CustomTitlebarPreset, TitlebarStyle};
+use velowork_workspace::settings::{CustomTitlePosition, CustomTitlebarPosition, CustomTitlebarPreset, TitlebarStyle};
 use gpui::*;
 use velowork_terminal::session_backend::SessionBackend;
 use velowork_terminal::shell_config::ShellType;
@@ -174,6 +174,8 @@ impl SettingsState {
     setting_setter!(set_titlebar_style, titlebar_style, TitlebarStyle);
     setting_setter!(set_titlebar_preset, titlebar_preset, CustomTitlebarPreset);
     setting_setter!(set_titlebar_position, titlebar_position, CustomTitlebarPosition);
+    setting_setter!(set_titlebar_title_position, title_position, CustomTitlePosition);
+    setting_setter!(set_titlebar_show_active_session, show_active_session_in_title, bool);
     setting_setter!(set_titlebar_height, titlebar_height, f32, 20.0, 60.0);
     setting_setter!(set_window_control_button_gap, window_control_button_gap, f32, 0.0, 32.0);
     setting_setter!(set_window_control_margin, window_control_margin, f32, 0.0, 48.0);

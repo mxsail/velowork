@@ -42,6 +42,11 @@ impl WindowView {
     /// project layout. Returns (project_id, terminal_id) or None if no terminal
     /// is focused or the path doesn't lead to a Terminal node with an assigned id.
     pub(super) fn focused_terminal_id(&self, cx: &Context<Self>) -> Option<(String, String)> {
+        self.focused_terminal_id_app(cx)
+    }
+
+    /// Resolve the focused (project_id, terminal_id) using an `&App` reference.
+    pub(super) fn focused_terminal_id_app(&self, cx: &App) -> Option<(String, String)> {
         let state = self.focus_manager.read(cx).focused_terminal_state()?;
         let ws = self.workspace.read(cx);
         let project = ws.project(&state.project_id)?;
@@ -51,6 +56,54 @@ impl WindowView {
             Some((state.project_id, id.clone()))
         } else {
             None
+        }
+    }
+
+    /// Compute the dynamic window title based on current settings and focused session.
+    pub(super) fn current_active_window_title(&self, cx: &App) -> String {
+        let settings = &crate::settings::settings_entity(cx).read(cx).settings;
+        if !settings.show_active_session_in_title {
+            return "Velowork".to_string();
+        }
+
+        let Some(state) = self.focus_manager.read(cx).focused_terminal_state() else {
+            return "Velowork".to_string();
+        };
+
+        let ws = self.workspace.read(cx);
+        let Some(project) = ws.project(&state.project_id) else {
+            return "Velowork".to_string();
+        };
+        let Some(layout) = project.layout.as_ref() else {
+            return "Velowork".to_string();
+        };
+        let Some(LayoutNode::Terminal { terminal_id: Some(terminal_id), shell_type, .. }) = layout.get_at_path(&state.layout_path) else {
+            return "Velowork".to_string();
+        };
+
+        let terminals = self.terminals.lock();
+        let term = terminals.get(terminal_id);
+        let is_remote = shell_type.is_remote() || project.is_remote || self.backend.is_remote();
+        let osc_title = term.and_then(|t| t.title());
+        let session_store = cx.global::<velowork_workspace::stores::GlobalSessionStore>().0.read(cx);
+
+        let base_name = if matches!(shell_type, velowork_core::shell::ShellType::Welcome) {
+            velowork_i18n::i18n!(cx, "welcome.title")
+        } else {
+            velowork_views_terminal::layout::session_labels::terminal_base_name(
+                terminal_id,
+                shell_type,
+                is_remote,
+                osc_title.as_deref(),
+                project,
+                &session_store,
+            )
+        };
+
+        if base_name.trim().is_empty() {
+            "Velowork".to_string()
+        } else {
+            format!("{} - Velowork", base_name)
         }
     }
 

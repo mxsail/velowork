@@ -2072,9 +2072,11 @@ impl SettingsPanel {
                 handles.push(self.get_or_create_toggle_focus_handle("enable-animations", cx));
                 handles.push(self.get_or_create_toggle_focus_handle("color-tinted-bg", cx));
                 handles.push(self.get_or_create_radio_focus_handle("titlebar-style", cx));
+                handles.push(self.get_or_create_toggle_focus_handle("titlebar-show-active-session", cx));
                 if s.titlebar_style == velowork_workspace::settings::TitlebarStyle::Custom {
                     handles.push(self.titlebar_preset_select.read(cx).focus_handle().clone());
                     handles.push(self.get_or_create_radio_focus_handle("titlebar-position", cx));
+                    handles.push(self.get_or_create_radio_focus_handle("titlebar-title-position", cx));
                     if let Some(input) = self.stepper_inputs.get("titlebar-height") {
                         handles.push(input.read(cx).focus_handle(cx));
                     }

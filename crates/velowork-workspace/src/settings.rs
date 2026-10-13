@@ -273,6 +273,35 @@ impl CustomTitlebarPosition {
     }
 }
 
+/// Custom titlebar title alignment position (Center, Left, Right)
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CustomTitlePosition {
+    #[default]
+    Center,
+    Left,
+    Right,
+}
+
+impl CustomTitlePosition {
+    pub fn translation_key(self) -> &'static str {
+        match self {
+            CustomTitlePosition::Center => "settings.titlebar_title_position.center",
+            CustomTitlePosition::Left => "settings.titlebar_title_position.left",
+            CustomTitlePosition::Right => "settings.titlebar_title_position.right",
+        }
+    }
+
+    pub fn all_variants() -> &'static [CustomTitlePosition] {
+        &[
+            CustomTitlePosition::Center,
+            CustomTitlePosition::Left,
+            CustomTitlePosition::Right,
+        ]
+    }
+}
+
+
 /// Status bar display mode (Always, AutoHide, Never)
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -868,6 +897,12 @@ pub struct AppSettings {
     /// Titlebar button position (Auto, Left, Right)
     #[serde(default)]
     pub titlebar_position: CustomTitlebarPosition,
+    /// Titlebar title text alignment position (Center, Left, Right)
+    #[serde(default)]
+    pub title_position: CustomTitlePosition,
+    /// Whether to display the active session name in the main window title
+    #[serde(default = "default_true")]
+    pub show_active_session_in_title: bool,
     /// Custom titlebar height in px (default: 32.0)
     #[serde(default = "default_titlebar_height")]
     pub titlebar_height: f32,
@@ -1450,6 +1485,8 @@ impl Default for AppSettings {
             titlebar_style: TitlebarStyle::default(),
             titlebar_preset: CustomTitlebarPreset::default(),
             titlebar_position: CustomTitlebarPosition::default(),
+            title_position: CustomTitlePosition::default(),
+            show_active_session_in_title: true,
             titlebar_height: default_titlebar_height(),
             window_control_button_gap: default_window_control_button_gap(),
             window_control_margin: default_window_control_margin(),

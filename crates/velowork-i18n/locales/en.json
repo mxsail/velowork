@@ -449,6 +449,16 @@
       "left": "Left Top",
       "right": "Right Top"
     },
+    "titlebar_title_position": {
+      "label": "Title Alignment",
+      "center": "Center",
+      "left": "Left",
+      "right": "Right"
+    },
+    "titlebar_show_active_session": {
+      "label": "Show Active Session in Window Title",
+      "desc": "Include the active terminal session name in the main window title (e.g. Session - Velowork)"
+    },
     "titlebar_height": "Titlebar Height (px)",
     "window_control_button_gap": "Button Spacing (px)",
     "window_control_margin": "Control Area Margin (px)",

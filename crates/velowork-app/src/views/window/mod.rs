@@ -213,6 +213,8 @@ pub struct WindowView {
     /// `modal_backdrop` can clip its dimming mask to the rounded window corners.
     /// Tracked to avoid re-setting the global every frame.
     last_modal_corner_radius: f32,
+    /// Last window title applied to the OS window and TitleBar, tracked to avoid redundant updates every frame.
+    last_window_title: String,
     /// Flag indicating that a modal was closed and physical focus needs cascade restoration.
     pub(crate) needs_focus_restore: bool,
     /// Modal state in the previous render pass (for modal close detection).
@@ -710,6 +712,7 @@ impl WindowView {
             last_data_replacement_epoch,
             cycle_dock_index: 1,
             last_modal_corner_radius: -1.0,
+            last_window_title: String::new(),
             needs_focus_restore: false,
             last_had_modal: false,
             initial_focus_done: false,
@@ -1305,14 +1308,14 @@ impl WindowView {
             .as_ref()
             .map(|p| p.metadata(cx).title.clone())
             .unwrap_or_else(|| match panel_id {
-                "ai_assistant" => "AI Assistant",
-                "quick_commands" => "Quick Commands",
-                "command_history" => "Command History",
-                "tunnels" => "Tunnels",
-                "services" => "Services",
-                _ => "Detached Panel",
-            }.to_string());
-        let window_title = format!("{} ({})", initial_title, velowork_i18n::i18n!(cx, "dock.panel.detach"));
+                "ai_assistant" => velowork_i18n::i18n!(cx, "ai.panel.title"),
+                "quick_commands" => velowork_i18n::i18n!(cx, "panel.quick_commands"),
+                "command_history" => velowork_i18n::i18n!(cx, "panel.command_history"),
+                "tunnels" => velowork_i18n::i18n!(cx, "tunnels.title"),
+                "services" => velowork_i18n::i18n!(cx, "services.title"),
+                _ => velowork_i18n::i18n!(cx, "dock.panel.detach"),
+            });
+        let window_title = initial_title;
 
         let handle = open_detached_overlay::<
             DetachedHost<velowork_ui::dock::DockPanel>,

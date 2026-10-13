@@ -211,6 +211,7 @@ where
 
         let titlebar_preset = app_settings.as_ref().map(|s| s.titlebar_preset).unwrap_or_default();
         let titlebar_position = app_settings.as_ref().map(|s| s.titlebar_position).unwrap_or_default();
+        let title_position = app_settings.as_ref().map(|s| s.title_position).unwrap_or_default();
         let titlebar_gap = app_settings.as_ref().map(|s| s.window_control_button_gap).unwrap_or_else(|| velowork_ui::decorations::get_window_control_button_gap(cx));
         let titlebar_margin = app_settings.as_ref().map(|s| s.window_control_margin).unwrap_or_else(|| velowork_ui::decorations::get_window_control_margin(cx));
         let titlebar_height_val = app_settings.as_ref().map(|s| s.titlebar_height).unwrap_or_else(|| velowork_ui::decorations::get_titlebar_height(cx));
@@ -331,15 +332,28 @@ where
                             ),
                     )
                     .child(
-                        div().flex_1().flex().items_center().justify_center().child(
-                            velowork_ui::h_flex().gap(velowork_ui::tokens::SPACE_XS).items_center().child(
-                                div()
-                                    .text_size(velowork_ui::tokens::ui_text(13.0, cx))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(rgb(t.text_primary))
-                                    .child(title_str),
+                        div()
+                            .flex_1()
+                            .flex()
+                            .items_center()
+                            .when(title_position == velowork_workspace::settings::CustomTitlePosition::Center, |d| {
+                                d.justify_center()
+                            })
+                            .when(title_position == velowork_workspace::settings::CustomTitlePosition::Left, |d| {
+                                d.justify_start().pl(velowork_ui::tokens::SPACE_XS)
+                            })
+                            .when(title_position == velowork_workspace::settings::CustomTitlePosition::Right, |d| {
+                                d.justify_end().pr(velowork_ui::tokens::SPACE_XS)
+                            })
+                            .child(
+                                velowork_ui::h_flex().gap(velowork_ui::tokens::SPACE_XS).items_center().child(
+                                    div()
+                                        .text_size(velowork_ui::tokens::ui_text(13.0, cx))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .text_color(rgb(t.text_primary))
+                                        .child(title_str),
+                                ),
                             ),
-                        ),
                     )
                     .child(
                         velowork_ui::h_flex()
