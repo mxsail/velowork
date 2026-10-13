@@ -11,7 +11,7 @@ use velowork_ui::focus_group::{FocusGroup, FocusGroupExt};
 use velowork_ui::focusable::FocusSurfaceExt;
 use velowork_ui::h_flex;
 use velowork_ui::icon::AppIcon;
-use velowork_ui::scrollable::Scrollbar;
+use velowork_ui::scrollable::ScrollableElement;
 use velowork_ui::select::{SelectOption, SelectState};
 use velowork_ui::simple_input::{SimpleInput, SimpleInputState};
 use velowork_ui::theme::{theme, with_alpha};
@@ -68,16 +68,6 @@ impl ImportFormatOption {
             Self::FinalShell => i18n!(cx, "session.import.format_finalshell"),
         }
     }
-
-    pub fn icon(&self) -> AppIcon {
-        match self {
-            Self::Auto => AppIcon::Refresh,
-            Self::Xshell => AppIcon::Terminal,
-            Self::MobaXterm => AppIcon::Server,
-            Self::WindTerm => AppIcon::Code,
-            Self::FinalShell => AppIcon::Folder,
-        }
-    }
 }
 
 pub struct ImportSessionsDialog {
@@ -98,7 +88,6 @@ pub struct ImportSessionsDialog {
     is_error: bool,
     is_importing: bool,
     last_result: Option<ImportResult>,
-    scroll_handle: ScrollHandle,
     initial_focus_done: bool,
 }
 
@@ -123,10 +112,7 @@ impl ImportSessionsDialog {
 
         let format_options: Vec<SelectOption<ImportFormatOption>> = ImportFormatOption::all()
             .iter()
-            .map(|opt| {
-                SelectOption::new(opt.clone(), opt.label(cx))
-                    .icon(opt.icon())
-            })
+            .map(|opt| SelectOption::new(opt.clone(), opt.label(cx)))
             .collect();
 
         let format_select = cx.new(|cx| {
@@ -153,12 +139,7 @@ impl ImportSessionsDialog {
                     DuplicateStrategy::Rename => i18n!(cx, "session.import.duplicate_rename"),
                     DuplicateStrategy::Skip => i18n!(cx, "session.import.duplicate_skip"),
                 };
-                let icon = match opt {
-                    DuplicateStrategy::Overwrite => AppIcon::Refresh,
-                    DuplicateStrategy::Rename => AppIcon::Edit,
-                    DuplicateStrategy::Skip => AppIcon::Close,
-                };
-                SelectOption::new(*opt, label).icon(icon)
+                SelectOption::new(*opt, label)
             })
             .collect();
 
@@ -196,7 +177,6 @@ impl ImportSessionsDialog {
             is_error: false,
             is_importing: false,
             last_result: None,
-            scroll_handle: ScrollHandle::new(),
             initial_focus_done: false,
         }
     }
@@ -364,7 +344,7 @@ impl Render for ImportSessionsDialog {
 
         let win_size = window.viewport_size();
         let card_w = px(520.0).min(win_size.width - px(48.0));
-        let card_h = px(600.0).min(win_size.height - px(80.0)).max(px(240.0));
+        let max_card_h = (win_size.height - px(80.0)).min(px(680.0));
 
         let header = div()
             .id("import-sessions-header")
@@ -411,15 +391,13 @@ impl Render for ImportSessionsDialog {
 
         let body_content = div()
             .id(ElementId::Name("import-sessions-scroll".into()))
-            .relative()
             .p(SPACE_XL)
             .flex()
             .flex_col()
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scrollbar()
             .gap(SPACE_LG)
-            .overflow_y_scroll()
-            .track_scroll(&self.scroll_handle)
-            .min_h(px(0.0))
-            .w_full()
                             // 1. Format Selection (Vertical Stack)
                             .child(
                                 div()
@@ -526,27 +504,10 @@ impl Render for ImportSessionsDialog {
                                 )
                             });
 
-        let body_container = div()
-            .relative()
-            .flex_1()
-            .min_w(px(0.0))
-            .min_h(px(0.0))
-            .overflow_hidden()
-            .child(body_content.h_full())
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .right_0()
-                    .left_0()
-                    .child(Scrollbar::vertical(&self.scroll_handle)),
-            );
-
         modal_content("import-sessions-modal", cx)
             .relative()
             .w(card_w)
-            .h(card_h)
+            .max_h(max_card_h)
             .overflow_hidden()
             .track_focus(&focus_handle)
             .key_context("ImportSessionsDialog")
@@ -558,8 +519,8 @@ impl Render for ImportSessionsDialog {
                 cx.stop_propagation();
             })
             .focus_scope_on_click(&self.focus_handle)
-                    .child(header)
-                    .child(body_container)
+            .child(header)
+            .child(body_content)
                     .child(
                         h_flex()
                             .h(px(48.0))
@@ -597,3 +558,28 @@ impl Render for ImportSessionsDialog {
 }
 
 impl_focusable!(ImportSessionsDialog);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_option_metadata() {
+        let all = ImportFormatOption::all();
+        assert_eq!(all.len(), 5);
+        assert_eq!(ImportFormatOption::Auto.id(), "auto");
+        assert_eq!(ImportFormatOption::Xshell.id(), "xshell");
+        assert_eq!(ImportFormatOption::MobaXterm.id(), "mobaxterm");
+        assert_eq!(ImportFormatOption::WindTerm.id(), "windterm");
+        assert_eq!(ImportFormatOption::FinalShell.id(), "finalshell");
+    }
+
+    #[test]
+    fn test_duplicate_strategy_coverage() {
+        let all = DuplicateStrategy::all();
+        assert_eq!(all.len(), 3);
+        assert!(all.contains(&DuplicateStrategy::Overwrite));
+        assert!(all.contains(&DuplicateStrategy::Rename));
+        assert!(all.contains(&DuplicateStrategy::Skip));
+    }
+}
