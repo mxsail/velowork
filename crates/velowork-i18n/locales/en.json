@@ -1111,8 +1111,11 @@
     "manage": {
       "label": "Project Manager",
       "title": "Project Manager",
-      "search_placeholder": "Type to filter projects...",
-      "edit_project": "Edit Project"
+      "search_placeholder": "Search project name...",
+      "edit_project": "Edit Project",
+      "current_badge": "Current",
+      "session_count": "{count} sessions",
+      "session_count_one": "1 session"
     },
     "new_project": "New Project",
     "import_project": "Import Project",
@@ -1187,15 +1190,7 @@
     "setting_up_worktree": "Setting up worktree…",
     "setting_up_worktree_desc": "Fetching latest changes and creating the branch. Terminals will start automatically.",
     "focus": "Focus Project",
-    "switcher": {
-      "title": "Switch Project",
-      "subtitle": "Type to search, Enter to focus, Space to toggle visibility",
-      "toggle_visibility": "toggle visibility",
-      "go_to_terminal": "go to terminal",
-      "search_placeholder": "Type to filter projects...",
-      "no_projects": "No projects found",
-      "focus": "focus"
-    },
+
     "editor": {
       "title": "Add Project",
       "name_placeholder": "Enter project name...",

@@ -19,7 +19,7 @@
 ```
 例如：
 - `project.editor.title`
-- `project.switcher.search_placeholder`
+- `project.manage.search_placeholder`
 - `session.dialog.host`
 - `settings.terminal.cursor_blink`
 - `ai.thinking`
@@ -40,7 +40,7 @@
 | `profile` | 配置管理 | 多 Profile 配置文件隔离与切换 | `profile.manager.title`, `profile.manager.delete_confirm` |
 | `workspace` | 工作区容器 | 多窗口管理、工作树、目录折叠与状态 | `workspace.explorer`, `workspace.folder.*`, `workspace.window.*` |
 | `session` | 会话领域 | SSH/Serial/Telnet/Local 会话创建、导入、编辑与列表 | `session.dialog.*`, `session.import.*`, `session.category.*` |
-| `project` | 项目领域 | 项目工程组织、切换器、配置编辑器与导入导出 | `project.switcher.*`, `project.editor.*`, `project.export.*`, `project.import.*` |
+| `project` | 项目领域 | 项目工程组织、项目管理、配置编辑器与导入导出 | `project.manage.*`, `project.editor.*`, `project.export.*`, `project.import.*` |
 | `terminal` | 终端运行态 | 运行态终端标签、上下文菜单、分屏操作与状态 | `terminal.split_horizontal`, `terminal.context_menu.*` |
 | `sftp` | 文件传输与管理 | SFTP 浏览、权限编辑、属性查看与操作菜单 | `sftp.panel.*`, `sftp.dialog.*`, `sftp.toolbar.*` |
 | `tunnel` | SSH 隧道 | 端口转发规则、编辑与生命周期监听 | `tunnel.type_local`, `tunnel.delete_confirm`, `tunnel.tooltip.*` |

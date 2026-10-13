@@ -1,7 +1,7 @@
 use crate::keybindings::{Cancel, RenameActiveNode};
 use crate::theme::{surface_bg_t, theme, with_alpha};
 use crate::ui::tokens::{
-    ui_text_md, ui_text_sm, ICON_SM, ICON_STD, RADIUS_STD,
+    ui_text_md, ui_text_ms, ui_text_sm, ui_text_xs, ICON_SM, ICON_STD, RADIUS_SM, RADIUS_STD,
     SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS, SPACE_XL,
 };
 use crate::views::components::{
@@ -41,8 +41,22 @@ use velowork_ui::focus_group::{FocusGroup, FocusGroupExt};
 use velowork_ui::tooltip::Tooltip;
 use velowork_ui::v_flex;
 use velowork_ui::{scroll_to_row, virtual_list};
+use velowork_state::SessionTreeNode;
 use velowork_workspace::focus::FocusManager;
 use velowork_workspace::state::{ProjectData, WindowId, Workspace};
+
+fn count_sessions_in_nodes(nodes: &[SessionTreeNode]) -> usize {
+    let mut count = 0;
+    for node in nodes {
+        match node {
+            SessionTreeNode::Session { .. } => count += 1,
+            SessionTreeNode::Folder { children, .. } => {
+                count += count_sessions_in_nodes(children);
+            }
+        }
+    }
+    count
+}
 
 type CloseFn = Arc<dyn Fn(&mut Window, &mut App) + Send + Sync>;
 
@@ -198,8 +212,18 @@ impl ManageProjectsDialog {
         cx.emit(ManageProjectsDialogEvent::Close);
     }
 
+    fn active_project_id(&self, cx: &App) -> Option<String> {
+        let raw = self.focus_manager.read(cx).active_project_id().cloned();
+        if let Some(ref pid) = raw
+            && self.workspace.read(cx).project(pid).is_some()
+        {
+            return raw;
+        }
+        self.workspace.read(cx).projects().first().map(|p| p.id.clone())
+    }
+
     fn confirm_and_switch(&mut self, project_id: &str, cx: &mut Context<Self>) {
-        let current = self.focus_manager.read(cx).active_project_id().cloned();
+        let current = self.active_project_id(cx);
         if current.as_deref() != Some(project_id) {
             let pid = project_id.to_string();
             self.focus_manager.update(cx, |fm, cx_fm| {
@@ -496,13 +520,13 @@ impl ManageProjectsDialog {
     }
 
 
-    fn render_list_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render_list_view(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         self.ensure_search_input(cx);
 
         let filtered_len = self.filtered_indices.len();
         let total_count = self.workspace.read(cx).projects().len();
-        let row_h = window.line_height() + SPACE_XL;
+        let row_h = px(52.0);
 
         let list_el: AnyElement = if total_count == 0 {
             div()
@@ -674,6 +698,15 @@ impl ManageProjectsDialog {
             (false, rgb(t.border_active))
         };
 
+        let is_current = self.active_project_id(cx).as_deref() == Some(&project_id);
+        let session_count = cx
+            .try_global::<velowork_workspace::stores::GlobalSessionStore>()
+            .map(|store| {
+                let tree = store.0.read(cx).tree_for_project(Some(&project_id));
+                count_sessions_in_nodes(tree)
+            })
+            .unwrap_or(0);
+
         let name_cell = if is_rename {
             let input_entity = self.rename_input.clone().unwrap();
             div()
@@ -704,35 +737,90 @@ impl ManageProjectsDialog {
                 .into_any_element()
         } else {
             let full_name = project_name.clone();
-            h_flex()
+            let full_desc = project_desc.clone();
+            let session_text = if session_count == 1 {
+                i18n!(cx, "project.manage.session_count_one")
+            } else {
+                i18n!(cx, "project.manage.session_count").replace("{count}", &session_count.to_string())
+            };
+
+            let clean_desc: String = project_desc
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+
+            v_flex()
                 .flex_1()
                 .min_w_0()
-                .gap(SPACE_SM)
-                .items_center()
+                .pr(SPACE_LG)
+                .justify_center()
+                .gap(px(2.0))
+                // Row 1: Project Name + Current Badge
                 .child(
-                    div()
-                        .id(ElementId::Name(
-                            format!("manage-project-name-{}", project_id).into(),
-                        ))
-                        .tooltip(move |_, cx| {
-                            let __tip = full_name.clone();
-                            cx.new(|_| Tooltip::new(__tip)).into()
-                        })
-                        .text_size(ui_text_md(cx))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(rgb(t.text_primary))
-                        .truncate()
-                        .child(project_name.clone()),
+                    h_flex()
+                        .items_center()
+                        .gap(SPACE_SM)
+                        .min_w_0()
+                        .child(
+                            div()
+                                .id(ElementId::Name(
+                                    format!("manage-project-name-{}", project_id).into(),
+                                ))
+                                .tooltip(move |_, cx| {
+                                    let __tip = full_name.clone();
+                                    cx.new(|_| Tooltip::new(__tip)).into()
+                                })
+                                .text_size(ui_text_md(cx))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(t.text_primary))
+                                .truncate()
+                                .child(project_name.clone()),
+                        )
+                        .when(is_current, |el| {
+                            el.child(
+                                div()
+                                    .flex_shrink_0()
+                                    .px(SPACE_XS)
+                                    .py(px(0.5))
+                                    .rounded(RADIUS_SM)
+                                    .bg(Hsla { a: 0.15, ..p.surface_accent })
+                                    .border_1()
+                                    .border_color(Hsla { a: 0.35, ..p.surface_accent })
+                                    .text_size(ui_text_xs(cx))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(p.surface_accent)
+                                    .child(i18n!(cx, "project.manage.current_badge")),
+                            )
+                        }),
                 )
-                .when(!project_desc.is_empty(), |el| {
-                    el.child(
-                        div()
-                            .text_size(ui_text_sm(cx))
-                            .text_color(rgb(t.text_muted))
-                            .truncate()
-                            .child(format!("- {}", project_desc)),
-                    )
-                })
+                // Row 2: Subtitle (Session count + description)
+                .child(
+                    h_flex()
+                        .items_center()
+                        .gap(SPACE_SM)
+                        .min_w_0()
+                        .text_size(ui_text_ms(cx))
+                        .text_color(rgb(t.text_muted))
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .child(session_text),
+                        )
+                        .when(!clean_desc.is_empty(), |el| {
+                            el.child(
+                                div()
+                                    .id(ElementId::Name(
+                                        format!("manage-project-desc-{}", project_id).into(),
+                                    ))
+                                    .tooltip(move |_, cx| {
+                                        let __tip = full_desc.clone();
+                                        cx.new(|_| Tooltip::new(__tip)).into()
+                                    })
+                                    .truncate()
+                                    .child(format!("- {}", clean_desc)),
+                            )
+                        }),
+                )
                 .into_any_element()
         };
 
@@ -944,10 +1032,14 @@ impl ManageProjectsDialog {
                     .gap(SPACE_MD)
                     .items_center()
                     .child(
-                        AppIcon::from_str(&project_icon)
-                            .unwrap_or(AppIcon::Folder)
-                            .size(px(18.0))
-                            .text_color(rgb(t.get_folder_color(project_color))),
+                        div()
+                            .flex_shrink_0()
+                            .child(
+                                AppIcon::from_str(&project_icon)
+                                    .unwrap_or(AppIcon::Folder)
+                                    .size(px(24.0))
+                                    .text_color(rgb(t.get_folder_color(project_color))),
+                            ),
                     )
                     .child(name_cell),
             )
@@ -1541,5 +1633,41 @@ mod tests {
             assert!(!dialog.read(cx).initial_focus_done);
             assert_eq!(dialog.read(cx).pending_focus, Some(PendingFocus::SearchInput));
         });
+    }
+
+    #[test]
+    fn test_count_sessions_in_nodes() {
+        use velowork_state::SshSession;
+        let s1 = SessionTreeNode::Session {
+            session: SshSession {
+                id: "s1".to_string(),
+                name: "Session 1".to_string(),
+                ..Default::default()
+            },
+        };
+        let s2 = SessionTreeNode::Session {
+            session: SshSession {
+                id: "s2".to_string(),
+                name: "Session 2".to_string(),
+                ..Default::default()
+            },
+        };
+        let folder = SessionTreeNode::Folder {
+            id: "f1".to_string(),
+            name: "Folder 1".to_string(),
+            children: vec![s2],
+            is_collapsed: false,
+        };
+
+        assert_eq!(count_sessions_in_nodes(&[]), 0);
+        assert_eq!(count_sessions_in_nodes(&[s1.clone()]), 1);
+        assert_eq!(count_sessions_in_nodes(&[s1, folder]), 2);
+    }
+
+    #[test]
+    fn test_clean_desc_multiline() {
+        let input = "汉字说明\n换行内容\r\n更多长文本   多个空格";
+        let clean: String = input.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert_eq!(clean, "汉字说明 换行内容 更多长文本 多个空格");
     }
 }

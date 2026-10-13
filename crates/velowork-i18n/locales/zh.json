@@ -1111,8 +1111,11 @@
     "manage": {
       "label": "项目管理器",
       "title": "项目管理器",
-      "search_placeholder": "输入以筛选项目…",
-      "edit_project": "编辑项目"
+      "search_placeholder": "搜索项目名称",
+      "edit_project": "编辑项目",
+      "current_badge": "当前",
+      "session_count": "{count} 个会话",
+      "session_count_one": "1 个会话"
     },
     "new_project": "新建项目",
     "import_project": "导入项目",
@@ -1187,15 +1190,7 @@
     "setting_up_worktree": "正在设置工作树…",
     "setting_up_worktree_desc": "正在获取最新更改并创建分支。终端将自动启动。",
     "focus": "聚焦项目",
-    "switcher": {
-      "title": "切换项目",
-      "subtitle": "输入以搜索，Enter 聚焦，Space 切换可见性",
-      "toggle_visibility": "切换可见性",
-      "go_to_terminal": "跳转到终端",
-      "search_placeholder": "输入以筛选项目…",
-      "no_projects": "未找到项目",
-      "focus": "聚焦"
-    },
+
     "editor": {
       "title": "添加项目",
       "name_placeholder": "输入项目名称…",
