@@ -4,7 +4,9 @@ use crate::theme::theme;
 use crate::ui::tokens::{mono_font_family, ui_text, ui_text_ms};
 use velowork_ui::button::Button;
 use velowork_ui::design::appearance::ControlSize;
-use velowork_ui::tokens::{SPACE_XS, SPACE_SM, SPACE_MD, SPACE_XL, ICON_MD, RADIUS_MD};
+use velowork_ui::scrollable::Scrollbar;
+use velowork_ui::ScrollFade;
+use velowork_ui::tokens::{SPACE_XS, SPACE_MD, SPACE_XL, ICON_MD, RADIUS_MD};
 use velowork_ui::design::semantic::SemanticPalette;
 use velowork_ui::icon::AppIcon;
 use velowork_ui::tooltip::Tooltip;
@@ -14,6 +16,7 @@ use velowork_ui::{h_flex, v_flex};
 use velowork_ui::badge::keyboard_hints_footer;
 use velowork_ui::input::InputState;
 use velowork_core::theme::ThemeColors;
+use velowork_theme::surface_bg;
 use std::time::Duration;
 use velowork_i18n::i18n;
 
@@ -282,7 +285,6 @@ impl Render for LogConsole {
             .when(has_rounded_corners, |d| {
                 d.rounded_b(radius).overflow_hidden()
             })
-            .bg(p.surface_base)
             .text_color(p.text_primary)
             .track_focus(&focus_handle)
             .key_context("LogConsole")
@@ -309,36 +311,6 @@ impl Render for LogConsole {
                     cx.notify();
                 }
             }))
-            .child(
-                h_flex()
-                    .w_full()
-                    .px(SPACE_XL)
-                    .py(px(12.0))
-                    .justify_between()
-                    .items_center()
-                    .child(
-                        h_flex()
-                            .gap(SPACE_SM)
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_size(ui_text(15.0, cx))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(p.text_primary)
-                                    .child(i18n!(cx, "log.title")),
-                            )
-                            .child(
-                                div()
-                                    .text_size(ui_text_ms(cx))
-                                    .text_color(p.text_muted)
-                                    .child(velowork_i18n::t_fmt(
-                                        &*cx,
-                                        "log.shown_buffered",
-                                        &[("shown", &shown.to_string()), ("total", &total.to_string())],
-                                    )),
-                            ),
-                    ),
-            )
             .child(self.render_toolbar(&t, cx))
             .child(self.render_list(visible, &t, cx))
             .child({
@@ -350,8 +322,23 @@ impl Render for LogConsole {
                 let hint_refs: Vec<(&str, &str)> = hints.iter()
                     .map(|(k, v)| (k.as_str(), v.as_str()))
                     .collect();
-                keyboard_hints_footer(&hint_refs, &t, cx)
+                h_flex()
+                    .w_full()
+                    .justify_between()
+                    .items_center()
                     .when(has_rounded_corners, |d| d.rounded_b(radius))
+                    .child(keyboard_hints_footer(&hint_refs, &t, cx))
+                    .child(
+                        div()
+                            .pr(SPACE_XL)
+                            .text_size(ui_text_ms(cx))
+                            .text_color(p.text_muted)
+                            .child(velowork_i18n::t_fmt(
+                                &*cx,
+                                "log.shown_buffered",
+                                &[("shown", &shown.to_string()), ("total", &total.to_string())],
+                            )),
+                    )
             })
     }
 }
@@ -414,7 +401,7 @@ impl LogConsole {
                             .iter()
                             .map(|&level| {
                                 let active = level <= self.min_level;
-                                let color = hsla_from_rgb(level_color(level, t));
+                                let color = surface_bg(level_color(level, t), cx);
                                 let mut btn = Button::new(format!("log-level-chip-{:?}", level), t)
                                     .size(ControlSize::Compact)
                                     .accent_color(color)
@@ -430,17 +417,27 @@ impl LogConsole {
                                 btn
                             })),
                     )
-                    .child(
-                        Button::new("log-autoscroll", t)
+                    .child({
+                        let active = self.auto_scroll;
+                        let sel_bg = surface_bg(t.bg_selection, cx);
+                        let mut btn = Button::new("log-autoscroll", t)
                             .size(ControlSize::Compact)
+                            .accent_color(sel_bg)
                             .label(i18n!(cx, "log.autoscroll"))
-                            .selected(self.auto_scroll)
+                            .px(px(8.0))
+                            .py(px(2.0))
                             .on_click(cx.listener(|this, _, _w, cx| {
                                 this.auto_scroll = !this.auto_scroll;
                                 this.pending_scroll = this.auto_scroll;
                                 cx.notify();
-                            })),
-                    )
+                            }));
+                        if active {
+                            btn = btn.primary();
+                        } else {
+                            btn = btn.default();
+                        }
+                        btn
+                    })
                     .child(
                         Button::new("log-copy", t)
                             .size(ControlSize::Compact)
@@ -498,18 +495,34 @@ impl LogConsole {
 
         let copy_tip = i18n!(cx, "common.action.copy");
         let count = visible.len();
-        uniform_list(
-            "log-console-list",
-            count,
-            move |range, _window, cx| {
-                range
-                    .map(|i| render_row(&visible[i], &copy_tip, &t, cx).into_any_element())
-                    .collect::<Vec<_>>()
-            },
-        )
-        .track_scroll(&self.scroll)
-        .flex_1()
-        .into_any_element()
+        div()
+            .relative()
+            .flex_1()
+            .w_full()
+            .child(
+                uniform_list(
+                    "log-console-list",
+                    count,
+                    move |range, _window, cx| {
+                        range
+                            .map(|i| render_row(&visible[i], &copy_tip, &t, cx).into_any_element())
+                            .collect::<Vec<_>>()
+                    },
+                )
+                .track_scroll(&self.scroll)
+                .size_full()
+            )
+            .child(ScrollFade::vertical(&self.scroll, surface_bg(t.bg_primary, cx)))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .right_0()
+                    .left_0()
+                    .child(Scrollbar::vertical(&self.scroll)),
+            )
+            .into_any_element()
     }
 }
 
@@ -520,6 +533,8 @@ fn render_row(
     cx: &App,
 ) -> impl IntoElement {
     let p = SemanticPalette::from_theme(t);
+    let hover_bg = surface_bg(t.bg_hover, cx);
+    let copy_bg = surface_bg(t.bg_secondary, cx);
     let group_id: SharedString = format!("log-row-{}", line.seq).into();
     let copy_id: SharedString = format!("log-copy-{}", line.seq).into();
     let copy_text = line.message.clone();
@@ -544,7 +559,7 @@ fn render_row(
         .border_color(p.border_subtle)
         .font_family(mono_font_family(cx))
         .text_size(font_size)
-        .hover(|s| s.bg(p.surface_hover))
+        .hover(move |s| s.bg(hover_bg))
         // 1. 加宽时间戳列：120px 宽度，单行不换行
         .child(
             div()
@@ -602,11 +617,11 @@ fn render_row(
                 .items_center()
                 .justify_center()
                 .rounded(RADIUS_MD)
-                .bg(p.surface_raised)
+                .bg(copy_bg)
                 .border_1()
                 .border_color(p.border_subtle)
                 .shadow_md()
-                .hover(|s| s.bg(p.surface_hover).border_color(p.border_active))
+                .hover(move |s| s.bg(hover_bg).border_color(p.border_active))
                 .tooltip(move |_, cx| cx.new(|_| Tooltip::new(copy_tip.clone())).into())
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(move |_, _, cx| {
@@ -627,13 +642,6 @@ fn field_label(label: &str, t: &ThemeColors, cx: &App) -> impl IntoElement {
         .text_size(ui_text_ms(cx))
         .text_color(rgb(t.text_muted))
         .child(label.to_string())
-}
-
-fn hsla_from_rgb(rgb_val: u32) -> Hsla {
-    let r = ((rgb_val >> 16) & 0xff) as f32 / 255.0;
-    let g = ((rgb_val >> 8) & 0xff) as f32 / 255.0;
-    let b = (rgb_val & 0xff) as f32 / 255.0;
-    Rgba { r, g, b, a: 1.0 }.into()
 }
 
 velowork_ui::impl_focusable!(LogConsole);
