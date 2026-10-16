@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.16] - 2026-10-16
+
+### Improved / 优化
+- **滚动边缘过渡重构为物理级景深微投影 (Elevation Drop Shadow)**：
+  - 彻底移除了正文上方半透明背景色块遮罩的旧模式，正文文字与图标 100% 保持原本的纯净对比度与锐利度，消除“白内障灰蒙蒙”与实色断层；
+  - 底部工具栏与顶部 Header 化身物理浮板，紧贴接缝处投射一道 8.0px 极度精致紧凑的环境漫反射微阴影（Ambient Shadow），自适应深色（0.28）与浅色（0.09）主题；
+  - 配合 16px Hermite Smoothstep 动态进入/消退缓冲，未溢出或触底时阴影完全蒸发；终端滚动区域同步升级。
+  *(Replaced opaque scroll fade overlays with subtle 8px elevation drop shadows and smooth Hermite ramps).*
+- **终端行号与右侧内容像素级绝对水平对齐 (Terminal Line Number Alignment)**：
+  - 解决使用 Powerlevel10k、fastfetch 等复杂富文本输出时终端行号与文字内容垂直基线微错位的问题；
+  - 行号列全面统一采用与主字符网格绝对一致的基线 Canvas 绘制定位计算，确保每一行像素级水平严格对齐。
+  *(Fixed baseline vertical offset between line numbers and terminal content for rich prompt themes).*
+- **帮助弹窗排版优化 (Help Dialog Polish)**：
+  - 优化帮助弹窗排版布局，合理收敛底部留白；
+  - “快速入门”后方的快捷键按钮采用整体圆角背景框并使用“+”连接键位，提升阅读连贯性；
+  - 引入滚动条与边缘平滑淡出支持。
+  *(Refined Help dialog layout, unified shortcut badges with plus connectors, and added scrollbar support).*
+- **测试版更新检测与版本展示优化 (Beta Update Channel Detection)**：
+  - 更新检测机制完善对测试版更新通道（Beta Channel）的精准探测与真实版本号展示，支持测试版在线持续升级。
+  *(Enhanced updater to accurately detect pre-releases and display actual beta version numbers).*
+
+### Fixed / 修复
+- **测试用例终端设置字段补全 (Smoke Tests Fix)**：
+  - 补齐 `TerminalViewSettings` 新增的 `terminal_theme_mode`、`dark_color_scheme` 和 `light_color_scheme` 字段，确保自动化冒烟测试顺利编译通过。
+  *(Added missing color scheme and theme mode fields in smoke test initializer).*
+
 ## [0.1.0-beta.15] - 2026-10-16
 
 ### Added / 新增
