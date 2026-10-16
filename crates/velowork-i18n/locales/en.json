@@ -1971,6 +1971,7 @@
     "shortcut_toggle_right_panel": "Toggle Right Panel",
     "shortcut_toggle_bottom_panel": "Toggle Bottom Panel",
     "shortcut_close_tab": "Close Active Tab",
+    "shortcut_settings": "Preferences",
     "common_operations": "Common Operations",
     "session_mgmt_title": "Session Manager: ",
     "session_mgmt_desc": "Manage multiple session types including SSH, Serial, Telnet, and Local Shell in the left panel, supporting nested directory trees and drag-and-drop ordering. Right-click sessions to connect, edit, duplicate, or delete.",

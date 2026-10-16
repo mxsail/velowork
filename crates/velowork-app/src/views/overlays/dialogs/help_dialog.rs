@@ -16,8 +16,9 @@ use velowork_ui::button::Button;
 use velowork_ui::design::appearance::ControlSize;
 use velowork_ui::icon::AppIcon;
 use velowork_ui::scrollable::Scrollbar;
+use velowork_ui::ScrollFade;
 use velowork_ui::tokens::{
-    RADIUS_MD, RADIUS_STD, RADIUS_XS, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL,
+    RADIUS_STD, RADIUS_XS, SPACE_2XS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XL,
     SPACE_XS,
 };
 use velowork_ui::tooltip::Tooltip;
@@ -113,14 +114,12 @@ impl HelpDialog {
         cx: &App,
     ) -> impl IntoElement {
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
+        let shortcut_text = keys.join(" + ");
         div()
             .flex()
             .items_center()
             .justify_between()
-            .px(SPACE_MD)
-            .py(px(6.0))
-            .rounded(RADIUS_MD)
-            .hover(|s| s.bg(p.surface_hover))
+            .py(px(3.0))
             .child(
                 div()
                     .text_size(ui_text_ms(cx))
@@ -128,22 +127,17 @@ impl HelpDialog {
                     .child(label),
             )
             .child(
-                h_flex()
-                    .items_center()
-                    .gap(SPACE_XS)
-                    .children(keys.into_iter().map(|key| {
-                        div()
-                            .px(SPACE_SM)
-                            .py(px(2.0))
-                            .bg(p.surface_card)
-                            .border_1()
-                            .border_color(p.border_subtle)
-                            .rounded(RADIUS_XS)
-                            .text_size(ui_text_xs(cx))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(p.text_muted)
-                            .child(key)
-                    })),
+                div()
+                    .px(SPACE_SM)
+                    .py(px(2.0))
+                    .bg(p.surface_card)
+                    .border_1()
+                    .border_color(p.border_subtle)
+                    .rounded(RADIUS_XS)
+                    .text_size(ui_text_xs(cx))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(p.text_muted)
+                    .child(shortcut_text),
             )
     }
 
@@ -199,11 +193,12 @@ impl HelpDialog {
         let quick_start_title = i18n!(cx, "help.quick_start");
         let s_new_session = i18n!(cx, "help.shortcut_new_session");
         let s_add_tab = i18n!(cx, "help.shortcut_add_tab");
+        let s_close_tab = i18n!(cx, "help.shortcut_close_tab");
+        let s_settings = i18n!(cx, "help.shortcut_settings");
         let s_palette = i18n!(cx, "help.shortcut_command_palette");
         let s_toggle_sidebar = i18n!(cx, "help.shortcut_toggle_sidebar");
         let s_toggle_right = i18n!(cx, "help.shortcut_toggle_right_panel");
         let s_toggle_bottom = i18n!(cx, "help.shortcut_toggle_bottom_panel");
-        let s_close_tab = i18n!(cx, "help.shortcut_close_tab");
 
         let common_ops_title = i18n!(cx, "help.common_operations");
         let session_title = i18n!(cx, "help.session_mgmt_title");
@@ -225,6 +220,82 @@ impl HelpDialog {
         let community_label = i18n!(cx, "help.community_label");
         let community_url = i18n!(cx, "help.community_url");
 
+        // 快速入门左右对称 4 × 2 网格
+        let left_col = v_flex()
+            .flex_1()
+            .gap(px(2.0))
+            .child(self.render_action_shortcut(
+                s_new_session,
+                "NewSession",
+                &[mod_key, "N"],
+                &t,
+                cx,
+            ))
+            .child(self.render_action_shortcut(
+                s_add_tab,
+                "AddTab",
+                if is_mac { &["⌘", "T"] } else { &["Ctrl", "Shift", "T"] },
+                &t,
+                cx,
+            ))
+            .child(self.render_action_shortcut(
+                s_close_tab,
+                "CloseTerminal",
+                if is_mac { &["⌘", "W"] } else { &["Ctrl", "Shift", "W"] },
+                &t,
+                cx,
+            ))
+            .child(self.render_action_shortcut(
+                s_settings,
+                "ShowSettings",
+                &[mod_key, ","],
+                &t,
+                cx,
+            ));
+
+        let right_col = v_flex()
+            .flex_1()
+            .gap(px(2.0))
+            .child(self.render_action_shortcut(
+                s_palette,
+                "ShowCommandPalette",
+                if is_mac { &["⌘", "⇧", "P"] } else { &["Ctrl", "Shift", "P"] },
+                &t,
+                cx,
+            ))
+            .child(self.render_action_shortcut(
+                s_toggle_sidebar,
+                "ToggleLeftDock",
+                &[mod_key, "B"],
+                &t,
+                cx,
+            ))
+            .child(self.render_action_shortcut(
+                s_toggle_right,
+                "ToggleRightDock",
+                if is_mac { &["⌘", "⇧", "R"] } else { &["Ctrl", "Shift", "R"] },
+                &t,
+                cx,
+            ))
+            .child(self.render_action_shortcut(
+                s_toggle_bottom,
+                "ToggleCommandsPanel",
+                if is_mac { &["⌘", "⇧", "Y"] } else { &["Ctrl", "Shift", "Y"] },
+                &t,
+                cx,
+            ));
+
+        let quick_start_section = v_flex()
+            .gap(SPACE_XS)
+            .child(self.render_group_title(quick_start_title, &t, cx))
+            .child(
+                h_flex()
+                    .gap(SPACE_LG)
+                    .items_start()
+                    .child(left_col)
+                    .child(right_col),
+            );
+
         let body_content = v_flex()
             .id("help-dialog-body-scroll")
             .size_full()
@@ -233,64 +304,7 @@ impl HelpDialog {
             .gap(SPACE_XL)
             .p(SPACE_XL)
             // 1. 快速入门 (Quick Start)
-            .child(
-                v_flex()
-                    .gap(SPACE_XS)
-                    .child(self.render_group_title(quick_start_title, &t, cx))
-                    .child(
-                        v_flex()
-                            .gap(px(2.0))
-                            .child(self.render_action_shortcut(
-                                s_new_session,
-                                "NewSession",
-                                &[mod_key, "N"],
-                                &t,
-                                cx,
-                            ))
-                            .child(self.render_action_shortcut(
-                                s_add_tab,
-                                "AddTab",
-                                if is_mac { &["⌘", "T"] } else { &["Ctrl", "Shift", "T"] },
-                                &t,
-                                cx,
-                            ))
-                            .child(self.render_action_shortcut(
-                                s_palette,
-                                "ShowCommandPalette",
-                                if is_mac { &["⌘", "⇧", "P"] } else { &["Ctrl", "Shift", "P"] },
-                                &t,
-                                cx,
-                            ))
-                            .child(self.render_action_shortcut(
-                                s_toggle_sidebar,
-                                "ToggleLeftDock",
-                                &[mod_key, "B"],
-                                &t,
-                                cx,
-                            ))
-                            .child(self.render_action_shortcut(
-                                s_toggle_right,
-                                "ToggleRightDock",
-                                if is_mac { &["⌘", "⇧", "R"] } else { &["Ctrl", "Shift", "R"] },
-                                &t,
-                                cx,
-                            ))
-                            .child(self.render_action_shortcut(
-                                s_toggle_bottom,
-                                "ToggleCommandsPanel",
-                                if is_mac { &["⌘", "⇧", "Y"] } else { &["Ctrl", "Shift", "Y"] },
-                                &t,
-                                cx,
-                            ))
-                            .child(self.render_action_shortcut(
-                                s_close_tab,
-                                "CloseTerminal",
-                                if is_mac { &["⌘", "W"] } else { &["Ctrl", "Shift", "W"] },
-                                &t,
-                                cx,
-                            )),
-                    ),
-            )
+            .child(quick_start_section)
             // 2. 常用操作 (Common Operations)
             .child(
                 v_flex()
@@ -423,13 +437,10 @@ impl HelpDialog {
             .overflow_hidden()
             .child(body_content)
             .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .right_0()
-                    .child(Scrollbar::vertical(&self.scroll_handle)),
+                ScrollFade::vertical(&self.scroll_handle, p.surface_overlay)
+                    .fade_size(px(28.0)),
             )
+            .child(Scrollbar::vertical(&self.scroll_handle))
     }
 
     fn render_footer(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -491,6 +502,32 @@ mod tests {
             let card_focus = dialog.read(cx).focus_handle.clone();
             // Ensure close button focus handle is created and distinct from card focus
             assert_ne!(close_focus, card_focus);
+        });
+    }
+
+    #[gpui::test]
+    async fn test_help_dialog_shortcut_actions_resolution(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            velowork_workspace::init_settings(cx);
+            velowork_i18n::init_locale(velowork_i18n::Locale::Zh, cx);
+
+            // Verify all 8 actions used in the 4x2 quick start grid can be resolved
+            let actions = [
+                "NewSession",
+                "AddTab",
+                "CloseTerminal",
+                "ShowSettings",
+                "ShowCommandPalette",
+                "ToggleLeftDock",
+                "ToggleRightDock",
+                "ToggleCommandsPanel",
+            ];
+
+            for action in actions {
+                let keys = crate::keybindings::shortcut_keys_for_action(action);
+                assert!(keys.is_some(), "shortcut keys for action {} must be resolvable", action);
+                assert!(!keys.unwrap().is_empty(), "action {} must have at least one key", action);
+            }
         });
     }
 }

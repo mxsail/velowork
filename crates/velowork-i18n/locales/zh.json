@@ -1971,6 +1971,7 @@
     "shortcut_toggle_right_panel": "切换右侧面板",
     "shortcut_toggle_bottom_panel": "切换底部面板",
     "shortcut_close_tab": "关闭当前标签",
+    "shortcut_settings": "偏好设置",
     "common_operations": "常用操作",
     "session_mgmt_title": "会话管理器：",
     "session_mgmt_desc": "左侧面板集中管理 SSH、串口 (Serial)、Telnet 以及本地终端 (Local) 等多种会话类型，支持目录层级树与拖拽排序。右键点击会话可进行连接、编辑、快速复制和删除操作。",
