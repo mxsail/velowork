@@ -13,32 +13,47 @@ use crate::scrollable::ScrollbarHandle;
 /// - Hitboxes are NOT inserted: 100% mouse event pass-through (clicks, selection, scroll wheel).
 pub struct ScrollFade {
     scroll_handle: Rc<dyn ScrollbarHandle>,
-    bg_color: Option<Hsla>,
+    shadow_color: Option<Hsla>,
     fade_size: Pixels,
+    max_opacity: Option<f32>,
 }
 
 impl ScrollFade {
-    /// Create a new vertical scroll fade overlay with an explicit background color.
-    pub fn vertical<H: ScrollbarHandle + Clone>(handle: &H, bg_color: impl Into<Hsla>) -> Self {
+    /// Create a new vertical elevation drop shadow with an explicit base shadow color.
+    pub fn vertical<H: ScrollbarHandle + Clone>(handle: &H, _unused_color: impl Into<Hsla>) -> Self {
         Self {
             scroll_handle: Rc::new(handle.clone()),
-            bg_color: Some(bg_color.into()),
-            fade_size: px(36.0),
+            shadow_color: None,
+            fade_size: px(8.0),
+            max_opacity: None,
         }
     }
 
-    /// Create a new vertical scroll fade overlay inheriting the contextual theme background.
+    /// Create a new vertical elevation drop shadow overlay.
     pub fn vertical_themed<H: ScrollbarHandle + Clone>(handle: &H) -> Self {
         Self {
             scroll_handle: Rc::new(handle.clone()),
-            bg_color: None,
-            fade_size: px(36.0),
+            shadow_color: None,
+            fade_size: px(8.0),
+            max_opacity: None,
         }
     }
 
-    /// Customize the fade gradient height (default 36px).
+    /// Set an explicit shadow color (defaults to theme-adapted ambient black).
+    pub fn shadow_color(mut self, color: impl Into<Hsla>) -> Self {
+        self.shadow_color = Some(color.into());
+        self
+    }
+
+    /// Customize the shadow spread height (default 8px).
     pub fn fade_size(mut self, size: impl Into<Pixels>) -> Self {
         self.fade_size = size.into();
+        self
+    }
+
+    /// Customize the peak opacity factor (defaults to 0.28 on dark themes, 0.09 on light themes).
+    pub fn max_opacity(mut self, opacity: f32) -> Self {
+        self.max_opacity = Some(opacity.clamp(0.0, 1.0));
         self
     }
 }
@@ -118,10 +133,19 @@ impl Element for ScrollFade {
         // Taking the absolute value gives the distance scrolled down from the top.
         let scroll_y = scroll_pos.y.abs();
 
-        let can_scroll_up = scroll_y > px(1.0);
-        let can_scroll_down = scroll_y + container_h < content_h - px(1.0);
+        let can_scroll_up = scroll_y > px(0.5);
+        let dist_to_bottom = (content_h - (scroll_y + container_h)).max(px(0.0));
+        let can_scroll_down = dist_to_bottom > px(0.5);
+
+        if !can_scroll_up && !can_scroll_down {
+            return;
+        }
 
         let effective_fade = self.fade_size.min(container_h / 2.0);
+        if effective_fade <= px(1.0) {
+            return;
+        }
+
         // 极重要：半透明防护原则。
         // 当窗口背景透明度小于 100%（例如 0.46 等半透明/毛玻璃状态）时，在已有透明图层上绘制任何渐变遮罩，
         // 都会发生二次 Alpha 复合（Alpha Compounding），导致渐变区与底部工具栏/外围容器交界处出现明显的矩形深浅分界线。
@@ -132,103 +156,80 @@ impl Element for ScrollFade {
             return;
         }
 
-        let bg = self.bg_color.unwrap_or_else(|| {
-            let t = crate::theme::theme(_cx);
-            crate::theme::surface_bg(t.bg_panel, _cx)
-        });
+        let t = crate::theme::theme(_cx);
+        let shadow = self.shadow_color.unwrap_or(hsla(0.0, 0.0, 0.0, 1.0));
+        let default_peak = if t.is_dark() { 0.28 } else { 0.09 };
+        let peak = self.max_opacity.unwrap_or(default_peak);
 
-        let a0 = 1.0;
-        let a1 = 0.45;
-        let a2 = 0.10;
-        let a3 = 0.0;
+        // 动态距离平滑缓冲 (Hermite Smoothstep Ramp):
+        // 临界感知区间为 16px。在 0~16px 之间，投影因数由 0.0 平滑升至 1.0，
+        // 触底或触顶时投影完全消退蒸发，内容与工具栏自然贴合平齐。
+        let ramp_distance = px(16.0);
+        let top_ramp = if can_scroll_up {
+            let r = (scroll_y / ramp_distance).clamp(0.0, 1.0);
+            r * r * (3.0 - 2.0 * r)
+        } else {
+            0.0
+        };
+        let bottom_ramp = if can_scroll_down {
+            let r = (dist_to_bottom / ramp_distance).clamp(0.0, 1.0);
+            r * r * (3.0 - 2.0 * r)
+        } else {
+            0.0
+        };
 
-        let h0 = effective_fade * 0.35;
-        let h1 = effective_fade * 0.35;
-        let h2 = effective_fade - h0 - h1;
-
-        if can_scroll_up {
-            // 上方渐变：从上到下淡出（顶部最深，向下逐渐透明融进内容）
-            // 切片 0 (顶部): alpha 从 a0 降到 a1
-            let b0 = Bounds::new(bounds.origin, size(bounds.size.width, h0));
-            window.paint_quad(fill(
-                b0,
-                linear_gradient(
-                    180.0,
-                    linear_color_stop(Hsla { a: a0, ..bg }, 0.0),
-                    linear_color_stop(Hsla { a: a1, ..bg }, 1.0),
-                ),
-            ));
-            // 切片 1 (中部): alpha 从 a1 降到 a2
-            let b1 = Bounds::new(
-                point(bounds.origin.x, bounds.origin.y + h0),
-                size(bounds.size.width, h1),
+        // 方案 A：环境光景深悬浮微投影（Elevation Drop Shadow）
+        // 彻底摆脱“在正文上方盖半透明色块”的弊病，文字颜色保持 100% 清晰锐利，
+        // 仅在顶栏/底栏接缝处投射一道极其幽微的 8px 漫反射微阴影，完美呈现纸张滑入托盘的物理隐喻。
+        if can_scroll_up && top_ramp > 0.001 {
+            let top_bounds = Bounds::new(
+                bounds.origin,
+                size(bounds.size.width, effective_fade),
             );
             window.paint_quad(fill(
-                b1,
+                top_bounds,
                 linear_gradient(
                     180.0,
-                    linear_color_stop(Hsla { a: a1, ..bg }, 0.0),
-                    linear_color_stop(Hsla { a: a2, ..bg }, 1.0),
-                ),
-            ));
-            // 切片 2 (下端消融区): alpha 从 a2 平滑归零 a3
-            let b2 = Bounds::new(
-                point(bounds.origin.x, bounds.origin.y + h0 + h1),
-                size(bounds.size.width, h2),
-            );
-            window.paint_quad(fill(
-                b2,
-                linear_gradient(
-                    180.0,
-                    linear_color_stop(Hsla { a: a2, ..bg }, 0.0),
-                    linear_color_stop(Hsla { a: a3, ..bg }, 1.0),
+                    linear_color_stop(shadow.alpha(peak * top_ramp), 0.0),
+                    linear_color_stop(shadow.alpha(0.0), 1.0),
                 ),
             ));
         }
 
-        if can_scroll_down {
-            // 下方渐变：从下到上淡出（底部最深，向上逐渐透明融进内容）
-            // 在 GPUI WGSL shader 中，angle = 0.0 方向为 (0, -1) 朝上，stop 0 在底端，stop 1 在顶端。
-            let base_y = bounds.origin.y + container_h;
-            // 切片 0 (底部最深区): alpha 从 a0 (底) 降到 a1 (顶)
-            let b0 = Bounds::new(
-                point(bounds.origin.x, base_y - h0),
-                size(bounds.size.width, h0),
+        if can_scroll_down && bottom_ramp > 0.001 {
+            let bottom_y = bounds.origin.y + container_h - effective_fade;
+            let bottom_bounds = Bounds::new(
+                point(bounds.origin.x, bottom_y),
+                size(bounds.size.width, effective_fade),
             );
             window.paint_quad(fill(
-                b0,
+                bottom_bounds,
                 linear_gradient(
                     0.0,
-                    linear_color_stop(Hsla { a: a0, ..bg }, 0.0),
-                    linear_color_stop(Hsla { a: a1, ..bg }, 1.0),
-                ),
-            ));
-            // 切片 1 (中部): alpha 从 a1 (底) 降到 a2 (顶)
-            let b1 = Bounds::new(
-                point(bounds.origin.x, base_y - h0 - h1),
-                size(bounds.size.width, h1),
-            );
-            window.paint_quad(fill(
-                b1,
-                linear_gradient(
-                    0.0,
-                    linear_color_stop(Hsla { a: a1, ..bg }, 0.0),
-                    linear_color_stop(Hsla { a: a2, ..bg }, 1.0),
-                ),
-            ));
-            // 切片 2 (上端消融区): alpha 从 a2 (底) 平滑归零 a3 (顶)
-            let b2 = Bounds::new(
-                point(bounds.origin.x, base_y - effective_fade),
-                size(bounds.size.width, h2),
-            );
-            window.paint_quad(fill(
-                b2,
-                linear_gradient(
-                    0.0,
-                    linear_color_stop(Hsla { a: a2, ..bg }, 0.0),
-                    linear_color_stop(Hsla { a: a3, ..bg }, 1.0),
+                    linear_color_stop(shadow.alpha(peak * bottom_ramp), 0.0),
+                    linear_color_stop(shadow.alpha(0.0), 1.0),
                 ),
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_smoothstep_bounds() {
+        let ramp_distance = 20.0f32;
+        let compute_ramp = |val: f32| -> f32 {
+            let r = (val / ramp_distance).clamp(0.0, 1.0);
+            r * r * (3.0 - 2.0 * r)
+        };
+
+        assert_eq!(compute_ramp(0.0), 0.0);
+        assert!((compute_ramp(10.0) - 0.5).abs() < 1e-4);
+        assert_eq!(compute_ramp(20.0), 1.0);
+        assert_eq!(compute_ramp(50.0), 1.0);
+        assert_eq!(compute_ramp(-10.0), 0.0);
     }
 }

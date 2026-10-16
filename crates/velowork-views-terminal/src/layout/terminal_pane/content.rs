@@ -1052,15 +1052,9 @@ impl Render for TerminalContent {
                                 if global_op < 1.0 {
                                     div()
                                 } else {
-                                    let base_hsla: Hsla = rgb(effective_bg).into();
-                                    let a0 = 1.0;
-                                    let a1 = 0.45;
-                                    let a2 = 0.10;
-                                    let a3 = 0.0;
-                                    let fade_size = px(42.0);
-                                    let h0 = fade_size * 0.35;
-                                    let h1 = fade_size * 0.35;
-                                    let h2 = fade_size - h0 - h1;
+                                    let fade_size = px(8.0);
+                                    let shadow_dark = hsla(0.0, 0.0, 0.0, 0.28);
+                                    let shadow_clear = hsla(0.0, 0.0, 0.0, 0.0);
 
                                     // 计算终端字符网格实际渲染的底部偏移，消除由于行高整数整除产生的底部留白余量
                                     let font_sz = effective_config.font_size * zoom_level * velowork_ui::tokens::ui_scale_factor(cx);
@@ -1078,94 +1072,46 @@ impl Render for TerminalContent {
                                         px(0.0)
                                     };
 
-                                    div()
+                                    let mut overlay = div()
                                         .absolute()
                                         .top_0()
                                         .left_0()
                                         .right_0()
-                                        .bottom_0()
-                                        .when(can_scroll_up, |el| {
-                                            el.child(
-                                                div()
-                                                    .absolute()
-                                                    .top_0()
-                                                    .left_0()
-                                                    .right_0()
-                                                    .h(h0)
-                                                    .bg(linear_gradient(
-                                                        180.0,
-                                                        linear_color_stop(Hsla { a: a0, ..base_hsla }, 0.0),
-                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 1.0),
-                                                    )),
-                                            )
-                                            .child(
-                                                div()
-                                                    .absolute()
-                                                    .top(h0)
-                                                    .left_0()
-                                                    .right_0()
-                                                    .h(h1)
-                                                    .bg(linear_gradient(
-                                                        180.0,
-                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 0.0),
-                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 1.0),
-                                                    )),
-                                            )
-                                            .child(
-                                                div()
-                                                    .absolute()
-                                                    .top(h0 + h1)
-                                                    .left_0()
-                                                    .right_0()
-                                                    .h(h2)
-                                                    .bg(linear_gradient(
-                                                        180.0,
-                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 0.0),
-                                                        linear_color_stop(Hsla { a: a3, ..base_hsla }, 1.0),
-                                                    )),
-                                            )
-                                        })
-                                        .when(can_scroll_down, |el| {
-                                            el.child(
-                                                div()
-                                                    .absolute()
-                                                    .bottom(grid_bottom_inset)
-                                                    .left_0()
-                                                    .right_0()
-                                                    .h(h0)
-                                                    .bg(linear_gradient(
-                                                        0.0,
-                                                        linear_color_stop(Hsla { a: a0, ..base_hsla }, 0.0),
-                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 1.0),
-                                                    )),
-                                            )
-                                            .child(
-                                                div()
-                                                    .absolute()
-                                                    .bottom(grid_bottom_inset + h0)
-                                                    .left_0()
-                                                    .right_0()
-                                                    .h(h1)
-                                                    .bg(linear_gradient(
-                                                        0.0,
-                                                        linear_color_stop(Hsla { a: a1, ..base_hsla }, 0.0),
-                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 1.0),
-                                                    )),
-                                            )
-                                            .child(
-                                                div()
-                                                    .absolute()
-                                                    .bottom(grid_bottom_inset + h0 + h1)
-                                                    .left_0()
-                                                    .right_0()
-                                                    .h(h2)
-                                                    .bg(linear_gradient(
-                                                        0.0,
-                                                        linear_color_stop(Hsla { a: a2, ..base_hsla }, 0.0),
-                                                        linear_color_stop(Hsla { a: a3, ..base_hsla }, 1.0),
-                                                    )),
-                                            )
-                                        })
+                                        .bottom_0();
+
+                                    if can_scroll_up {
+                                        overlay = overlay.child(
+                                            div()
+                                                .absolute()
+                                                .top_0()
+                                                .left_0()
+                                                .right_0()
+                                                .h(fade_size)
+                                                .bg(linear_gradient(
+                                                    180.0,
+                                                    linear_color_stop(shadow_dark, 0.0),
+                                                    linear_color_stop(shadow_clear, 1.0),
+                                                )),
+                                        );
+                                    }
+
+                                    if can_scroll_down {
+                                        overlay = overlay.child(
+                                            div()
+                                                .absolute()
+                                                .bottom(grid_bottom_inset)
+                                                .left_0()
+                                                .right_0()
+                                                .h(fade_size)
+                                                .bg(linear_gradient(
+                                                    0.0,
+                                                    linear_color_stop(shadow_dark, 0.0),
+                                                    linear_color_stop(shadow_clear, 1.0),
+                                                )),
+                                        );
+                                    }
+
+                                    overlay
                                 }
                             }),
                     )
