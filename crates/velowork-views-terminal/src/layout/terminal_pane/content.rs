@@ -1206,7 +1206,7 @@ pub(crate) fn compute_max_scroll_x(
 pub fn render_line_numbers_gutter(
     terminal: &Arc<Terminal>,
     zoom_level: f32,
-    element_bounds: Option<Bounds<Pixels>>,
+    _element_bounds: Option<Bounds<Pixels>>,
     config_override: Option<&velowork_terminal::ResolvedTerminalConfig>,
     cx: &App,
 ) -> Option<Div> {
@@ -1215,8 +1215,7 @@ pub fn render_line_numbers_gutter(
         return None;
     }
 
-    let rows = terminal.resize_state.lock().size.rows;
-    let (line_items, is_alt_screen, max_line_num) = terminal.with_content(|term| {
+    let (rows_info, is_alt_screen, max_line_num) = terminal.with_content(|term| {
         if term.mode().contains(alacritty_terminal::term::TermMode::ALT_SCREEN) {
             return (Vec::new(), true, 0usize);
         }
@@ -1224,13 +1223,14 @@ pub fn render_line_numbers_gutter(
         let grid = term.grid();
         let offset = grid.display_offset() as i32;
         let cols = grid.columns();
-        let screen_lines = grid.screen_lines() as i32;
+        let screen_lines = grid.screen_lines();
+        let screen_lines_i32 = screen_lines as i32;
 
         let topmost = grid.topmost_line().0;
-
         let cursor_line = grid.cursor.point.line.0;
+
         let mut last_content_line = cursor_line.max(0);
-        for row_idx in (0..screen_lines).rev() {
+        for row_idx in (0..screen_lines_i32).rev() {
             let mut has_content = false;
             for col in 0..cols {
                 let c = grid[alacritty_terminal::index::Point::new(
@@ -1251,11 +1251,11 @@ pub fn render_line_numbers_gutter(
         let last_active_line = last_content_line.max(cursor_line);
 
         let cursor_visual_row = cursor_line + offset;
-        let cursor_on_screen = cursor_visual_row >= 0 && cursor_visual_row < screen_lines;
+        let cursor_on_screen = cursor_visual_row >= 0 && cursor_visual_row < screen_lines_i32;
 
         let mut current_logical_line = 1usize;
         let mut cursor_logical_line = None;
-        let mut visible_lines = Vec::with_capacity(screen_lines as usize);
+        let mut line_number_map = std::collections::HashMap::new();
         let mut max_line = 1usize;
 
         for l in topmost..=last_active_line {
@@ -1268,37 +1268,37 @@ pub fn render_line_numbers_gutter(
                 false
             };
 
-            if !is_continuation {
+            if !is_continuation && l > topmost {
                 current_logical_line += 1;
             }
 
             if l == cursor_line {
-                cursor_logical_line = Some((current_logical_line - 1).max(1));
+                cursor_logical_line = Some(current_logical_line);
             }
 
-            let visual_row = l + offset;
-            if visual_row >= 0 && visual_row < screen_lines {
-                let num = (current_logical_line - 1).max(1);
-                if !is_continuation {
-                    max_line = max_line.max(num);
+            if !is_continuation {
+                max_line = max_line.max(current_logical_line);
+            }
+
+            line_number_map.insert(l, (current_logical_line, is_continuation));
+        }
+
+        let mut visual_rows = Vec::with_capacity(screen_lines);
+        for r in 0..screen_lines_i32 {
+            let buffer_line = r - offset;
+            if let Some(&(num, is_continuation)) = line_number_map.get(&buffer_line) {
+                if is_continuation {
+                    visual_rows.push((String::new(), false));
+                } else {
+                    let is_active = cursor_on_screen && cursor_logical_line == Some(num);
+                    visual_rows.push((format!("{}", num), is_active));
                 }
-                visible_lines.push((num, is_continuation));
+            } else {
+                visual_rows.push((String::new(), false));
             }
         }
 
-        let items: Vec<(String, bool)> = visible_lines
-            .into_iter()
-            .map(|(num, is_continuation)| {
-                if is_continuation {
-                    (String::new(), false)
-                } else {
-                    let is_active = cursor_on_screen && cursor_logical_line == Some(num);
-                    (format!("{}", num), is_active)
-                }
-            })
-            .collect();
-
-        (items, false, max_line)
+        (visual_rows, false, max_line)
     });
 
     if is_alt_screen {
@@ -1310,9 +1310,54 @@ pub fn render_line_numbers_gutter(
     let default_opts = velowork_state::SessionTerminalOptions::default();
     let fallback_config = velowork_terminal::resolve_effective_terminal_config(&default_opts, &defaults);
     let effective_config = config_override.unwrap_or(&fallback_config);
-    let font_sz = effective_config.font_size * zoom_level * velowork_ui::tokens::ui_scale_factor(cx);
-    let lh = font_sz * render_settings.line_height;
-    let font_family = effective_config.font_family.clone();
+
+    let base_font_size = effective_config.font_size * zoom_level;
+    let font_size = px(base_font_size * velowork_ui::tokens::ui_scale_factor(cx));
+    let line_height = font_size * render_settings.line_height;
+
+    let base_weight = match render_settings.font_weight.as_str() {
+        "Light" | "light" => FontWeight::LIGHT,
+        "Medium" | "medium" => FontWeight::MEDIUM,
+        "Bold" | "bold" => FontWeight::BOLD,
+        _ => FontWeight::NORMAL,
+    };
+    let base_style = FontStyle::Normal;
+
+    #[cfg(target_os = "macos")]
+    let font = Font {
+        family: effective_config.font_family.clone().into(),
+        features: FontFeatures::disable_ligatures(),
+        fallbacks: Some(FontFallbacks::from_fonts(vec![
+            "JetBrains Mono".into(),
+            "Menlo".into(),
+            "SF Mono".into(),
+            "Monaco".into(),
+        ])),
+        weight: base_weight,
+        style: base_style,
+    };
+
+    #[cfg(not(target_os = "macos"))]
+    let font = Font {
+        family: effective_config.font_family.clone().into(),
+        features: FontFeatures::disable_ligatures(),
+        fallbacks: Some(FontFallbacks::from_fonts(vec![
+            "JetBrains Mono".into(),
+            "DejaVu Sans Mono".into(),
+            "Liberation Mono".into(),
+            "Ubuntu Mono".into(),
+            "Noto Sans Mono".into(),
+            "monospace".into(),
+        ])),
+        weight: base_weight,
+        style: base_style,
+    };
+
+    let font_bold = Font {
+        weight: FontWeight::SEMIBOLD,
+        ..font.clone()
+    };
+
     let term_palette = velowork_core::theme::get_terminal_palette_with_custom(
         &effective_config.color_scheme,
         &render_settings.custom_terminal_color_schemes,
@@ -1328,17 +1373,7 @@ pub fn render_line_numbers_gutter(
     };
 
     let max_digits = max_line_num.to_string().len().max(3);
-    let gutter_w = (max_digits as f32 * font_sz * 0.6 + 16.0).max(36.0);
-
-    let effective_rows = if let Some(bounds) = element_bounds {
-        if lh > 0.0 {
-            ((f32::from(bounds.size.height) - 0.5) / lh).floor().max(1.0) as u16
-        } else {
-            rows
-        }
-    } else {
-        rows.max(30)
-    }.max(rows);
+    let gutter_w = (max_digits as f32 * f32::from(font_size) * 0.6 + 16.0).max(36.0);
 
     Some(
         div()
@@ -1346,37 +1381,56 @@ pub fn render_line_numbers_gutter(
             .w(px(gutter_w))
             .h_full()
             .pt(SPACE_XS)
+            .pb(SPACE_XS)
             .pr(SPACE_SM)
-            .flex()
-            .flex_col()
             .overflow_hidden()
-            .children((0..effective_rows).map(move |row| {
-                let (label, is_active) = line_items
-                    .get(row as usize)
-                    .cloned()
-                    .unwrap_or_else(|| (String::new(), false));
-                let font_family = font_family.clone();
-                let text_color = if is_active {
-                    active_line_num_color
-                } else {
-                    normal_line_num_color
-                };
-                let font_weight = if is_active {
-                    FontWeight::SEMIBOLD
-                } else {
-                    FontWeight::NORMAL
-                };
-                div()
-                    .font_family(font_family)
-                    .text_size(px(font_sz))
-                    .line_height(px(lh))
-                    .font_weight(font_weight)
-                    .text_color(text_color)
-                    .w_full()
-                    .flex()
-                    .justify_end()
-                    .child(label)
-            }))
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |bounds: Bounds<Pixels>, _, window: &mut Window, cx: &mut App| {
+                        for (r, (label, is_active)) in rows_info.iter().enumerate() {
+                            if label.is_empty() {
+                                continue;
+                            }
+                            let y = px((f32::from(bounds.origin.y) + r as f32 * f32::from(line_height)).floor());
+                            let color = if *is_active {
+                                active_line_num_color
+                            } else {
+                                normal_line_num_color
+                            };
+                            let selected_font = if *is_active {
+                                font_bold.clone()
+                            } else {
+                                font.clone()
+                            };
+                            let run = TextRun {
+                                len: label.len(),
+                                font: selected_font,
+                                color,
+                                background_color: None,
+                                underline: None,
+                                strikethrough: None,
+                            };
+                            let shaped = window.text_system().shape_line(
+                                label.clone().into(),
+                                font_size,
+                                &[run],
+                                None,
+                            );
+                            let x = bounds.origin.x + bounds.size.width - shaped.width;
+                            let _ = shaped.paint(
+                                point(x, y),
+                                line_height,
+                                TextAlign::Left,
+                                None,
+                                window,
+                                cx,
+                            );
+                        }
+                    },
+                )
+                .size_full(),
+            )
     )
 }
 
