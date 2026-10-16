@@ -47,29 +47,33 @@
 
 - ⚡ **120 FPS 丝滑 GPU 渲染** — 纯 Rust 基于 GPUI 打造，亚毫秒级输入响应，瞬时冷启动，并针对多线程小内存分配进行优化（`jemalloc` / `mimalloc`）。
 - 🌐 **一体化远程与本地工作区** — 并排管理 SSH 主机、跳板机、端口隧道、SFTP 传输与本地终端，支持标签页、自由分屏与独立浮动窗口。
-- 🔄 **强韧会话持久化** — 借助底层原生会话引擎（`dtach`、`tmux`、`screen` 及 Windows WSL），即使遭遇网络波动或应用重启，终端会话依旧保持在线。
-- 🤖 **AI 助手（初步接入 / 迭代中）** — 当前已初步接入多模型 Provider（Claude、OpenAI、DeepSeek、Ollama），提供基础的自然语言转 Shell 命令行与侧边栏对话。该模块目前处于早期集成阶段，更多深入的终端协同功能仍在持续迭代完善中。
-- 📊 **实时系统与服务监控** — 实时硬件状态栏（CPU、内存、磁盘 I/O、网络带宽）；图形化**服务面板**统一监管 Systemd 单元、Docker 容器与自定义命令服务，支持健康探活与启停控制。
-- 🔐 **本地优先安全与凭据保险箱** — 支持主密码保护（`velowork-security`），深度整合系统密钥环（Keyring）与 AES-256-GCM 本地加密存储及同步包。
+- 🔄 **强韧会话持久化与弱网低延迟** — 借助底层原生会话引擎（`dtach`、`tmux`、`screen` 及 Windows WSL），即使遭遇网络波动或应用重启，终端会话依旧保持在线；弱网智能预测性本地回显结合 `TCP_NODELAY`，彻底消除跨国与高延迟 SSH 击键粘滞感。
+- 🤖 **AI 智能助手与终端 Copilot** — 终端内联 AI 提示框（`Ctrl+I` / `Cmd+I`）即时生成与解释 Shell 命令，多模态 Vision 图像理解支持直接按 `Ctrl+V` 粘贴系统截图进行排障诊断，智能胶囊划选引用，SQLite 虚拟化无限历史回溯。
+- 📊 **实时系统与服务监控** — 实时硬件状态栏（CPU、内存、磁盘 I/O、网络带宽）配备 32px 自动隐藏模式；图形化**服务面板**统一监管 Systemd 单元、Docker 容器与自定义命令服务，支持健康探活与启停控制。
+- ☁️ **端到端强加密云同步** — 基于 S3 兼容对象存储（AWS S3、MinIO、Cloudflare R2）与 WebDAV 的多设备无缝同步，支持私网 IP 自动 Path-Style 探测、细粒度数据范围选择与本地 AES-256-GCM 加密保护。
+- 🔐 **本地优先安全与凭据保险箱** — 支持主密码保护（`velowork-security`），深度整合系统密钥环（Keyring）与 AES-256-GCM 加密；全应用未保存修改二次确认保护（`soft_close`）杜绝误触丢数据。
 
 ---
 
 ## 🚀 核心功能特性
 
 ### 🪟 布局与工作区管理
-- **自由分屏面板** — 支持水平与垂直自由分屏，拖拽分割线即可即时平滑调整尺寸。
+- **自由分屏面板** — 支持水平与垂直自由分屏，拖拽分割线即可平滑调整尺寸，快捷键一键等比均分（`Cmd/Ctrl+Alt+E`）。
 - **标签页容器与停靠栏** — 灵活组织终端标签页，支持鼠标拖拽排序；支持折叠左/右/底三向 Dock 面板。
 - **多种标签页宽度模式** — 支持等宽（Equal）、紧凑（Compact）与标题自适应（TitleLength）三种模式，适配不同标签数量与多任务场景。
 - **标签页悬停卡片预览** — 鼠标悬停未激活标签页时，自动弹出带实时终端快照、连接协议与会话元信息的半透明卡片预览。
-- **可脱离浮动窗口** — 将任意终端面板弹出为独立浮动窗口，并可随时吸附回主工作区。
-- **多项目并排管理** — 并行展示多个独立项目列，支持按需调整各列宽度与层级。
+- **可脱离独立窗口** — 将任意终端面板或辅助工具（如内置日志控制台）弹出为独立浮动窗口，并可随时吸附回主工作区。
+- **平台风格动态标题栏与对齐定制** — 支持精美应用内置标题栏与原生系统标题栏切换（macOS 交通灯、Windows 11、Linux CSD、KDE Breeze 预设）；支持标题文本居中、靠左、靠右对齐定制与动态会话窗口标题（`{会话名称} - Velowork`）。
+- **滚动边缘平滑淡出** — 终端主视口与列表滚动接入连续缓动平滑消融特效（Scroll Fade Edges），并提供半透明窗口二次 Alpha 防晕染回退机制。
 - **工作区状态自动持久化** — 防抖自动保存并恢复完整的窗口布局、终端历史输出、打开的标签页与偏好设置。
 
 ### 💻 终端使用体验
 - **完整终端仿真** — 基于 `alacritty_terminal`，支持完整的 24-bit TrueColor 真彩色与 ANSI 转义序列、图片及 Sixel 渲染。
+- **预测性本地回显 (Predictive Local Echo)** — 针对跨国或弱网高延迟 SSH 会话，实现击键本地即时上屏预测与服务端数据平滑校验消除，打字零卡顿。
 - **沉浸式终端背景壁纸** — 支持自定义设置终端背景图片，配备自适应高斯模糊磨砂遮罩与半透明顶栏保护层，兼顾个性化壁纸与文字图标的清晰对比度。
-- **ZMODEM 高速文件互传** — 原生集成 ZMODEM 协议，终端内执行 `rz` / `sz` 即可直接唤起图形化文件选择器完成双向传输。
-- **行内文本搜索** — 快速检索终端输出，支持正则表达式、大小写匹配与命中高亮计数。
+- **工业级 ZMODEM 流式互传** — 原生集成 ZMODEM 协议，终端内执行 `rz` / `sz` 即可唤起原生文件选择器；具备控制字符深度转义（`ESCCTL`）、`ZRINIT` 预协商及取消排空循环（Drain Loop）防终端锁死机制。
+- **自适应高反差行号** — 行号对比度自适应浅色与深色终端方案，当前活动光标行号高亮显示。
+- **行内文本搜索** — 快速检索终端输出，支持正则表达式、大小写匹配与命中高亮计数（`Cmd/Ctrl+F`）。
 - **智能链接识别与编辑器联动** — 自动识别 URL、IP 地址与文件路径；支持 `file:line:col` 语法，一键在 VS Code、Cursor、Zed、Sublime、Neovim 等编辑器中打开。
 - **安全括号粘贴与图片粘贴** — 自动处理多行粘贴防代码注入，支持直接向 TUI 应用粘贴剪贴板图片。
 - **逐终端独立 Shell** — 每个终端窗口可自由指定不同的 Shell（`bash`、`zsh`、`fish`、`cmd.exe`、`PowerShell`、`WSL`）。
@@ -82,27 +86,26 @@
 - **X11 远程图形转发** — 支持 SSH X11 Forwarding，远程 Linux GUI 应用程序窗口可无缝投影到本地桌面显示。
 - **跳板机 (ProxyJump)** — 支持多跳堡垒机链路与 SSH 密钥密码缓存。
 - **SSH 隧道转发** — 图形化配置和管理本地（`-L`）、远程（`-R`）与动态 SOCKS5（`-D`）端口转发。
-- **SFTP 文件浏览器** — 双栏文件管理器，支持拖拽上传/下载、远程文件实时浏览与远程行内编辑。
-- **快捷指令库** — 沉淀高频命令，支持参数占位符 `{{变量}}` 弹出式交互输入与模态填充。
+- **SFTP 文件浏览器** — 双栏文件管理器，支持拖拽上传/下载、远程文件实时浏览、权限修改与远程行内编辑。
+- **快捷指令库** — 沉淀高频命令，支持参数占位符 `{{变量}}` 与 `${VAR}` 交互输入、目标终端选择器与历史多行截断展示（`+N` 角标）。
 
 ### 🔄 会话持久化
 - **零中断重连** — 通过 `dtach`、`tmux` 或 `screen`（Unix）在断网或重启后无缝恢复会话状态。
 - **WSL 会话支持** — 无缝兼容 Windows 平台的 WSL 终端持久化与环境隔离。
 - **配置与场景快照** — 命名工作区配置的快速保存、加载、导出与导入。
 
-### 🤖 AI 智能助手（初步接入 / 迭代中）
-- **AI 交互侧边栏** — 融合当前活动终端与项目上下文的 AI 对话窗口。
-- **自然语言转命令** — 将日常语言需求一键转为精准 Shell 命令行并直接执行。
-- **多模型支持** — 支持对接 Claude、OpenAI、DeepSeek、Ollama 或任意兼容 OpenAI 接口的模型。
-> 💡 **说明**：AI 功能目前处于早期接入与探索阶段，更多深度的终端智能联动特性仍在持续开发完善中。
+### 🤖 AI 智能助手与终端 Copilot
+- **终端内联 AI (`Cmd/Ctrl+I`)** — Command Palette 风格单行输入条，输入自然语言一键转为 Shell 命令上屏执行（`Tab`/`Enter`）。
+- **多模态 Vision 图像理解** — 直接在 AI 对话框中按 `Ctrl+V` 粘贴屏幕截图与报错图片，大模型秒级多模态图文排障。
+- **AI 侧边栏与上下文引用** — 终端选区智能胶囊一键引用、完整对话流、多模型随时切换（Claude、OpenAI、DeepSeek、Ollama 私有模型）。
+- **系统提示词安全契约** — 五层安全契约防注入，意图自适应提示词优化输出质量。
 
 ### 📊 系统与服务监控
-- **实时硬件状态栏** — 毫秒级展示 CPU、内存、磁盘 I/O、网络流量与系统时钟。
+- **实时硬件状态栏** — 毫秒级展示 CPU、内存、磁盘 I/O、网络流量与系统时钟，支持 32px 自动隐藏模式。
 - **自定义服务面板** — 在服务面板中直观管理 Systemd 单元、Docker 容器与自定义命令服务，实时检测存活状态并一键启停/重启。
 
 ### 🎨 外观定制与全面国际化
 - **自研原生设计系统** — 统一的 Design Tokens、语义调色板、同心圆角设计与微动效，兼顾优雅观感与高密度工作区效率。
-- **多平台风格动态标题栏** — 支持精美应用内置标题栏与原生系统标题栏随时切换，并提供 macOS 交通灯、Windows 11、Linux CSD、KDE Breeze 多套平台级控件风格预设。
 - **精致主题系统** — 内置深色、浅色、柔和深色、高对比度主题，支持导入自定义 JSON 主题。
 - **完整双语国际化 (i18n)** — 全面支持英文与简体中文，纯图标按钮配备悬停中文 Tooltip 提示。
 
@@ -110,11 +113,12 @@
 
 ## 🏗️ 系统架构
 
-Velowork 采用清晰的分层设计，由 17 个专业化 Cargo workspace crate 构成：
+Velowork 采用清晰的分层设计，由 18 个专业化 Cargo workspace crate 构成：
 
 ```
 velowork (二进制入口)
   ├── velowork-app (桌面业务层: 窗口调度、菜单栏、浮层协调、快捷键路由)
+  │     ├── velowork-app-core (应用核心领域模型、设置状态与跨模块持久化桥接)
   │     ├── velowork-views-terminal (视图层: 终端面板、SFTP 浏览器、对话框、侧边栏)
   │     ├── velowork-ui (UI 组件层: 设计令牌、按钮、输入框、对话框、标签页)
   │     │     ├── velowork-theme (主题引擎与语义颜色调色板)
@@ -122,9 +126,9 @@ velowork (二进制入口)
   │     ├── velowork-layout (Dock 与面板分屏布局原语)
   │     ├── velowork-state (响应式状态存储、服务监控定义与事件通道)
   │     ├── velowork-workspace (Workspace GPUI 实体、持久化与项目状态)
-  │     ├── velowork-terminal (PTY 调度循环、Shell 探测、会话持久化引擎)
+  │     ├── velowork-terminal (PTY 调度循环、Shell 探测、会话持久化引擎、ZMODEM)
   │     ├── velowork-security (主密码加密、系统 Keyring 凭据保险箱)
-  │     ├── velowork-ai (AI 助手、LLM Provider 适配与自然语言命令生成)
+  │     ├── velowork-ai (AI 助手、LLM Provider 适配、Vision 图像理解与命令生成)
   │     ├── velowork-monitor (硬件资源与系统指标采集: CPU/内存/磁盘/网络)
   │     ├── velowork-markdown (Markdown 解析与渲染器、文档阅读器)
   │     ├── velowork-i18n (内置多语言翻译、词条加载器与 i18n! 宏)
@@ -135,16 +139,16 @@ velowork (二进制入口)
 | Crate | 职责划分 |
 | :--- | :--- |
 | `velowork-app` | 桌面应用业务层：主窗口生命周期、菜单栏、浮层管理器、快捷键调度 |
-| `velowork-app-core` | 应用核心领域模型、接口契约与跨模块状态桥接 |
+| `velowork-app-core` | 应用核心领域模型、设置状态与线程安全持久化桥接 |
 | `velowork-workspace` | LayoutNode 布局树、多窗格停靠、工作区持久化与设置状态 |
 | `velowork-views-terminal` | 终端面板视图、SFTP 浏览器、隧道与远程连接对话框、侧边栏视图 |
-| `velowork-terminal` | PTY 调度循环、Shell 探测、会话持久化引擎（`dtach`/`tmux`/`screen`） |
+| `velowork-terminal` | PTY 调度循环、Shell 探测、会话持久化引擎（`dtach`/`tmux`/`screen`）、ZMODEM 流式引擎 |
 | `velowork-layout` | Dock 停靠栏、Panel 面板与分屏结构原语 |
 | `velowork-state` | 状态存储、响应式状态模型、服务监控定义与消息通道 |
 | `velowork-ui` | 设计令牌、图标库、现代化自研 UI 通用组件库（`Button`、`SimpleInput`、`Tab` 等） |
 | `velowork-theme` | 主题颜色定义、动态主题解析与语义颜色映射 |
 | `velowork-security` | 主密码加密、OS Keyring 接入与凭据保险箱 |
-| `velowork-ai` | AI 助手集成、LLM Provider 适配与自然语言命令生成 |
+| `velowork-ai` | AI 助手集成、LLM Provider 适配、Vision 图像理解与自然语言命令生成 |
 | `velowork-monitor` | 硬件与系统资源监控（CPU、内存、磁盘 I/O、网络流量） |
 | `velowork-markdown` | Markdown 渲染引擎、文档查看器与语法高亮 |
 | `velowork-i18n` | 内置多语言字典、国际化加载器与 `i18n!` 宏 |
@@ -161,76 +165,78 @@ velowork (二进制入口)
 | 操作 | macOS | Linux / Windows | 生效范围 / 上下文 |
 | :--- | :--- | :--- | :--- |
 | **全局命令面板** | `Cmd+Shift+P` | `Ctrl+Shift+P` | 全局 |
+| **终端内联 AI 提示框** | `Cmd+I` | `Ctrl+I` | 终端窗格 |
 | **聚焦左侧栏 (会话树)** | `Cmd+1` | `Alt+1` | 全局 |
 | **聚焦中间工作区 (终端)** | `Cmd+2` | `Alt+2` | 全局 |
 | **聚焦底栏 (SFTP / 命令)** | `Cmd+3` | `Alt+3` | 全局 |
 | **聚焦右侧面板 (AI / 工具)** | `Cmd+4` | `Alt+4` | 全局 |
 | **切换左侧 Dock 栏** | `Cmd+B` | `Ctrl+B` | 全局 |
 | **切换右侧 Dock 栏** | `Cmd+Shift+R` | `Ctrl+Shift+R` | 全局 |
+| **切换底部命令面板** | `Cmd+Shift+Y` | `Ctrl+Shift+Y` | 全局 |
+| **切换底部状态栏** | `Cmd+J` | `Ctrl+J` | 全局 |
 | **打开 AI 助手面板** | `Cmd+Shift+A` | `Ctrl+Shift+A` | 全局 |
 | **打开 SSH 隧道面板** | `Cmd+Shift+U` | `Ctrl+Shift+U` | 全局 |
 | **打开服务面板** | `Cmd+Shift+S` | `Ctrl+Shift+S` | 全局 |
 | **打开快捷指令面板** | `Cmd+Shift+K` | `Ctrl+Shift+K` | 全局 |
 | **打开 SFTP 文件浏览器** | `Cmd+Shift+F` | `Ctrl+Shift+F` | 全局 |
-| **打开底部命令面板** | `Cmd+Shift+Y` | `Ctrl+Shift+Y` | 全局 |
 | **打开历史命令记录面板** | `Cmd+Shift+H` | `Ctrl+Shift+H` | 全局 |
 | **均化所有分屏尺寸** | `Cmd+Alt+E` | `Ctrl+Alt+E` | 全局 |
 | **新建应用窗口** | `Cmd+Shift+N` | `Ctrl+Shift+N` | 全局 |
 | **偏好设置** | `Cmd+,` | `Ctrl+,` | 全局 |
 | **快捷键查看与配置** | `Cmd+K Cmd+S` | `Ctrl+K Ctrl+S` | 全局 |
 | **主题选择器** | `Cmd+K Cmd+T` | `Ctrl+K Ctrl+T` | 全局 |
-| **新建终端标签** | `Cmd+T` | `Ctrl+Shift+T` | 终端面板 |
-| **垂直分屏** | `Cmd+D` | `Ctrl+Shift+D` | 终端面板 |
-| **水平分屏** | `Cmd+Shift+D` | `Ctrl+D` | 终端面板 |
-| **关闭当前终端** | `Cmd+W` | `Ctrl+Shift+W` | 终端面板 |
-| **终端内搜索** | `Cmd+F` | `Ctrl+F` | 终端面板 |
-| **复制 / 粘贴** | `Cmd+C` / `Cmd+V` | `Ctrl+Shift+C` / `Ctrl+Shift+V` | 终端面板 |
-| **放大 / 缩小字号** | `Cmd+=` / `Cmd+-` | `Ctrl+=` / `Ctrl+-` | 终端面板 |
+| **新建终端标签页** | `Cmd+T` | `Ctrl+Shift+T` | 终端窗格 |
+| **垂直分屏 (左右并排)** | `Cmd+D` | `Ctrl+Shift+D` | 终端窗格 |
+| **水平分屏 (上下并排)** | `Cmd+Shift+D` | `Ctrl+D` | 终端窗格 |
+| **关闭当前终端标签** | `Cmd+W` | `Ctrl+Shift+W` | 终端窗格 |
+| **终端内搜索** | `Cmd+F` | `Ctrl+F` | 终端窗格 |
+| **复制 / 粘贴** | `Cmd+C` / `Cmd+V` | `Ctrl+Shift+C` / `Ctrl+Shift+V` | 终端窗格 |
+| **字体放大 / 缩小** | `Cmd+=` / `Cmd+-` | `Ctrl+=` / `Ctrl+-` | 终端窗格 |
 
 ---
 
-## 🛠️ 构建与安装
+## 🛠️ 编译与本地构建
 
-### 环境准备
+### 前置环境需求
 
-- **Rust 工具链**: **1.95.0**（通过 `rust-toolchain.toml` 锁定，Edition 2024）。
-- **C/C++ 工具链与依赖**: `cmake`、`pkg-config` 及基础 C 编译环境。
+- **Rust 工具链**：**1.95.0**（已在 `rust-toolchain.toml` 中锁定，Edition 2024）。
+- **C 构建工具集**：`cmake`、`pkg-config` 及本地 C/C++ 编译器。
 
-#### Linux 系统依赖安装
-Debian / Ubuntu 系列：
+#### Linux 平台系统底层依赖
+Debian / Ubuntu 系：
 ```bash
 sudo apt update
 sudo apt install -y build-essential pkg-config libx11-dev libxkbcommon-x11-dev \
     libfontconfig1-dev libwayland-dev libssl-dev cmake
 ```
 
-Fedora / RHEL 系列：
+Fedora / RHEL 系：
 ```bash
 sudo dnf install -y gcc gcc-c++ pkgconfig libX11-devel libxkbcommon-x11-devel \
     fontconfig-devel wayland-devel openssl-devel cmake
 ```
 
-### 源码编译
+### 源码编译步骤
 
 ```bash
-# 克隆仓库
+# 克隆代码仓库
 git clone https://github.com/mxsail/velowork.git
 cd velowork
 
-# 编译优化后的 Release 版本
+# 编译优化后的 Release 二进制文件
 cargo build --release
 
 # 运行 Velowork
 ./target/release/velowork
 ```
 
-### Windows 构建
+### Windows 平台编译
 
-在 Windows 环境下，请在 **x64 Native Tools Command Prompt for VS 2022** 命令行中执行：
+在 Windows 下，建议打开 **x64 Native Tools Command Prompt for VS 2022** 执行构建：
 
 ```powershell
 cargo build --release --target x86_64-pc-windows-msvc
-# 生成二进制产物：target\x86_64-pc-windows-msvc\release\velowork.exe
+# 二进制输出路径: target\x86_64-pc-windows-msvc\release\velowork.exe
 ```
 
 ### 性能分析构建
@@ -243,15 +249,15 @@ cargo run --profile profiling --features dhat-heap
 
 ---
 
-## ⚙️ 配置文件与多 Profile 架构
+## ⚙️ 配置文件与存储规范
 
-Velowork 采用 Profile 隔离的配置存储方案。各平台配置路径如下：
+Velowork 采用环境隔离的 Profile 存储机制，各操作系统下的标准存储路径：
 
-- **macOS**: `~/Library/Application Support/velowork/`
-- **Linux**: `~/.config/velowork/`
-- **Windows**: `%APPDATA%\velowork\`
+- **macOS**：`~/Library/Application Support/velowork/`
+- **Linux**：`~/.config/velowork/`
+- **Windows**：`%APPDATA%\velowork\`
 
-### 目录结构组织
+### 目录结构一览
 
 ```text
 <config-dir>/velowork/
@@ -259,24 +265,35 @@ Velowork 采用 Profile 隔离的配置存储方案。各平台配置路径如�
 │   └── default/
 │       ├── manifest.json
 │       ├── config/
-│       │   ├── settings.json       # 统一设置（外观、字体、AI 助手、云同步、网络代理等）
+│       │   ├── settings.json       # 全局设置 (外观、终端、AI、云同步、代理等)
 │       │   └── keybindings.json    # 用户自定义快捷键映射
 │       ├── data/
-│       │   └── velowork.db         # SQLite 单文件数据库（主机资产、会话、服务、历史记录）
-│       └── themes/                 # 自定义 JSON 主题文件
-├── logs/                           # 按 Profile 划分的运行日志
-└── runtime/                        # 套接字、IPC 与运行锁文件
+│       │   └── velowork.db         # 单一嵌入式 SQLite 数据库 (资产、会话树、服务、历史等)
+│       └── themes/                 # 用户自定义 JSON 主题文件夹
+├── logs/                           # 运行日志
+└── runtime/                        # IPC 套接字、PID 锁与运行时缓存
 ```
 
 ---
 
-## 📖 文档与支持
+## 📖 文档中心与实操手册
 
-- [快速入门指南](https://github.com/mxsail/velowork/wiki/Getting-Started)
-- [SSH 与远程连接配置](https://github.com/mxsail/velowork/wiki/SSH-Configuration)
-- [快捷指令与占位符变量](https://github.com/mxsail/velowork/wiki/Quick-Commands)
-- [自定义主题与字体配置](https://github.com/mxsail/velowork/wiki/Custom-Themes)
-- [快捷键完整规则手册](docs/shortcuts.md)
+项目提供保姆级实操操作手册与完整的工程技术规范：
+
+| 专题指南 | 仓库内实操文档 | 对应 GitHub Wiki 外链 |
+| :--- | :--- | :--- |
+| **文档中心首页** | [docs/wiki/Home.md](docs/wiki/Home.md) | [Wiki 首页](https://github.com/mxsail/velowork/wiki) |
+| **01. 快速入门指南** | [docs/wiki/Getting-Started.md](docs/wiki/Getting-Started.md) | [快速入门指南](https://github.com/mxsail/velowork/wiki/Getting-Started) |
+| **02. 会话与远程连接** | [docs/wiki/SSH-Configuration.md](docs/wiki/SSH-Configuration.md) | [SSH 与远程连接配置](https://github.com/mxsail/velowork/wiki/SSH-Configuration) |
+| **03. 文件管理与 ZMODEM** | [docs/wiki/SFTP-and-File-Transfer.md](docs/wiki/SFTP-and-File-Transfer.md) | [SFTP 与 ZMODEM 传输](https://github.com/mxsail/velowork/wiki/SFTP-and-File-Transfer) |
+| **04. 快捷指令与变量语法** | [docs/wiki/Quick-Commands.md](docs/wiki/Quick-Commands.md) | [快捷指令与占位符变量](https://github.com/mxsail/velowork/wiki/Quick-Commands) |
+| **05. 端口转发与隧道映射** | [docs/wiki/SSH-Tunnels.md](docs/wiki/SSH-Tunnels.md) | [SSH 端口转发隧道](https://github.com/mxsail/velowork/wiki/SSH-Tunnels) |
+| **06. 服务监控与实时守护** | [docs/wiki/Services-and-Monitoring.md](docs/wiki/Services-and-Monitoring.md) | [服务监控与管理](https://github.com/mxsail/velowork/wiki/Services-and-Monitoring) |
+| **07. 终端进阶与 AI 助手** | [docs/wiki/Terminal-and-AI.md](docs/wiki/Terminal-and-AI.md) | [终端进阶与 AI 助手](https://github.com/mxsail/velowork/wiki/Terminal-and-AI) |
+| **08. 云端多端同步备份** | [docs/wiki/Cloud-Sync.md](docs/wiki/Cloud-Sync.md) | [云端多端同步备份](https://github.com/mxsail/velowork/wiki/Cloud-Sync) |
+| **09. 自定义主题与外观** | [docs/wiki/Custom-Themes.md](docs/wiki/Custom-Themes.md) | [自定义主题与外观定制](https://github.com/mxsail/velowork/wiki/Custom-Themes) |
+| **快捷键完整速查** | [docs/shortcuts.md](docs/shortcuts.md) | [快捷键速查表](docs/shortcuts.md) |
+| **配置与存储规约** | [docs/configuration.md](docs/configuration.md) | [配置项全解](docs/configuration.md) |
 
 ---
 

@@ -85,7 +85,6 @@ build/
 .chat/
 .anthropic/
 .openai/
-docs/
 plans/
 rules/
 skills/

@@ -47,29 +47,33 @@
 
 - ⚡ **Buttery 120 FPS GPU Rendering** — Built purely in Rust on GPUI with sub-millisecond input response, instant cold starts, and minimal memory footprint (`jemalloc` / `mimalloc`).
 - 🌐 **Unified Remote & Local Workspace** — Manage SSH hosts, jump hosts, port tunnels, SFTP transfers, and local shells side-by-side with tabs, splits, and detachable floating windows.
-- 🔄 **Resilient Session Persistence** — Keep remote and local sessions alive across network dropouts or app restarts via native persistence backends (`dtach`, `tmux`, `screen`, and Windows WSL).
-- 🤖 **AI Copilot (Early Preview / In Progress)** — Initial integration with multi-provider LLMs (Claude, OpenAI, DeepSeek, Ollama) for natural language shell command generation and sidebar chat. Currently in an early iteration stage with ongoing active development.
-- 📊 **Real-time System & Service Monitoring** — Live CPU, RAM, Disk I/O, and Network throughput meters; graphical Services Panel for monitoring Systemd units, Docker containers, and custom command services with health checks and start/stop/restart controls.
-- 🔐 **Local-First Security & Credential Vault** — Master-password protected credential store with OS keyring integration and encrypted AES-256-GCM sync bundles.
+- 🔄 **Resilient Session Persistence & Low Latency** — Keep remote and local sessions alive across network dropouts via native persistence backends (`dtach`, `tmux`, `screen`, and Windows WSL); predictive local echo engine with `TCP_NODELAY` eliminates typing lag on weak/high-latency networks.
+- 🤖 **AI Assistant & Terminal Copilot** — Inline AI command generation (`Ctrl+I` / `Cmd+I`), multimodal vision image understanding via clipboard paste (`Ctrl+V`), smart selection capsules, and SQLite-backed virtualized chat history.
+- 📊 **Real-time System & Service Monitoring** — Live CPU, RAM, Disk I/O, and Network throughput meters with 32px auto-hide status bar; graphical Services Panel for monitoring Systemd units, Docker containers, and custom command services with health checks and start/stop/restart controls.
+- ☁️ **End-to-End Encrypted Cloud Sync** — Multi-device synchronization backed by S3-compatible object storage (AWS S3, MinIO, Cloudflare R2) and WebDAV with automated IP Path-Style detection and AES-256-GCM local encryption.
+- 🔐 **Local-First Security & Credential Vault** — Master-password protected credential store with OS keyring integration and secondary confirmation protection (`soft_close`) preventing accidental loss of unsaved changes.
 
 ---
 
 ## 🚀 Key Features
 
 ### 🪟 Layout & Workspace Management
-- **Interactive Split Panes** — Horizontal and vertical splits with interactive drag-to-resize dividers.
+- **Interactive Split Panes** — Horizontal and vertical splits with interactive drag-to-resize dividers and one-click equalization (`Cmd/Ctrl+Alt+E`).
 - **Tabbed Containers & Docking** — Organize terminals into tab groups with drag-and-drop reordering; collapsible left/right/bottom docks.
 - **Multiple Tab Width Modes** — Support for Equal, Compact, and TitleLength adaptive modes to suit various multitasking workflows.
 - **Tab Hover Snapshot Previews** — Hovering over inactive tabs reveals a translucent snapshot card displaying live terminal state, connection protocol, and session details.
-- **Detachable Windows** — Pop out any terminal into an independent floating window and reattach on demand.
-- **Multi-Project Columns** — Manage multiple project environments side-by-side with resizable columns.
+- **Detachable Windows** — Pop out any terminal or auxiliary tool (such as the in-app Log Console) into an independent floating window and reattach on demand.
+- **Platform-Native Titlebar Presets & Alignment** — Switch between in-app custom chrome and OS-native decorations (macOS Traffic Lights, Windows 11, Linux CSD, KDE Breeze); customize title text alignment (Center, Left, Right) with dynamic session titles (`{session} - Velowork`).
+- **Scroll Fade Edges** — Reusable continuous easing gradient overlays on terminal viewport and lists with graceful opacity fallback for translucent DWM/Wayland windows.
 - **Automatic State Persistence** — Debounced auto-save restores your complete workspace layout, terminal scrollback, open tabs, and settings on startup.
 
 ### 💻 Terminal Experience
 - **Full Terminal Emulation** — Powered by `alacritty_terminal` with complete 24-bit TrueColor ANSI support and Sixel/image support.
+- **Predictive Local Echo** — Zero-latency local keystroke prediction and server-side reconciliation for intercontinental or weak-network SSH sessions.
 - **Immersive Terminal Wallpaper** — Custom background images with adaptive Gaussian blur scrims and translucent tab bar protection, balancing personalization with high-contrast readability.
-- **ZMODEM File Transfer** — Native ZMODEM integration: run `rz` / `sz` directly inside the terminal to trigger GUI file pickers for high-speed file transfers.
-- **Inline Text Search** — Fast search with regex support, case matching, and occurrence counts.
+- **Hardened ZMODEM File Transfer** — Native ZMODEM integration: run `rz` / `sz` directly inside the terminal to trigger GUI file pickers, backed by `ESCCTL` escape filtering and cancellation drain loops preventing terminal lockups.
+- **Adaptive Line Numbers** — High-contrast scheme-aware terminal line numbers with distinct active line highlighting.
+- **Inline Text Search** — Fast search with regex support, case matching, and occurrence counts (`Cmd/Ctrl+F`).
 - **Smart Link Detection & Editor Jump** — Clickable URLs, IP addresses, and file paths with `file:line:col` syntax to directly open files in VS Code, Cursor, Zed, Sublime, or Neovim.
 - **Bracketed Paste & Image Paste** — Multi-line paste injection protection, plus direct clipboard image pasting into TUIs.
 - **Per-Terminal Shell Selection** — Assign different shells per terminal (`bash`, `zsh`, `fish`, `cmd.exe`, `PowerShell`, `WSL`).
@@ -82,27 +86,26 @@
 - **X11 Forwarding** — Integrated SSH X11 graphics forwarding to display remote GUI windows directly on your local desktop.
 - **ProxyJump & Jump Hosts** — Multi-hop bastion host routing and SSH key passphrase caching.
 - **SSH Tunnels & Port Forwarding** — Graphical manager for Local (`-L`), Remote (`-R`), and Dynamic SOCKS5 (`-D`) tunnels.
-- **SFTP File Browser** — Dual-pane file manager with drag-and-drop upload/download, remote file preview, and remote file editing.
-- **Quick Commands & Snippets** — Pre-configured command templates with interactive `{{variable}}` parameter modal inputs.
+- **SFTP File Browser** — Dual-pane file manager with drag-and-drop upload/download, remote file preview, permissions editor, and remote file editing.
+- **Quick Commands & Snippets** — Pre-configured command templates with interactive `{{variable}}` and `${VAR}` parameter modal inputs, resizable session pickers, and multiline truncation badges (`+N`).
 
 ### 🔄 Session Persistence
 - **Zero-Downtime Reconnection** — Automatic multi-backend session recovery via `dtach`, `tmux`, or `screen` (Unix).
 - **Windows WSL Session Recovery** — Transparent session persistence for Windows WSL environments.
 - **Named Session Profiles** — Save, restore, import, and export named workspace layouts and session presets.
 
-### 🤖 AI Assistant (Early Preview / In Progress)
-- **AI Sidebar Panel** — Built-in AI chat panel with context from active terminals and project files.
-- **Natural Language to CLI** — Convert plain English descriptions into shell commands with one-click execution.
-- **Multi-Model Provider Support** — Connect to Claude, OpenAI, DeepSeek, Ollama, or custom OpenAI-compatible endpoints.
-> 💡 **Note**: AI features are currently in an initial preview stage and are being actively enhanced for deeper terminal workflow synergy.
+### 🤖 AI Assistant & Terminal Copilot
+- **Terminal Inline AI (`Cmd/Ctrl+I`)** — Command-palette style floating prompt converting plain language descriptions into shell commands with one-click execution (`Tab`/`Enter`).
+- **Multimodal Vision Understanding** — Press `Ctrl+V` to paste screenshots and error logs directly into chat for visual diagnosis.
+- **AI Sidebar Panel** — Full conversation history, terminal selection smart capsules, and model switching (Claude, OpenAI, DeepSeek, Ollama local models).
+- **Hardened Prompt Contract** — 5-layer system prompt contract with injection defense and intent-adaptive prompting.
 
 ### 📊 System & Service Monitoring
-- **Live Hardware Status Bar** — Real-time CPU, RAM, Disk I/O, Network traffic, and system clock.
+- **Live Hardware Status Bar** — Real-time CPU, RAM, Disk I/O, Network traffic, and system clock with 32px auto-hide mode.
 - **Custom Services Panel** — Manage and monitor Systemd units, Docker containers, and custom command services with health checking and one-click start/stop/restart.
 
 ### 🎨 Customization & Internationalization
 - **Handcrafted Design System** — Unified Design Tokens, semantic palettes, concentric geometry, and smooth micro-motions for visual consistency.
-- **Platform-Native Titlebar Presets** — Switch between a custom in-app titlebar and OS-native decorations, with presets for macOS Traffic Lights, Windows 11, Linux CSD, and KDE Breeze.
 - **Theme Engine** — Built-in Dark, Light, Pastel Dark, and High Contrast themes, plus custom JSON theme loading.
 - **Complete Bilingual i18n** — English and Simplified Chinese localization with tooltip hints on every icon.
 
@@ -110,11 +113,12 @@
 
 ## 🏗️ Architecture
 
-Velowork is architected as a modular Cargo workspace of 17 specialized crates:
+Velowork is architected as a modular Cargo workspace of 18 specialized crates:
 
 ```
 velowork (Binary Entry Point)
   ├── velowork-app (Desktop Application Layer: Windows, Menus, Overlays, Actions)
+  │     ├── velowork-app-core (App Core Models, Settings State & Persistence Bridges)
   │     ├── velowork-views-terminal (Views: Terminal Panes, SFTP Browser, Dialogs, Sidebar)
   │     ├── velowork-ui (UI Components: Tokens, Buttons, Inputs, Dialogs, Tabs)
   │     │     ├── velowork-theme (Theme Engine & Semantic Palette)
@@ -135,16 +139,16 @@ velowork (Binary Entry Point)
 | Crate | Responsibility |
 | :--- | :--- |
 | `velowork-app` | Desktop app layer: window lifecycle, menus, overlay coordinator, keybinding routing |
-| `velowork-app-core` | App core domain models, interfaces, and shared state bridges |
+| `velowork-app-core` | App core domain models, settings state, and thread-safe persistence bridges |
 | `velowork-workspace` | LayoutNode tree, multi-pane docking, workspace persistence, settings state |
 | `velowork-views-terminal` | Terminal pane views, SFTP browser, tunnel and remote connection dialogs, sidebar |
-| `velowork-terminal` | PTY spawn loop, shell detection, session persistence engines (`dtach`/`tmux`/`screen`) |
+| `velowork-terminal` | PTY spawn loop, shell detection, session persistence engines (`dtach`/`tmux`/`screen`), ZMODEM |
 | `velowork-layout` | Dock, panel, and split layout primitives |
 | `velowork-state` | State store, reactive state models, service monitor definitions, and event channels |
 | `velowork-ui` | Design tokens, icons, handcrafted modern UI component library (`Button`, `SimpleInput`, `Tab`, etc.) |
 | `velowork-theme` | Color definitions, theme resolution, and semantic color palette mapping |
 | `velowork-security` | Master password encryption, OS keyring integration, and credential vault |
-| `velowork-ai` | AI copilot integration, LLM providers, and natural language command generator |
+| `velowork-ai` | AI copilot integration, LLM providers, vision pipeline, and natural language command generator |
 | `velowork-monitor` | Real-time hardware and system metrics (CPU, RAM, Disk, Network) |
 | `velowork-markdown` | Markdown rendering engine, document viewer, and syntax highlighter |
 | `velowork-i18n` | Embedded JSON translations, locale loader, and `i18n!` macro |
@@ -161,18 +165,20 @@ velowork (Binary Entry Point)
 | Action | macOS | Linux / Windows | Scope / Context |
 | :--- | :--- | :--- | :--- |
 | **Command Palette** | `Cmd+Shift+P` | `Ctrl+Shift+P` | Global |
+| **Terminal Inline AI** | `Cmd+I` | `Ctrl+I` | Terminal |
 | **Focus Left Dock (Sessions)** | `Cmd+1` | `Alt+1` | Global |
 | **Focus Center Dock (Terminal)** | `Cmd+2` | `Alt+2` | Global |
 | **Focus Bottom Dock (SFTP / Commands)** | `Cmd+3` | `Alt+3` | Global |
 | **Focus Right Dock (AI / Tools)** | `Cmd+4` | `Alt+4` | Global |
 | **Toggle Left Dock** | `Cmd+B` | `Ctrl+B` | Global |
 | **Toggle Right Dock** | `Cmd+Shift+R` | `Ctrl+Shift+R` | Global |
+| **Toggle Bottom Dock (Commands)** | `Cmd+Shift+Y` | `Ctrl+Shift+Y` | Global |
+| **Toggle Status Bar** | `Cmd+J` | `Ctrl+J` | Global |
 | **AI Assistant Panel** | `Cmd+Shift+A` | `Ctrl+Shift+A` | Global |
 | **SSH Tunnels Panel** | `Cmd+Shift+U` | `Ctrl+Shift+U` | Global |
 | **Services Panel** | `Cmd+Shift+S` | `Ctrl+Shift+S` | Global |
 | **Quick Commands Panel** | `Cmd+Shift+K` | `Ctrl+Shift+K` | Global |
 | **SFTP File Browser** | `Cmd+Shift+F` | `Ctrl+Shift+F` | Global |
-| **Bottom Commands Panel** | `Cmd+Shift+Y` | `Ctrl+Shift+Y` | Global |
 | **Command History Panel** | `Cmd+Shift+H` | `Ctrl+Shift+H` | Global |
 | **Equalize Layout** | `Cmd+Alt+E` | `Ctrl+Alt+E` | Global |
 | **New Window** | `Cmd+Shift+N` | `Ctrl+Shift+N` | Global |
@@ -270,13 +276,25 @@ Velowork uses a profile-isolated storage model. Platform configuration paths:
 
 ---
 
-## 📖 Documentation & Resources
+## 📖 Documentation & User Manuals
 
-- [Getting Started Guide](https://github.com/mxsail/velowork/wiki/Getting-Started)
-- [SSH & Remote Configuration](https://github.com/mxsail/velowork/wiki/SSH-Configuration)
-- [Quick Commands & Variable Syntax](https://github.com/mxsail/velowork/wiki/Quick-Commands)
-- [Custom Themes & Fonts](https://github.com/mxsail/velowork/wiki/Custom-Themes)
-- [Keybindings Guide](docs/shortcuts.md)
+Comprehensive step-by-step user manuals and technical specifications:
+
+| Topic | In-Repo User Guide | GitHub Wiki Link |
+| :--- | :--- | :--- |
+| **Documentation Portal** | [docs/wiki/Home.md](docs/wiki/Home.md) | [Wiki Home](https://github.com/mxsail/velowork/wiki) |
+| **Getting Started Guide** | [docs/wiki/Getting-Started.md](docs/wiki/Getting-Started.md) | [Wiki Getting Started](https://github.com/mxsail/velowork/wiki/Getting-Started) |
+| **SSH & Remote Configuration** | [docs/wiki/SSH-Configuration.md](docs/wiki/SSH-Configuration.md) | [Wiki SSH Configuration](https://github.com/mxsail/velowork/wiki/SSH-Configuration) |
+| **SFTP & ZMODEM File Transfer** | [docs/wiki/SFTP-and-File-Transfer.md](docs/wiki/SFTP-and-File-Transfer.md) | [Wiki SFTP & ZMODEM](https://github.com/mxsail/velowork/wiki/SFTP-and-File-Transfer) |
+| **Quick Commands & Variables** | [docs/wiki/Quick-Commands.md](docs/wiki/Quick-Commands.md) | [Wiki Quick Commands](https://github.com/mxsail/velowork/wiki/Quick-Commands) |
+| **SSH Tunnels & Port Forwarding** | [docs/wiki/SSH-Tunnels.md](docs/wiki/SSH-Tunnels.md) | [Wiki SSH Tunnels](https://github.com/mxsail/velowork/wiki/SSH-Tunnels) |
+| **Services & Hardware Monitoring** | [docs/wiki/Services-and-Monitoring.md](docs/wiki/Services-and-Monitoring.md) | [Wiki Services & Monitoring](https://github.com/mxsail/velowork/wiki/Services-and-Monitoring) |
+| **Terminal & AI Copilot** | [docs/wiki/Terminal-and-AI.md](docs/wiki/Terminal-and-AI.md) | [Wiki Terminal & AI](https://github.com/mxsail/velowork/wiki/Terminal-and-AI) |
+| **Cloud Multi-Device Sync** | [docs/wiki/Cloud-Sync.md](docs/wiki/Cloud-Sync.md) | [Wiki Cloud Sync](https://github.com/mxsail/velowork/wiki/Cloud-Sync) |
+| **Custom Themes & Appearance** | [docs/wiki/Custom-Themes.md](docs/wiki/Custom-Themes.md) | [Wiki Custom Themes](https://github.com/mxsail/velowork/wiki/Custom-Themes) |
+| **Keybindings Reference** | [docs/shortcuts.md](docs/shortcuts.md) | [Shortcuts](docs/shortcuts.md) |
+| **Configuration Reference** | [docs/configuration.md](docs/configuration.md) | [Configuration](docs/configuration.md) |
+
 
 ---
 
