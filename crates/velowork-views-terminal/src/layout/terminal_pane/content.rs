@@ -1016,6 +1016,7 @@ impl Render for TerminalContent {
                 );
                 div()
                     .size_full()
+                    .relative()
                     .flex()
                     .flex_row()
                     .when_some(gutter_el, |el, g| el.child(g))
@@ -1042,79 +1043,63 @@ impl Render for TerminalContent {
                                     .with_font_family(effective_config.font_family.clone())
                                     .with_font_size(effective_config.font_size)
                                     .with_color_scheme(effective_config.color_scheme.clone()),
-                            )
-                            .child({
-                                let (total_lines, visible_lines, display_offset) = terminal.scroll_info();
-                                let history_size = total_lines.saturating_sub(visible_lines);
-                                let can_scroll_up = (display_offset as usize) < history_size;
-                                let can_scroll_down = display_offset > 0;
-                                let global_op = velowork_ui::theme::bg_opacity(cx);
-                                if global_op < 1.0 {
+                            ),
+                    )
+                    .child({
+                        let (total_lines, visible_lines, display_offset) = terminal.scroll_info();
+                        let history_size = total_lines.saturating_sub(visible_lines);
+                        let can_scroll_up = (display_offset as usize) < history_size;
+                        let can_scroll_down = display_offset > 0;
+                        let global_op = velowork_ui::theme::bg_opacity(cx);
+                        if global_op < 1.0 {
+                            div()
+                        } else {
+                            let fade_size = px(8.0);
+                            let shadow_dark = hsla(0.0, 0.0, 0.0, 0.28);
+                            let shadow_clear = hsla(0.0, 0.0, 0.0, 0.0);
+
+                            let mut overlay = div()
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .right_0()
+                                .bottom_0();
+
+                            if can_scroll_up {
+                                overlay = overlay.child(
                                     div()
-                                } else {
-                                    let fade_size = px(8.0);
-                                    let shadow_dark = hsla(0.0, 0.0, 0.0, 0.28);
-                                    let shadow_clear = hsla(0.0, 0.0, 0.0, 0.0);
-
-                                    // 计算终端字符网格实际渲染的底部偏移，消除由于行高整数整除产生的底部留白余量
-                                    let font_sz = effective_config.font_size * zoom_level * velowork_ui::tokens::ui_scale_factor(cx);
-                                    let lh = font_sz * render_settings.line_height;
-                                    let grid_bottom_inset = if let Some(bounds) = self.element_bounds {
-                                        if lh > 0.0 {
-                                            let avail_h = f32::from(bounds.size.height);
-                                            let rows = ((avail_h - 0.5) / lh).floor().max(1.0);
-                                            let grid_h = rows * lh;
-                                            px((avail_h - grid_h).max(0.0))
-                                        } else {
-                                            px(0.0)
-                                        }
-                                    } else {
-                                        px(0.0)
-                                    };
-
-                                    let mut overlay = div()
                                         .absolute()
                                         .top_0()
                                         .left_0()
                                         .right_0()
-                                        .bottom_0();
+                                        .h(fade_size)
+                                        .bg(linear_gradient(
+                                            180.0,
+                                            linear_color_stop(shadow_dark, 0.0),
+                                            linear_color_stop(shadow_clear, 1.0),
+                                        )),
+                                );
+                            }
 
-                                    if can_scroll_up {
-                                        overlay = overlay.child(
-                                            div()
-                                                .absolute()
-                                                .top_0()
-                                                .left_0()
-                                                .right_0()
-                                                .h(fade_size)
-                                                .bg(linear_gradient(
-                                                    180.0,
-                                                    linear_color_stop(shadow_dark, 0.0),
-                                                    linear_color_stop(shadow_clear, 1.0),
-                                                )),
-                                        );
-                                    }
+                            if can_scroll_down {
+                                overlay = overlay.child(
+                                    div()
+                                        .absolute()
+                                        .bottom_0()
+                                        .left_0()
+                                        .right_0()
+                                        .h(fade_size)
+                                        .bg(linear_gradient(
+                                            0.0,
+                                            linear_color_stop(shadow_dark, 0.0),
+                                            linear_color_stop(shadow_clear, 1.0),
+                                        )),
+                                );
+                            }
 
-                                    if can_scroll_down {
-                                        overlay = overlay.child(
-                                            div()
-                                                .absolute()
-                                                .bottom(grid_bottom_inset)
-                                                .left_0()
-                                                .right_0()
-                                                .h(fade_size)
-                                                .bg(linear_gradient(
-                                                    0.0,
-                                                    linear_color_stop(shadow_dark, 0.0),
-                                                    linear_color_stop(shadow_clear, 1.0),
-                                                )),
-                                        );
-                                    }
-
-                                    overlay
-                                }
-                            }),
-                    )
+                            overlay
+                        }
+                    })
             })
             .child(self.scrollbar.clone())
             .into_any_element()
