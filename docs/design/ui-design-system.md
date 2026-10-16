@@ -52,7 +52,7 @@ velowork-theme / velowork-core (核心层: ThemeColors, SemanticPalette, Design 
 Velowork 内置 4 套开箱即用主题，定义于 `crates/velowork-core/src/theme/colors.rs`：
 
 - **`DARK_THEME`**：暗色主题（深黑曜石碳灰低反光底色 `0x202326`、表面层 `0x2a2d31` 与经典蓝 `0x0078d4`）。
-- **`LIGHT_THEME`**：清爽明亮主题（白/浅灰底色 `0xffffff` / `0xf5f5f5`）。
+- **`LIGHT_THEME`**：明亮主题（现代白瓷工作区底色 `0xffffff`、表面层 `0xf6f8fa`、面板层 `0xf4f5f7`、天水蓝选区 `0xcde6ff` 与深海蓝 `0x0969da`）。
 - **`PASTEL_DARK_THEME`**：柔和暗调主题（带微蓝紫调，护眼低对比）。
 - **`HIGH_CONTRAST_THEME`**：高对比主题（纯黑白极高辨识度）。
 
