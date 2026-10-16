@@ -642,6 +642,9 @@ impl SettingsState {
     setting_setter!(set_text_antialiasing, text_antialiasing, crate::workspace::settings::TextAntialiasingMode);
 
     // Terminal settings
+    setting_setter!(set_terminal_theme_mode, terminal_theme_mode, crate::workspace::settings::TerminalThemeMode);
+    setting_setter!(set_dark_color_scheme, dark_color_scheme, String);
+    setting_setter!(set_light_color_scheme, light_color_scheme, String);
     setting_setter!(set_color_scheme, color_scheme, String);
     setting_setter!(set_charset, charset, String);
     setting_setter!(set_term_type, term_type, String);

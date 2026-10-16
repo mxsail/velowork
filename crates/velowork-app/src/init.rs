@@ -183,7 +183,13 @@ pub fn init_extensions(cx: &mut App) {
                         terminal_background_image: s.settings.terminal_background_image.clone(),
                         terminal_background_image_blur: s.settings.terminal_background_image_blur,
                         terminal_scrollbar_show: s.settings.terminal_scrollbar_show,
-                        color_scheme: s.settings.color_scheme.clone(),
+                        terminal_theme_mode: s.settings.terminal_theme_mode,
+                        dark_color_scheme: s.settings.dark_color_scheme.clone(),
+                        light_color_scheme: s.settings.light_color_scheme.clone(),
+                        color_scheme: {
+                            let is_dark = cx.global::<GlobalTheme>().0.read(cx).effective_is_dark();
+                            s.settings.effective_terminal_color_scheme(is_dark).to_string()
+                        },
                         custom_terminal_color_schemes: s.settings.custom_terminal_color_schemes.clone(),
                         charset: s.settings.charset.clone(),
                         term_type: s.settings.term_type.clone(),
@@ -241,6 +247,9 @@ pub fn init_extensions(cx: &mut App) {
                             state.settings.terminal_background_image_blur =
                                 tvs.terminal_background_image_blur;
                             state.settings.terminal_scrollbar_show = tvs.terminal_scrollbar_show;
+                            state.settings.terminal_theme_mode = tvs.terminal_theme_mode;
+                            state.settings.dark_color_scheme = tvs.dark_color_scheme;
+                            state.settings.light_color_scheme = tvs.light_color_scheme;
                             state.settings.color_scheme = tvs.color_scheme;
                             state.settings.custom_terminal_color_schemes = tvs.custom_terminal_color_schemes;
                             state.settings.charset = tvs.charset;

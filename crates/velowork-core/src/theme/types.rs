@@ -56,6 +56,34 @@ pub enum ColorSchema {
     System,
 }
 
+/// Terminal color scheme linkage mode.
+///
+/// Governs whether the terminal color scheme follows the application appearance
+/// (automatically toggling between dedicated dark/light terminal schemes) or
+/// stays fixed to a single user-selected scheme.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TerminalThemeMode {
+    /// Follow application appearance (Dark terminal scheme when dark, Light scheme when light).
+    #[default]
+    FollowApp,
+    /// Stay fixed to a single color scheme regardless of application appearance.
+    Fixed,
+}
+
+impl TerminalThemeMode {
+    pub fn translation_key(self) -> &'static str {
+        match self {
+            TerminalThemeMode::FollowApp => "settings.terminal_theme_mode.follow_app",
+            TerminalThemeMode::Fixed => "settings.terminal_theme_mode.fixed",
+        }
+    }
+
+    pub fn all_variants() -> &'static [TerminalThemeMode] {
+        &[TerminalThemeMode::FollowApp, TerminalThemeMode::Fixed]
+    }
+}
+
 /// Interface density level.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

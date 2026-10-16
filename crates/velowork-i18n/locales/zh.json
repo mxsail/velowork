@@ -216,6 +216,17 @@
       "equal": "等宽"
     },
     "color_scheme": "配色方案",
+    "terminal_theme_mode": {
+      "label": "终端配色模式",
+      "follow_app": "跟随应用外观",
+      "fixed": "固定单一方案"
+    },
+    "dark_terminal_color_scheme": {
+      "label": "深色终端方案"
+    },
+    "light_terminal_color_scheme": {
+      "label": "浅色终端方案"
+    },
     "charset": "字符集",
     "term_type": "终端类型",
     "wrap_mode": {

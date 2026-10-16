@@ -100,7 +100,14 @@ impl SettingsPanel {
                     .child(section_header(&display_section_title, &t, cx))
                     .child(
                         section_container(&t)
-                            .child(self.render_color_scheme_row(&s.color_scheme, cx))
+                            .child(self.render_terminal_theme_mode_row(s.terminal_theme_mode, cx))
+                            .when(s.terminal_theme_mode == velowork_core::theme::TerminalThemeMode::FollowApp, |this| {
+                                this.child(self.render_dark_color_scheme_row(&s.dark_color_scheme, cx))
+                                    .child(self.render_light_color_scheme_row(&s.light_color_scheme, cx))
+                            })
+                            .when(s.terminal_theme_mode == velowork_core::theme::TerminalThemeMode::Fixed, |this| {
+                                this.child(self.render_color_scheme_row(&s.color_scheme, cx))
+                            })
                             .child(self.render_cursor_style_row(s.cursor_style, cx))
                             .child(self.render_toggle(
                                 "cursor-blink",
@@ -457,6 +464,65 @@ impl SettingsPanel {
         let label = i18n!(cx, "ssh.terminal.charset");
         settings_row("charset".to_string(), &label, &t, cx, true).child(
             div().w(SELECT_WIDTH_MD).child(Select::new(&self.charset_select)),
+        )
+    }
+
+    fn render_terminal_theme_mode_row(
+        &mut self,
+        current: velowork_core::theme::TerminalThemeMode,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let t = theme(cx);
+        let label = i18n!(cx, "settings.terminal_theme_mode.label");
+        let focus_handle = self.get_or_create_radio_focus_handle("terminal-theme-mode", cx);
+
+        settings_row("terminal-theme-mode".to_string(), &label, &t, cx, true).child(
+            RadioGroup::new("terminal-theme-mode-radio")
+                .focus(&focus_handle)
+                .mode(RadioMode::Button)
+                .selected(Some(current))
+                .options(
+                    velowork_core::theme::TerminalThemeMode::all_variants()
+                        .iter()
+                        .map(|&mode| RadioOption::new(mode, i18n!(cx, mode.translation_key())))
+                        .collect(),
+                )
+                .on_change(move |&mode, _, cx| {
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_terminal_theme_mode(mode, cx);
+                    });
+                }),
+        )
+    }
+
+    fn render_dark_color_scheme_row(&mut self, _current: &str, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx);
+        let label = i18n!(cx, "settings.dark_terminal_color_scheme.label");
+        let manage_fh = self.get_or_create_button_focus_handle("manage-color-schemes-btn", cx);
+        settings_row("dark-color-scheme".to_string(), &label, &t, cx, true).child(
+            h_flex()
+                .gap(SPACE_SM)
+                .items_center()
+                .child(div().w(SELECT_WIDTH_MD).child(Select::new(&self.dark_color_scheme_select)))
+                .child(
+                    Button::new("manage-color-schemes-btn", &t)
+                        .label(i18n!(cx, "terminal_color_schemes.manage_button"))
+                        .default()
+                        .tooltip(i18n!(cx, "terminal_color_schemes.manage_tooltip"))
+                        .focus_handle(&manage_fh)
+                        .on_click(cx.listener(|this, _, _window, cx| {
+                            this.dialog_trigger_focus_handle = Some(this.get_or_create_button_focus_handle("manage-color-schemes-btn", cx));
+                            this.open_color_scheme_dialog(cx);
+                        })),
+                ),
+        )
+    }
+
+    fn render_light_color_scheme_row(&mut self, _current: &str, cx: &mut Context<Self>) -> impl IntoElement {
+        let t = theme(cx);
+        let label = i18n!(cx, "settings.light_terminal_color_scheme.label");
+        settings_row("light-color-scheme".to_string(), &label, &t, cx, true).child(
+            div().w(SELECT_WIDTH_MD).child(Select::new(&self.light_color_scheme_select)),
         )
     }
 

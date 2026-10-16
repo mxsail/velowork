@@ -158,7 +158,7 @@ impl CloseBehavior {
 /// `velowork_core::theme` so the workspace settings module stays the single
 /// source of truth for settings types while `velowork-theme` (which cannot
 /// depend on this crate) can use the same type.
-pub use velowork_core::theme::ColorSchema;
+pub use velowork_core::theme::{ColorSchema, TerminalThemeMode};
 
 
 /// Title bar style option (Custom vs Native)
@@ -1150,7 +1150,16 @@ pub struct AppSettings {
     pub ui_font_family: String,
 
     // Terminal settings (new)
-    /// Terminal color scheme name
+    /// Terminal theme linkage mode (follow app appearance vs fixed scheme)
+    #[serde(default)]
+    pub terminal_theme_mode: TerminalThemeMode,
+    /// Terminal color scheme name used when active appearance is dark
+    #[serde(default = "default_dark_color_scheme")]
+    pub dark_color_scheme: String,
+    /// Terminal color scheme name used when active appearance is light
+    #[serde(default = "default_light_color_scheme")]
+    pub light_color_scheme: String,
+    /// Terminal color scheme name (used when terminal_theme_mode is Fixed, or fallback)
     #[serde(default = "default_color_scheme")]
     pub color_scheme: String,
     /// Custom terminal color schemes
@@ -1327,13 +1336,42 @@ impl AppSettings {
             .expect("inserted above")
     }
 
+    /// Resolve the active terminal color scheme name based on current appearance and linkage mode.
+    pub fn effective_terminal_color_scheme(&self, is_dark: bool) -> &str {
+        match self.terminal_theme_mode {
+            TerminalThemeMode::FollowApp => {
+                if is_dark {
+                    if self.dark_color_scheme.trim().is_empty() {
+                        "Dark"
+                    } else {
+                        &self.dark_color_scheme
+                    }
+                } else {
+                    if self.light_color_scheme.trim().is_empty() {
+                        "Light"
+                    } else {
+                        &self.light_color_scheme
+                    }
+                }
+            }
+            TerminalThemeMode::Fixed => {
+                if self.color_scheme.trim().is_empty() {
+                    "Dark"
+                } else {
+                    &self.color_scheme
+                }
+            }
+        }
+    }
+
     /// Extract baseline terminal defaults with safe fallback for color scheme.
     pub fn terminal_defaults(&self) -> velowork_terminal::TerminalDefaults {
-        let valid_color_scheme = if self.color_scheme.trim().is_empty() {
-            "default".to_string()
-        } else {
-            self.color_scheme.clone()
-        };
+        self.terminal_defaults_with_appearance(true)
+    }
+
+    /// Extract baseline terminal defaults with appearance-aware color scheme resolution.
+    pub fn terminal_defaults_with_appearance(&self, is_dark: bool) -> velowork_terminal::TerminalDefaults {
+        let valid_color_scheme = self.effective_terminal_color_scheme(is_dark).to_string();
 
         velowork_terminal::TerminalDefaults {
             font_family: self.font_family.clone(),
@@ -1552,6 +1590,9 @@ impl Default for AppSettings {
             tab_width_mode: TabWidthMode::default(),
             enable_tab_preview: true,
             ui_font_family: default_ui_font_family(),
+            terminal_theme_mode: TerminalThemeMode::default(),
+            dark_color_scheme: default_dark_color_scheme(),
+            light_color_scheme: default_light_color_scheme(),
             color_scheme: default_color_scheme(),
             custom_terminal_color_schemes: Vec::new(),
             charset: default_charset(),
@@ -1751,6 +1792,14 @@ fn default_bg_opacity() -> f32 {
 
 fn default_ui_font_family() -> String {
     "System Default".to_string()
+}
+
+fn default_dark_color_scheme() -> String {
+    "Dark".to_string()
+}
+
+fn default_light_color_scheme() -> String {
+    "Light".to_string()
 }
 
 fn default_color_scheme() -> String {
@@ -2078,6 +2127,40 @@ mod tests {
         assert_eq!(recovered.font_family, "Custom Font");
         assert_eq!(recovered.font_size, 18.0);
         assert_eq!(recovered.scrollback_lines, 42000);
+    }
+
+    #[test]
+    fn test_effective_terminal_color_scheme_linkage() {
+        let mut settings = AppSettings::default();
+
+        // 1. Default mode is FollowApp
+        assert_eq!(settings.terminal_theme_mode, TerminalThemeMode::FollowApp);
+        // FollowApp: Dark when is_dark = true
+        assert_eq!(settings.effective_terminal_color_scheme(true), "Dark");
+        // FollowApp: Light when is_dark = false
+        assert_eq!(settings.effective_terminal_color_scheme(false), "Light");
+
+        // 2. Custom dark/light schemes in FollowApp
+        settings.dark_color_scheme = "One Dark".to_string();
+        settings.light_color_scheme = "Solarized Light".to_string();
+        assert_eq!(settings.effective_terminal_color_scheme(true), "One Dark");
+        assert_eq!(settings.effective_terminal_color_scheme(false), "Solarized Light");
+
+        // 3. Fixed mode
+        settings.terminal_theme_mode = TerminalThemeMode::Fixed;
+        settings.color_scheme = "Monokai".to_string();
+        assert_eq!(settings.effective_terminal_color_scheme(true), "Monokai");
+        assert_eq!(settings.effective_terminal_color_scheme(false), "Monokai");
+
+        // 4. Safe fallbacks for empty strings
+        settings.color_scheme = "".to_string();
+        assert_eq!(settings.effective_terminal_color_scheme(true), "Dark");
+
+        settings.terminal_theme_mode = TerminalThemeMode::FollowApp;
+        settings.dark_color_scheme = "  ".to_string();
+        settings.light_color_scheme = "".to_string();
+        assert_eq!(settings.effective_terminal_color_scheme(true), "Dark");
+        assert_eq!(settings.effective_terminal_color_scheme(false), "Light");
     }
 
     #[test]

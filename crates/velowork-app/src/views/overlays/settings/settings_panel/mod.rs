@@ -90,6 +90,8 @@ pub struct SettingsPanel {
     pub(super) session_backend_select: Entity<SelectState<SessionBackend>>,
     pub(super) charset_select: Entity<SelectState<String>>,
     pub(super) color_scheme_select: Entity<SelectState<String>>,
+    pub(super) dark_color_scheme_select: Entity<SelectState<String>>,
+    pub(super) light_color_scheme_select: Entity<SelectState<String>>,
     pub(super) term_type_select: Entity<SelectState<String>>,
     pub(super) ai_default_model_select: Entity<SelectState<String>>,
     pub(super) ai_compression_strategy_select:
@@ -1157,7 +1159,7 @@ impl SettingsPanel {
         }
         let color_scheme_select = cx.new(|cx| {
             SelectState::new(cx)
-                .options(color_scheme_options)
+                .options(color_scheme_options.clone())
                 .selected(Some(cur_color_scheme))
                 .placement(SelectPlacement::Below)
         });
@@ -1168,6 +1170,54 @@ impl SettingsPanel {
                     let cs = cs.clone();
                     settings_entity(cx).update(cx, |state, cx| {
                         state.set_color_scheme(cs, cx);
+                    });
+                }
+            },
+        )
+        .detach();
+
+        let cur_dark_color_scheme = if s.dark_color_scheme.is_empty() {
+            "Dark".to_string()
+        } else {
+            s.dark_color_scheme.clone()
+        };
+        let dark_color_scheme_select = cx.new(|cx| {
+            SelectState::new(cx)
+                .options(color_scheme_options.clone())
+                .selected(Some(cur_dark_color_scheme))
+                .placement(SelectPlacement::Below)
+        });
+        cx.subscribe(
+            &dark_color_scheme_select,
+            |_, _, event: &SelectEvent<String>, cx| {
+                if let SelectEvent::Change(Some(cs)) = event {
+                    let cs = cs.clone();
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_dark_color_scheme(cs, cx);
+                    });
+                }
+            },
+        )
+        .detach();
+
+        let cur_light_color_scheme = if s.light_color_scheme.is_empty() {
+            "Light".to_string()
+        } else {
+            s.light_color_scheme.clone()
+        };
+        let light_color_scheme_select = cx.new(|cx| {
+            SelectState::new(cx)
+                .options(color_scheme_options)
+                .selected(Some(cur_light_color_scheme))
+                .placement(SelectPlacement::Below)
+        });
+        cx.subscribe(
+            &light_color_scheme_select,
+            |_, _, event: &SelectEvent<String>, cx| {
+                if let SelectEvent::Change(Some(cs)) = event {
+                    let cs = cs.clone();
+                    settings_entity(cx).update(cx, |state, cx| {
+                        state.set_light_color_scheme(cs, cx);
                     });
                 }
             },
@@ -1341,6 +1391,8 @@ impl SettingsPanel {
             session_backend_select,
             charset_select,
             color_scheme_select,
+            dark_color_scheme_select,
+            light_color_scheme_select,
             term_type_select,
             ai_default_model_select,
             ai_compression_strategy_select,
@@ -1640,6 +1692,10 @@ impl SettingsPanel {
         self.charset_select
             .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.color_scheme_select
+            .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
+        self.dark_color_scheme_select
+            .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
+        self.light_color_scheme_select
             .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
         self.term_type_select
             .update(cx, |s, _| s.set_overlay_registry(reg.clone()));
@@ -2012,6 +2068,16 @@ impl SettingsPanel {
         } else {
             s.color_scheme.clone()
         };
+        let cur_dark_color_scheme = if s.dark_color_scheme.is_empty() {
+            "Dark".to_string()
+        } else {
+            s.dark_color_scheme.clone()
+        };
+        let cur_light_color_scheme = if s.light_color_scheme.is_empty() {
+            "Light".to_string()
+        } else {
+            s.light_color_scheme.clone()
+        };
         let mut color_scheme_options = vec![
             SelectOption::new("Dark".to_string(), "Dark"),
             SelectOption::new("Light".to_string(), "Light"),
@@ -2027,8 +2093,16 @@ impl SettingsPanel {
             color_scheme_options.push(SelectOption::new(custom.name.clone(), custom.name.clone()));
         }
         self.color_scheme_select.update(cx, |select, cx| {
-            select.set_options(color_scheme_options, cx);
+            select.set_options(color_scheme_options.clone(), cx);
             select.set_selected_value(Some(cur_color_scheme), cx);
+        });
+        self.dark_color_scheme_select.update(cx, |select, cx| {
+            select.set_options(color_scheme_options.clone(), cx);
+            select.set_selected_value(Some(cur_dark_color_scheme), cx);
+        });
+        self.light_color_scheme_select.update(cx, |select, cx| {
+            select.set_options(color_scheme_options, cx);
+            select.set_selected_value(Some(cur_light_color_scheme), cx);
         });
     }
 
@@ -2122,8 +2196,15 @@ impl SettingsPanel {
                 handles.push(self.term_type_select.read(cx).focus_handle().clone());
                 handles.push(self.charset_select.read(cx).focus_handle().clone());
                 handles.push(self.get_or_create_toggle_focus_handle("restore-terminals", cx));
-                handles.push(self.color_scheme_select.read(cx).focus_handle().clone());
-                handles.push(self.get_or_create_button_focus_handle("manage-color-schemes-btn", cx));
+                handles.push(self.get_or_create_radio_focus_handle("terminal-theme-mode", cx));
+                if s.terminal_theme_mode == velowork_core::theme::TerminalThemeMode::FollowApp {
+                    handles.push(self.dark_color_scheme_select.read(cx).focus_handle().clone());
+                    handles.push(self.get_or_create_button_focus_handle("manage-color-schemes-btn", cx));
+                    handles.push(self.light_color_scheme_select.read(cx).focus_handle().clone());
+                } else {
+                    handles.push(self.color_scheme_select.read(cx).focus_handle().clone());
+                    handles.push(self.get_or_create_button_focus_handle("manage-color-schemes-btn", cx));
+                }
                 handles.push(self.get_or_create_radio_focus_handle("cursor-style", cx));
                 handles.push(self.get_or_create_toggle_focus_handle("cursor-blink", cx));
                 handles.push(self.get_or_create_radio_focus_handle("terminal-scrollbar-show", cx));

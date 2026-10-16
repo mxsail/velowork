@@ -65,9 +65,9 @@ impl<'a> TerminalPainter<'a> {
         let normalized_selection = if self.options.show_selection {
             self.model.selection.map(|((start_col, start_row), (end_col, end_row))| {
                 if start_row < end_row || (start_row == end_row && start_col <= end_col) {
-                    (start_row as i32, start_col as i32, end_row as i32, end_col as i32)
+                    (start_row, start_col as i32, end_row, end_col as i32)
                 } else {
-                    (end_row as i32, end_col as i32, start_row as i32, start_col as i32)
+                    (end_row, end_col as i32, start_row, start_col as i32)
                 }
             })
         } else {
@@ -427,13 +427,21 @@ impl<'a> TerminalPainter<'a> {
 
         let cursor_x = px((f32::from(origin.x) + cursor_point.column.0 as f32 * f32::from(cell_width)).floor());
         let cursor_y = px((f32::from(origin.y) + visual_line as f32 * f32::from(line_height)).floor());
-        let cursor_rgba = rgb(self.palette.cursor.unwrap_or(self.palette.foreground));
-        let cursor_color = Hsla::from(Rgba {
-            r: cursor_rgba.r,
-            g: cursor_rgba.g,
-            b: cursor_rgba.b,
-            a: 0.8,
-        });
+        let cursor_color = if let Some(cursor_color) = self.palette.cursor {
+            let cursor_rgba = rgb(cursor_color);
+            Hsla::from(Rgba {
+                r: cursor_rgba.r,
+                g: cursor_rgba.g,
+                b: cursor_rgba.b,
+                a: 0.8,
+            })
+        } else {
+            let p = SemanticPalette::from_theme(self.theme_colors);
+            Hsla {
+                a: 0.8,
+                ..p.editor_cursor
+            }
+        };
 
         match self.model.cursor_shape {
             CursorShape::Block => {

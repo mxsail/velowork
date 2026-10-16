@@ -38,6 +38,7 @@ velowork-theme / velowork-core (核心层: ThemeColors, SemanticPalette, Design 
 ```
 
 ### 核心设计原则
+
 1. **单一真实源 (Single Source of Truth)**：所有样式、间距、字号、圆角、颜色必须从 Design Tokens 与 `SemanticPalette` 导出，**严禁硬编码**。
 2. **通透磨砂一致性 (Frosted Translucency)**：全平台窗口、弹窗、浮层与控件在任意透明度（`bg_opacity`）下，必须保持纯净同调的色调层次与高辨识度。
 3. **确定性与无障碍 (Determinism & Accessibility)**：纯图标必带中文 Tooltip、所有面板支持拖拽缩放、所有文案支持国际化。
@@ -47,8 +48,10 @@ velowork-theme / velowork-core (核心层: ThemeColors, SemanticPalette, Design 
 ## 2. 色彩与透明度模型 (Colors & Translucency)
 
 ### 2.1 四套内置主题 (`ThemeColors`)
+
 Velowork 内置 4 套开箱即用主题，定义于 `crates/velowork-core/src/theme/colors.rs`：
-- **`DARK_THEME`**：经典暗色主题（VSCode 质感，深黑底色 `0x0a0b0d`）。
+
+- **`DARK_THEME`**：暗色主题（深黑曜石碳灰低反光底色 `0x202326`、表面层 `0x2a2d31` 与经典蓝 `0x0078d4`）。
 - **`LIGHT_THEME`**：清爽明亮主题（白/浅灰底色 `0xffffff` / `0xf5f5f5`）。
 - **`PASTEL_DARK_THEME`**：柔和暗调主题（带微蓝紫调，护眼低对比）。
 - **`HIGH_CONTRAST_THEME`**：高对比主题（纯黑白极高辨识度）。
@@ -56,26 +59,28 @@ Velowork 内置 4 套开箱即用主题，定义于 `crates/velowork-core/src/th
 > **注意**：新增主题字段时，必须同时在 4 套主题结构体中完整声明。
 
 ### 2.2 语义调色盘 (`SemanticPalette`)
+
 在 UI 渲染中，一律使用语义化调色盘字段，禁止直接使用裸 Hex 颜色：
 
-| 语义字段 | 描述 / 计算规则 | 典型应用场景 |
-| :--- | :--- | :--- |
-| `p.surface_base` | `with_alpha(t.bg_primary, opacity)` | 主窗口背景、独立设置窗口基底、弹窗基底 |
-| `p.surface_raised` | `with_alpha(t.bg_secondary, opacity)` | 悬浮卡片、次级容器、步进器/数值展示框 |
-| `p.surface_card` | `with_alpha(t.text_primary, 0.035)` | 磨砂卡片层、控件静止底色、弹窗头部/底部区域 |
-| `p.surface_selection` | `with_alpha(t.bg_selection, opacity)` | 列表选中行、分段按钮选中态、Tab 激活态 |
-| `p.surface_accent` | `with_alpha(t.accent, (0.85 + 0.15*a)*a)` | 主操作按钮（保存）、协议切换选中 Tab、Switch 开关开启态 |
-| `p.surface_accent_hover` | 亮度自适应动态 Hover | 强调色按钮/Tab 的悬停状态 |
-| `p.surface_overlay` | `with_alpha(t.bg_primary, opacity)` | 下拉菜单浮层、右键菜单浮层、Tooltip 容器 |
-| `p.surface_hover` | `with_alpha(t.bg_hover, opacity)` | 列表行悬停、普通按钮悬停、分段项悬停 |
-| `p.border_subtle` | `with_alpha(t.border, 0.5)` | 通用细边框、卡片边框、分段控件分隔线 |
-| `p.border_active` | `to_hsla(t.border_active)` | 输入框聚焦边框、Tab 底部指示条、单选圆钮高亮边框 |
-| `p.text_primary` | `to_hsla(t.text_primary)` | 主标题、正文、激活态标签 |
-| `p.text_secondary` | `to_hsla(t.text_secondary)` | 次级标签、辅助文本、未选中 Tab |
-| `p.text_muted` | `to_hsla(t.text_muted)` | 禁用文本、快捷键提示说明、占位符 (Placeholder) |
-| `p.text_on_accent` | 高对比黑/白文本 | 位于 `surface_accent` 之上的文字与图标 |
+| 语义字段                 | 描述 / 计算规则                           | 典型应用场景                                            |
+| :----------------------- | :---------------------------------------- | :------------------------------------------------------ |
+| `p.surface_base`         | `with_alpha(t.bg_primary, opacity)`       | 主窗口背景、独立设置窗口基底、弹窗基底                  |
+| `p.surface_raised`       | `with_alpha(t.bg_secondary, opacity)`     | 悬浮卡片、次级容器、步进器/数值展示框                   |
+| `p.surface_card`         | `with_alpha(t.text_primary, 0.035)`       | 磨砂卡片层、控件静止底色、弹窗头部/底部区域             |
+| `p.surface_selection`    | `with_alpha(t.bg_selection, opacity)`     | 列表选中行、分段按钮选中态、Tab 激活态                  |
+| `p.surface_accent`       | `with_alpha(t.accent, (0.85 + 0.15*a)*a)` | 主操作按钮（保存）、协议切换选中 Tab、Switch 开关开启态 |
+| `p.surface_accent_hover` | 亮度自适应动态 Hover                      | 强调色按钮/Tab 的悬停状态                               |
+| `p.surface_overlay`      | `with_alpha(t.bg_primary, opacity)`       | 下拉菜单浮层、右键菜单浮层、Tooltip 容器                |
+| `p.surface_hover`        | `with_alpha(t.bg_hover, opacity)`         | 列表行悬停、普通按钮悬停、分段项悬停                    |
+| `p.border_subtle`        | `with_alpha(t.border, 0.5)`               | 通用细边框、卡片边框、分段控件分隔线                    |
+| `p.border_active`        | `to_hsla(t.border_active)`                | 输入框聚焦边框、Tab 底部指示条、单选圆钮高亮边框        |
+| `p.text_primary`         | `to_hsla(t.text_primary)`                 | 主标题、正文、激活态标签                                |
+| `p.text_secondary`       | `to_hsla(t.text_secondary)`               | 次级标签、辅助文本、未选中 Tab                          |
+| `p.text_muted`           | `to_hsla(t.text_muted)`                   | 禁用文本、快捷键提示说明、占位符 (Placeholder)          |
+| `p.text_on_accent`       | 高对比黑/白文本                           | 位于 `surface_accent` 之上的文字与图标                  |
 
 ### 2.3 透明度三大硬性法则
+
 1. **强制从 Context 派生**：在任何 `render` 函数或闭包中，**必须使用 `let p = SemanticPalette::from_context(cx);`**。严禁使用静态实色的 `from_theme(&t)`。
 2. **底色单一来源原则**：主窗口或外层弹窗容器已定义透明底色时，内层内容容器严禁重复设置 `.bg(surface_bg(...))`，避免两层透明通道相乘导致色调变厚、发灰、失真。
 3. **遮罩暗化联动**：模态暗化遮罩必须与透明度联动：`with_alpha(0x000000, 0.35 * bg_opacity(cx))`。
@@ -100,6 +105,7 @@ Velowork 支持用户自定义 `ui_font_size`（界面字号微调）、`ui_scal
 ```
 
 ### 3.2 字体族与代码规范
+
 - **UI 界面文字**：默认使用系统高质量无衬线字体族，直接调用 `.child("文字")`。
 - **数值与代码**：使用 `.font_family("monospace")` 或跟随终端配置字体。
 - **自定义字号**：如需任意基准像素（如 14px），必须调用 `ui_text(14.0, cx)` 参与缩放流水线，**禁止直接写 `px(14.0)` 作为字号**。
@@ -109,6 +115,7 @@ Velowork 支持用户自定义 `ui_font_size`（界面字号微调）、`ui_scal
 ## 4. 图标体系与无障碍 (Iconography & Accessibility)
 
 ### 4.1 图标尺寸阶梯 (`crates/velowork-ui/src/tokens/icon.rs`)
+
 - **`ICON_SM` (10px)** / `ui_icon_sm(cx)`：行内微型指示符、下拉小箭头。
 - **`ICON_MICRO` (12px)** / `ui_icon_micro(cx)`：文件树节点折叠/展开箭头。
 - **`ICON_STD` (14px)** / `ui_icon_std(cx)`：**[标准推荐]** 普通按钮图标、行内操作图标。
@@ -116,6 +123,7 @@ Velowork 支持用户自定义 `ui_font_size`（界面字号微调）、`ui_scal
 - **`ICON_LG` (20px)** / `ui_icon_lg(cx)`：主活动栏 (Activity Bar)、侧边导航大图标。
 
 ### 4.2 图标无障碍强制规约
+
 - **所有纯图标按钮必须配备中文 Tooltip**：
   ```rust
   // 正确范例：
@@ -133,16 +141,17 @@ Velowork 支持用户自定义 `ui_font_size`（界面字号微调）、`ui_scal
 
 ### 5.1 间距 Token (`crates/velowork-ui/src/tokens/spacing.rs`)
 
-| 常量 | 像素 | 缩放函数 | 典型应用场景 |
-| :--- | :--- | :--- | :--- |
-| `SPACE_2XS` | 2px | - | 微间距、分段按钮内部间隙 (`gap(SPACE_2XS)`) |
-| `SPACE_XS` | 4px | `ui_space_xs(cx)` | 紧凑间距、图标与文字微间隙 |
-| `SPACE_SM` | 6px | `ui_space_sm(cx)` | 列表项内边距、控件紧凑 padding |
-| `SPACE_MD` | 8px | `ui_space_md(cx)` | **[标准间距]** 控件间距、表单项 gap、菜单项 padding |
-| `SPACE_LG` | 12px | `ui_space_lg(cx)` | 分组间距、面板内容 padding |
-| `SPACE_XL` | 16px | `ui_space_xl(cx)` | 模态弹窗内边距、对话框 padding |
+| 常量        | 像素 | 缩放函数          | 典型应用场景                                        |
+| :---------- | :--- | :---------------- | :-------------------------------------------------- |
+| `SPACE_2XS` | 2px  | -                 | 微间距、分段按钮内部间隙 (`gap(SPACE_2XS)`)         |
+| `SPACE_XS`  | 4px  | `ui_space_xs(cx)` | 紧凑间距、图标与文字微间隙                          |
+| `SPACE_SM`  | 6px  | `ui_space_sm(cx)` | 列表项内边距、控件紧凑 padding                      |
+| `SPACE_MD`  | 8px  | `ui_space_md(cx)` | **[标准间距]** 控件间距、表单项 gap、菜单项 padding |
+| `SPACE_LG`  | 12px | `ui_space_lg(cx)` | 分组间距、面板内容 padding                          |
+| `SPACE_XL`  | 16px | `ui_space_xl(cx)` | 模态弹窗内边距、对话框 padding                      |
 
 ### 5.2 圆角 Token (`crates/velowork-ui/src/tokens/radius.rs`)
+
 - `RADIUS_XS` (2px)：紧凑微型角标 (`Badge`)。
 - `RADIUS_MD` (3px)：标准角标、小尺寸分段项。
 - `RADIUS_STD` (4px)：**[通用标准]** 按钮、输入框、普通卡片、Tab 选项卡。
@@ -150,6 +159,7 @@ Velowork 支持用户自定义 `ui_font_size`（界面字号微调）、`ui_scal
 - `RADIUS_XL` (10px)：模态弹窗外壳 (`ModalContainer`)。
 
 ### 5.3 面板与布局规约
+
 - **多栏面板必须支持调整尺寸**：所有停靠面板（Sidebar, Dock, Pane）必须通过拖拽边框调整大小（`Resizable Panes`）。
 - **水平与垂直流容器**：优先使用 `h_flex()` / `v_flex()` 并搭配 `.gap(SPACE_*)`。
 
@@ -158,13 +168,16 @@ Velowork 支持用户自定义 `ui_font_size`（界面字号微调）、`ui_scal
 ## 6. 阴影与层级体系 (Shadows & Elevation)
 
 ### 6.1 阴影阶梯
+
 - **`shadow_sm()`**：微浮起（滑块手柄、微型悬浮按钮）。
 - **`shadow_md()`**：卡片悬浮、局部小面板。
 - **`shadow_lg()`**：Tooltip 气泡、悬浮提示框。
 - **`shadow_xl()`**：模态弹窗、右键菜单、下拉浮层。
 
 ### 6.2 焦点环光效 (Focus Ring)
+
 输入框与交互控件聚焦时，必须使用**内嵌式焦点环**，不增加元素物理外边距，防止导致布局抖动：
+
 ```rust
 // 统一调用:
 let ring = focus_ring_shadows(&t);
@@ -177,7 +190,9 @@ div().track_focus(&focus_handle)
 ## 7. 控件规格与通用组件库 (`crates/velowork-ui`)
 
 ### 7.1 控件三级尺寸体系 (`ControlSize`)
+
 所有通用控件共享 3 级标准高度：
+
 - **`ControlSize::Compact`**：高度 24px（用于紧凑工具栏、内嵌表格行）。
 - **`ControlSize::Default`**：高度 28px（**[全局标准]** 用于表单、设置项、常规对话框）。
 - **`ControlSize::Large`**：高度 36px（用于 Hero 区域、重点引导步骤）。
@@ -187,6 +202,7 @@ div().track_focus(&focus_handle)
 ### 7.2 核心控件标准使用范式
 
 #### A. 按钮 (`Button` / `button_*`)
+
 ```rust
 use velowork_ui::button::{button, button_primary, button_danger};
 
@@ -204,6 +220,7 @@ button_danger("delete-btn", i18n!(cx, "dialog.delete"), &t)
 ```
 
 #### B. 单选与分段控件 (`RadioGroup`)
+
 ```rust
 use velowork_ui::radio::{RadioGroup, RadioMode, RadioOption};
 
@@ -219,6 +236,7 @@ RadioGroup::new("proxy-mode-radio")
 ```
 
 #### C. 下拉选择器 (`Select` / `Dropdown`)
+
 ```rust
 use velowork_ui::select::{Select, SelectState, SelectOption};
 
@@ -234,6 +252,7 @@ Select::new(&select_state)
 ```
 
 #### D. 开关 (`Switch`) 与滑块 (`Slider`)
+
 ```rust
 use velowork_ui::switch::Switch;
 use velowork_ui::slider::{Slider, SliderState};
@@ -248,6 +267,7 @@ Slider::new(&slider_state)
 ```
 
 #### E. 文本输入框 (`SimpleInput` / `SimpleInputState` / `Input`)
+
 ```rust
 use velowork_ui::input::{Input, SimpleInputState};
 
@@ -266,7 +286,9 @@ Input::new(&input)
 ## 8. 交互状态、焦点管理与事件防护
 
 ### 8.1 事件穿透防护（极其重要）
+
 所有浮层、弹窗、下拉菜单和独立面板，必须在最外层容器声明以下防护，防止鼠标点击与滚轮事件穿透到底层终端或代码编辑器：
+
 ```rust
 div()
     .occlude() // 阻挡下层视图命中测试
@@ -276,6 +298,7 @@ div()
 ```
 
 ### 8.2 键盘导航与焦点闭环
+
 - 弹窗打开时，自动聚焦首个输入框或主操作按钮：`input.update(cx, |s, cx| s.focus(window, cx));`。
 - 支持 `Escape` 键快速关闭弹窗/浮层。
 - 分段控件 `RadioGroup` 支持 `ArrowLeft` / `ArrowRight` / `ArrowUp` / `ArrowDown` 方向键循环切换。
@@ -301,11 +324,15 @@ div()
 ## 10. 反模式与防错代码对比 (Do's and Don'ts)
 
 ### 反模式 1：使用静态实色 Palette（导致透明度失效）
+
 ❌ **错误示范**：
+
 ```rust
 let p = SemanticPalette::from_theme(&t); // 永远为 1.0 实色，透明度调节无效！
 ```
+
 ✅ **正确示范**：
+
 ```rust
 let p = SemanticPalette::from_context(cx); // 自动读取当前全局 bg_opacity
 ```
@@ -313,7 +340,9 @@ let p = SemanticPalette::from_context(cx); // 自动读取当前全局 bg_opacit
 ---
 
 ### 反模式 2：双层透明背景叠加（导致变厚、发暗）
+
 ❌ **错误示范**：
+
 ```rust
 // 外层 Overlay
 div().bg(surface_bg(t.bg_primary, cx)).child(
@@ -321,7 +350,9 @@ div().bg(surface_bg(t.bg_primary, cx)).child(
     div().bg(surface_bg(t.bg_panel, cx)).child(...)
 )
 ```
+
 ✅ **正确示范**：
+
 ```rust
 // 外层定义单一透明底色，内层使用磨砂卡片层或纯透明容器
 div().bg(surface_bg(t.bg_primary, cx)).child(
@@ -332,7 +363,9 @@ div().bg(surface_bg(t.bg_primary, cx)).child(
 ---
 
 ### 反模式 3：硬编码像素与色彩
+
 ❌ **错误示范**：
+
 ```rust
 div()
     .p(px(16.0))
@@ -340,7 +373,9 @@ div()
     .bg(rgb(0x5B6BD6))
     .text_size(px(13.0))
 ```
+
 ✅ **正确示范**：
+
 ```rust
 div()
     .p(SPACE_XL)
@@ -352,11 +387,15 @@ div()
 ---
 
 ### 反模式 4：纯图标按钮缺少 Tooltip
+
 ❌ **错误示范**：
+
 ```rust
 div().child(AppIcon::Close.size(ICON_STD)) // 用户无法得知按钮含义
 ```
+
 ✅ **正确示范**：
+
 ```rust
 IconButton::new("close-btn", AppIcon::Close)
     .tooltip(i18n!(cx, "common.close"))
@@ -365,11 +404,15 @@ IconButton::new("close-btn", AppIcon::Close)
 ---
 
 ### 反模式 5：浮层缺少防穿透拦截
+
 ❌ **错误示范**：
+
 ```rust
 div().id("my-popover").child(...) // 点击会穿透并触发底层终端输入！
 ```
+
 ✅ **正确示范**：
+
 ```rust
 div()
     .id("my-popover")
@@ -381,12 +424,16 @@ div()
 ---
 
 ### 反模式 6：在 render 中重复初始化 Entity
+
 ❌ **错误示范**：
+
 ```rust
 // 每次 re-render 都 new 一个 SliderState，导致拖拽手柄状态丢失并引发抖动
 let slider = cx.new(|cx| SliderState::new(cx));
 ```
+
 ✅ **正确示范**：
+
 ```rust
 // 状态保存在 View / Entity 字段中，render 中仅复用实体
 Slider::new(&self.slider_state)

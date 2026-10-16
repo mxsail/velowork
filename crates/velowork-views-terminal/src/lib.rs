@@ -131,6 +131,12 @@ pub struct TerminalViewSettings {
     pub terminal_background_image_blur: bool,
     #[serde(default)]
     pub terminal_scrollbar_show: velowork_core::types::ScrollbarShow,
+    #[serde(default)]
+    pub terminal_theme_mode: velowork_core::theme::TerminalThemeMode,
+    #[serde(default = "default_dark_color_scheme")]
+    pub dark_color_scheme: String,
+    #[serde(default = "default_light_color_scheme")]
+    pub light_color_scheme: String,
     #[serde(default = "default_color_scheme")]
     pub color_scheme: String,
     #[serde(default)]
@@ -239,6 +245,14 @@ fn default_command_history_ignore_space() -> bool {
     true
 }
 
+fn default_dark_color_scheme() -> String {
+    "Dark".to_string()
+}
+
+fn default_light_color_scheme() -> String {
+    "Light".to_string()
+}
+
 fn default_color_scheme() -> String {
     "Dark".to_string()
 }
@@ -303,6 +317,9 @@ pub fn terminal_view_settings(cx: &gpui::App) -> TerminalViewSettings {
             terminal_background_image: None,
             terminal_background_image_blur: false,
             terminal_scrollbar_show: Default::default(),
+            terminal_theme_mode: Default::default(),
+            dark_color_scheme: default_dark_color_scheme(),
+            light_color_scheme: default_light_color_scheme(),
             color_scheme: default_color_scheme(),
             custom_terminal_color_schemes: Vec::new(),
             charset: default_charset(),

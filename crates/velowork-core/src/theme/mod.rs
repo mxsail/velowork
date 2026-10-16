@@ -10,4 +10,4 @@ pub use color_schemes::{
     hex_to_u32, is_built_in_color_scheme, u32_to_hex, CustomTerminalColorScheme,
     TerminalPalette, BUILTIN_COLOR_SCHEMES, DARK_PALETTE, LIGHT_PALETTE,
 };
-pub use types::{ColorSchema, ColorTheme, FolderColor, ThemeInfo, UiDensity};
+pub use types::{ColorSchema, ColorTheme, FolderColor, TerminalThemeMode, ThemeInfo, UiDensity};

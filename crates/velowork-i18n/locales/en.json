@@ -216,6 +216,17 @@
       "equal": "Equal Width"
     },
     "color_scheme": "Color Scheme",
+    "terminal_theme_mode": {
+      "label": "Terminal Theme Mode",
+      "follow_app": "Follow App Appearance",
+      "fixed": "Fixed Scheme"
+    },
+    "dark_terminal_color_scheme": {
+      "label": "Dark Terminal Scheme"
+    },
+    "light_terminal_color_scheme": {
+      "label": "Light Terminal Scheme"
+    },
     "charset": "Charset",
     "term_type": "Terminal Type",
     "wrap_mode": {

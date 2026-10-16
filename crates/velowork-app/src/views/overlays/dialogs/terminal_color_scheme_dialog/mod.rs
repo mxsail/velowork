@@ -834,8 +834,8 @@ impl TerminalColorSchemeDialog {
         t: &velowork_core::theme::ThemeColors,
         cx: &App,
     ) -> impl IntoElement {
-        let cursor_c = p.cursor.unwrap_or(p.foreground);
-        let selection_c = p.selection.unwrap_or(0x264F78);
+        let cursor_c = p.cursor.unwrap_or(t.text_primary);
+        let selection_c = p.selection.unwrap_or(t.bg_selection);
 
         div()
             .flex()
@@ -1010,7 +1010,7 @@ impl TerminalColorSchemeDialog {
                             .child(self.render_swatch_card(
                                 "cursor",
                                 i18n!(cx, "terminal_color_schemes.cursor"),
-                                p.cursor.unwrap_or(p.foreground),
+                                p.cursor.unwrap_or(t.text_primary),
                                 is_builtin,
                                 t,
                                 cx,
@@ -1018,7 +1018,7 @@ impl TerminalColorSchemeDialog {
                             .child(self.render_swatch_card(
                                 "selection",
                                 i18n!(cx, "terminal_color_schemes.selection"),
-                                p.selection.unwrap_or(0x264F78),
+                                p.selection.unwrap_or(t.bg_selection),
                                 is_builtin,
                                 t,
                                 cx,

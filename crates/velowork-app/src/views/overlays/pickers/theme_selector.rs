@@ -1,21 +1,19 @@
 use crate::keybindings::Cancel;
 use crate::settings::settings_entity;
 use crate::theme::{
-    load_custom_themes, theme, theme_entity,
-    ThemeColors, ThemeInfo, ColorTheme, DARK_THEME, LIGHT_THEME,
-    HIGH_CONTRAST_THEME, PASTEL_DARK_THEME,
-};
-use crate::views::components::{
-    badge, keyboard_hints_footer, modal_content, modal_header,
-    QuickPickerConfig, QuickPickerState,
+    ColorTheme, DARK_THEME, HIGH_CONTRAST_THEME, LIGHT_THEME, PASTEL_DARK_THEME, ThemeColors,
+    ThemeInfo, load_custom_themes, theme, theme_entity,
 };
 use crate::ui::tokens::{ui_text, ui_text_md, ui_text_xl};
-use velowork_ui::tokens::{SPACE_XS, SPACE_MD, SPACE_LG, RADIUS_STD};
-use gpui::*;
-use velowork_ui::h_flex;
+use crate::views::components::{
+    QuickPickerConfig, QuickPickerState, badge, keyboard_hints_footer, modal_content, modal_header,
+};
 use gpui::prelude::*;
-use velowork_ui::selectable_list::selectable_list_item;
+use gpui::*;
 use velowork_i18n::i18n;
+use velowork_ui::h_flex;
+use velowork_ui::selectable_list::selectable_list_item;
+use velowork_ui::tokens::{RADIUS_STD, SPACE_LG, SPACE_MD, SPACE_XS};
 
 /// Theme selection entry with preview and info
 #[derive(Clone)]
@@ -41,7 +39,7 @@ impl ThemeSelector {
             info: ThemeInfo {
                 id: "dark".to_string(),
                 name: "Dark".to_string(),
-                description: "Modern high-end dark theme".to_string(),
+                description: "Modern dark theme".to_string(),
                 is_dark: true,
             },
             colors: DARK_THEME,
@@ -91,7 +89,9 @@ impl ThemeSelector {
             ColorTheme::HighContrast => 3,
             ColorTheme::Custom => {
                 // Try to find matching custom theme
-                themes.iter().position(|t| t.info.id.starts_with("custom:"))
+                themes
+                    .iter()
+                    .position(|t| t.info.id.starts_with("custom:"))
                     .unwrap_or(0)
             }
         };
@@ -157,7 +157,11 @@ impl ThemeSelector {
         let active_is_dark = theme_ent.read(cx).effective_is_dark();
         let custom_id = if ct == ColorTheme::Custom {
             // Extract file stem from "custom:stem" ID
-            theme_entry.info.id.strip_prefix("custom:").map(|s| s.to_string())
+            theme_entry
+                .info
+                .id
+                .strip_prefix("custom:")
+                .map(|s| s.to_string())
         } else {
             None
         };
@@ -235,9 +239,27 @@ impl ThemeSelector {
                     .items_center()
                     .gap(px(2.0))
                     .px(px(2.0))
-                    .child(div().w(px(4.0)).h(px(4.0)).rounded_full().bg(rgb(colors.error)))
-                    .child(div().w(px(4.0)).h(px(4.0)).rounded_full().bg(rgb(colors.warning)))
-                    .child(div().w(px(4.0)).h(px(4.0)).rounded_full().bg(rgb(colors.success))),
+                    .child(
+                        div()
+                            .w(px(4.0))
+                            .h(px(4.0))
+                            .rounded_full()
+                            .bg(rgb(colors.error)),
+                    )
+                    .child(
+                        div()
+                            .w(px(4.0))
+                            .h(px(4.0))
+                            .rounded_full()
+                            .bg(rgb(colors.warning)),
+                    )
+                    .child(
+                        div()
+                            .w(px(4.0))
+                            .h(px(4.0))
+                            .rounded_full()
+                            .bg(rgb(colors.success)),
+                    ),
             )
             .child(
                 // Fake terminal content
@@ -282,73 +304,90 @@ impl ThemeSelector {
             )
     }
 
-    fn render_theme_row(&self, index: usize, entry: &ThemeEntry, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+    fn render_theme_row(
+        &self,
+        index: usize,
+        entry: &ThemeEntry,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
         let t = theme(cx);
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
         let is_selected = index == self.state.selected_index;
         let colors = entry.colors;
         let (name, description) = match entry.info.id.as_str() {
-            "dark" => (i18n!(cx, "settings.color_theme.dark"), i18n!(cx, "theme.desc_dark")),
-            "light" => (i18n!(cx, "settings.color_theme.light"), i18n!(cx, "theme.desc_light")),
-            "pastel-dark" => (i18n!(cx, "settings.color_theme.pastel_dark"), i18n!(cx, "theme.desc_pastel_dark")),
-            "high-contrast" => (i18n!(cx, "settings.color_theme.high_contrast"), i18n!(cx, "theme.desc_high_contrast")),
+            "dark" => (
+                i18n!(cx, "settings.color_theme.dark"),
+                i18n!(cx, "theme.desc_dark"),
+            ),
+            "light" => (
+                i18n!(cx, "settings.color_theme.light"),
+                i18n!(cx, "theme.desc_light"),
+            ),
+            "pastel-dark" => (
+                i18n!(cx, "settings.color_theme.pastel_dark"),
+                i18n!(cx, "theme.desc_pastel_dark"),
+            ),
+            "high-contrast" => (
+                i18n!(cx, "settings.color_theme.high_contrast"),
+                i18n!(cx, "theme.desc_high_contrast"),
+            ),
             _ => (entry.info.name.clone(), entry.info.description.clone()),
         };
         let is_custom = entry.info.id.starts_with("custom:");
 
         selectable_list_item(
-                ElementId::Name(format!("theme-{}", index).into()),
-                is_selected,
-                &t,
-            )
-            .gap(SPACE_LG)
-            .py(px(10.0))
-            .border_b_1()
-            .border_color(p.border_subtle)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _window, cx| {
-                    // Preview on click before selection
-                    this.preview_theme(index, cx);
-                    this.select_theme(index, cx);
-                }),
-            )
-            .child(self.render_theme_preview(&colors, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.0))
-                    .child(
-                        h_flex()
-                            .gap(SPACE_MD)
-                            .child(
+            ElementId::Name(format!("theme-{}", index).into()),
+            is_selected,
+            &t,
+        )
+        .gap(SPACE_LG)
+        .py(px(10.0))
+        .border_b_1()
+        .border_color(p.border_subtle)
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, _window, cx| {
+                // Preview on click before selection
+                this.preview_theme(index, cx);
+                this.select_theme(index, cx);
+            }),
+        )
+        .child(self.render_theme_preview(&colors, cx))
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(px(2.0))
+                .child(
+                    h_flex()
+                        .gap(SPACE_MD)
+                        .child(
+                            div()
+                                .text_size(ui_text_xl(cx))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(t.text_primary))
+                                .child(name),
+                        )
+                        .when(is_custom, |d| {
+                            d.child(badge(i18n!(cx, "common.custom"), &t, cx))
+                        })
+                        .when(is_selected, |d| {
+                            d.child(
                                 div()
-                                    .text_size(ui_text_xl(cx))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(rgb(t.text_primary))
-                                    .child(name),
+                                    .text_size(ui_text_md(cx))
+                                    .text_color(rgb(t.border_active))
+                                    .child("✓"),
                             )
-                            .when(is_custom, |d| {
-                                d.child(badge(i18n!(cx, "common.custom"), &t, cx))
-                            })
-                            .when(is_selected, |d| {
-                                d.child(
-                                    div()
-                                        .text_size(ui_text_md(cx))
-                                        .text_color(rgb(t.border_active))
-                                        .child("✓"),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .text_size(ui_text_md(cx))
-                            .text_color(rgb(t.text_muted))
-                            .child(description),
-                    ),
-            )
+                        }),
+                )
+                .child(
+                    div()
+                        .text_size(ui_text_md(cx))
+                        .text_color(rgb(t.text_muted))
+                        .child(description),
+                ),
+        )
     }
 }
 
@@ -414,10 +453,14 @@ impl Render for ThemeSelector {
                     .flex_1()
                     .overflow_y_scroll()
                     .children(
-                        self.state.filtered.iter().enumerate().map(|(i, filter_result)| {
-                            let entry = &self.state.items[filter_result.index];
-                            self.render_theme_row(i, entry, cx)
-                        }),
+                        self.state
+                            .filtered
+                            .iter()
+                            .enumerate()
+                            .map(|(i, filter_result)| {
+                                let entry = &self.state.items[filter_result.index];
+                                self.render_theme_row(i, entry, cx)
+                            }),
                     ),
             )
             .child({

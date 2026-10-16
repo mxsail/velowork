@@ -89,21 +89,21 @@ pub struct CustomThemeColors {
 }
 
 // Default color functions for serde (based on dark theme)
-fn default_bg_primary() -> String { "#1e1e1e".to_string() }
-fn default_bg_secondary() -> String { "#252526".to_string() }
-fn default_bg_header() -> String { "#323233".to_string() }
-fn default_bg_panel() -> String { "#202326".to_string() }
+fn default_bg_primary() -> String { "#202326".to_string() }
+fn default_bg_secondary() -> String { "#2a2d31".to_string() }
+fn default_bg_header() -> String { "#1a1c1e".to_string() }
+fn default_bg_panel() -> String { "#1c1e21".to_string() }
 fn default_bg_selection() -> String { "#264f78".to_string() }
-fn default_bg_hover() -> String { "#2a2d2e".to_string() }
-fn default_accent() -> String { "#5B6BD6".to_string() }
-fn default_border() -> String { "#252526".to_string() }
-fn default_border_active() -> String { "#007acc".to_string() }
-fn default_text_primary() -> String { "#cccccc".to_string() }
-fn default_text_secondary() -> String { "#808080".to_string() }
-fn default_text_muted() -> String { "#6a6a6a".to_string() }
-fn default_success() -> String { "#4ec9b0".to_string() }
-fn default_warning() -> String { "#dcdcaa".to_string() }
-fn default_error() -> String { "#f44747".to_string() }
+fn default_bg_hover() -> String { "#32363b".to_string() }
+fn default_accent() -> String { "#0078d4".to_string() }
+fn default_border() -> String { "#33373d".to_string() }
+fn default_border_active() -> String { "#60cdff".to_string() }
+fn default_text_primary() -> String { "#ffffff".to_string() }
+fn default_text_secondary() -> String { "#cccccc".to_string() }
+fn default_text_muted() -> String { "#8a8a8a".to_string() }
+fn default_success() -> String { "#6ccb5f".to_string() }
+fn default_warning() -> String { "#ffc83b".to_string() }
+fn default_error() -> String { "#ff6b6b".to_string() }
 fn default_folder_default() -> String { "#8a9199".to_string() }
 fn default_folder_red() -> String { "#e06c75".to_string() }
 fn default_folder_orange() -> String { "#d19a66".to_string() }

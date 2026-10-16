@@ -118,26 +118,26 @@ impl TerminalPalette {
 }
 
 pub const DARK_PALETTE: TerminalPalette = TerminalPalette {
-    black: 0x181920,
+    black: 0x202326,
     red: 0xF87171,
     green: 0x34D399,
     yellow: 0xFBBF24,
-    blue: 0x60A5FA,
-    magenta: 0xA78BFA,
+    blue: 0x3B8EEA,
+    magenta: 0xB146C2,
     cyan: 0x38BDF8,
-    white: 0xEDEDF0,
-    bright_black: 0x4B5563,
+    white: 0xCCCCCC,
+    bright_black: 0x585C63,
     bright_red: 0xFCA5A5,
     bright_green: 0x6EE7B7,
     bright_yellow: 0xFDE68A,
-    bright_blue: 0x93C5FD,
-    bright_magenta: 0xC4B5FD,
+    bright_blue: 0x60CDFF,
+    bright_magenta: 0xD670D6,
     bright_cyan: 0x7DD3FC,
     bright_white: 0xFFFFFF,
-    foreground: 0xEDEDF0,
-    background: 0x0F1015,
-    cursor: Some(0x6366F1),
-    selection: Some(0x282A3A),
+    foreground: 0xCCCCCC,
+    background: 0x202326,
+    cursor: None,
+    selection: None,
 };
 
 pub const LIGHT_PALETTE: TerminalPalette = TerminalPalette {
@@ -159,8 +159,8 @@ pub const LIGHT_PALETTE: TerminalPalette = TerminalPalette {
     bright_white: 0x0F172A,
     foreground: 0x0F172A,
     background: 0xFFFFFF,
-    cursor: Some(0x4F46E5),
-    selection: Some(0xE0E7FF),
+    cursor: None,
+    selection: None,
 };
 
 pub const SOLARIZED_DARK_PALETTE: TerminalPalette = TerminalPalette {
