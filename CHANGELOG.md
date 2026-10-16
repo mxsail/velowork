@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.15] - 2026-10-16
+
+### Added / 新增
+- **自定义标题栏标题对齐位置配置 (Custom Titlebar Alignment)**：
+  - 外观设置新增标题对齐方式配置项：支持“居中（Center）”、“靠左（Left）”、“靠右（Right）”三种对齐样式，主窗口与独立分离窗口标题栏自适应布局并保持安全间距防重叠。
+  *(Custom titlebar title alignment support with Center, Left, and Right options).*
+- **主窗口动态会话标题与双轨同步 (Dynamic Session Window Title)**：
+  - 新增“主窗口标题显示当前会话名称”开关，自动将活动终端会话名格式化为 `{会话名称} - Velowork`，同时驱动自定义标题栏文字与操作系统原生窗口标题（`window.set_window_title`），确保任务栏、Alt-Tab 与多任务视图中统一感知。
+  *(Dynamic main window session title format synced to both custom chrome and OS native window title).*
+- **全应用独立弹窗与分离面板统一样式命名 (Unified Detached Window Naming)**：
+  - 规范设置窗口（`设置 - Velowork`）、日志控制台（`日志控制台 - Velowork`）、独立终端窗口及分离 Dock 面板等独立窗口的命名规则，统一规范后缀为 ` - Velowork`，彻底消除硬编码英文。
+  *(Consistent window naming convention across all detached overlays and independent windows).*
+
+### Improved / 优化
+- **日志控制台视觉与交互打磨 (Log Console Polish)**：
+  - 日志列表引入滚动条及边缘模糊淡出效果，背景色与透明度全面联动窗口整体设定，自动滚动状态样式对齐单选按钮与筛选工具栏。
+  *(Refined log console scrolling, fade effects, and background transparency synchronization).*
+- **会话导入弹窗与项目管理器体验优化 (Dialog & Project Manager Polish)**：
+  - 导入会话弹窗支持动态高度自适应；项目管理器优化列表项视觉层级与交互反馈。
+  *(Adaptive height for import session dialog and enhanced project manager visual hierarchy).*
+- **全应用弹窗二次确认与焦点防丢失体系 (Modal Close Protection & Focus Restoral)**：
+  - 重构全应用弹窗未保存修改二次确认体系，优化焦点级联恢复逻辑，杜绝任何交互导致物理焦点意外悬空。
+  *(Robust dirty check confirmation and cascade focus restoration across application modals).*
+
+### Fixed / 修复
+- **Windows 构建版本探测日志刷屏防护 (Windows Build Detection Log Throttling)**：
+  - 缓存 Windows 系统内部构建号探测结果，消除频繁日志输出循环。
+  *(Cache Windows build number detection to prevent potential log flooding).*
+
 ## [0.1.0-beta.14] - 2026-10-11
 
 ### Added / 新增
