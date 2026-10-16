@@ -15,6 +15,7 @@ impl SettingsPanel {
         let (
             start_on_boot,
             auto_check_updates,
+            check_beta_updates,
             close_behavior,
             locale,
             proxy_mode,
@@ -26,6 +27,7 @@ impl SettingsPanel {
             (
                 s.start_on_boot,
                 s.auto_check_updates,
+                s.check_beta_updates,
                 s.close_behavior,
                 s.locale,
                 s.proxy_mode,
@@ -38,6 +40,8 @@ impl SettingsPanel {
         let app_section = {
             let start_on_boot_label = i18n!(cx, "settings.start_on_boot");
             let auto_check_updates_label = i18n!(cx, "settings.auto_check_updates");
+            let check_beta_updates_label = i18n!(cx, "settings.check_beta_updates");
+            let check_beta_updates_desc = i18n!(cx, "settings.check_beta_updates_desc");
 
             section_container(&t)
                 .child(self.render_toggle(
@@ -57,6 +61,15 @@ impl SettingsPanel {
                         state.set_auto_check_updates(val, cx);
                         if let Some(gui) = cx.try_global::<velowork_updater::GlobalUpdateInfo>() {
                             gui.0.set_auto_check_enabled(val);
+                        }
+                    }, cx,
+                ))
+                .child(self.render_toggle_with_desc(
+                    "check-beta-updates", &check_beta_updates_label, &check_beta_updates_desc, check_beta_updates, true,
+                    |state, val, cx| {
+                        state.set_check_beta_updates(val, cx);
+                        if let Some(gui) = cx.try_global::<velowork_updater::GlobalUpdateInfo>() {
+                            gui.0.set_check_beta_enabled(val);
                         }
                     }, cx,
                 ))

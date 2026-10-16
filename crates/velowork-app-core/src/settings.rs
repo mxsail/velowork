@@ -582,6 +582,7 @@ impl SettingsState {
     // General settings
     setting_setter!(set_start_on_boot, start_on_boot, bool);
     setting_setter!(set_auto_check_updates, auto_check_updates, bool);
+    setting_setter!(set_check_beta_updates, check_beta_updates, bool);
 
     /// Set close window behavior
     pub fn set_close_behavior(

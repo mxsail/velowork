@@ -96,9 +96,9 @@ impl AboutDialog {
     }
 
     fn render_version_bar(&self, t: &ThemeColors, cx: &mut Context<Self>) -> impl IntoElement {
-        let status = match cx.try_global::<GlobalUpdateInfo>() {
-            Some(g) => g.0.status(),
-            None => UpdateStatus::Idle,
+        let (current_ver, status) = match cx.try_global::<GlobalUpdateInfo>() {
+            Some(g) => (g.0.app_version(), g.0.status()),
+            None => (velowork_core::version::app_version().to_string(), UpdateStatus::Idle),
         };
 
         let is_checking = matches!(status, UpdateStatus::Checking);
@@ -214,7 +214,7 @@ impl AboutDialog {
                             .text_size(ui_text_md(cx))
                             .font_weight(FontWeight::BOLD)
                             .text_color(p.text_primary)
-                            .child(format!("v{}", env!("CARGO_PKG_VERSION"))),
+                            .child(format!("v{}", current_ver)),
                     ),
             )
             .child(status_action)

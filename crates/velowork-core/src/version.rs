@@ -141,6 +141,20 @@ impl VersionManager {
     }
 }
 
+use std::sync::OnceLock;
+
+static APP_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Set the global application version string (typically injected from the root binary's `CARGO_PKG_VERSION`).
+pub fn set_app_version(version: impl Into<String>) {
+    let _ = APP_VERSION.set(version.into());
+}
+
+/// Get the global application version string. Falls back to `"0.0.0"` if not yet initialized.
+pub fn app_version() -> &'static str {
+    APP_VERSION.get().map(String::as_str).unwrap_or("0.0.0")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

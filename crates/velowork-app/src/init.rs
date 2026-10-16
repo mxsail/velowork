@@ -283,8 +283,13 @@ pub fn init_extensions(cx: &mut App) {
 }
 
 /// Initialize updater: sets GlobalUpdateInfo, cleans old binary, and starts background checker if enabled.
-pub fn init_updater(app_settings: &AppSettings, cx: &mut App) {
-    velowork_updater::init(env!("CARGO_PKG_VERSION"), app_settings.auto_check_updates, cx);
+pub fn init_updater(app_version: &str, app_settings: &AppSettings, cx: &mut App) {
+    velowork_updater::init(
+        app_version,
+        app_settings.auto_check_updates,
+        app_settings.check_beta_updates,
+        cx,
+    );
 }
 
 /// Build the four domain stores, aggregate them into the unified `AppState`,

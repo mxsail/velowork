@@ -180,6 +180,8 @@
     "path": "Path",
     "start_on_boot": "Start on System Boot",
     "auto_check_updates": "Automatically Check for Updates",
+    "check_beta_updates": "Include Pre-releases (Beta)",
+    "check_beta_updates_desc": "Check for and receive early preview and beta releases with newest features",
     "close_behavior": {
       "label": "Close Window Behavior",
       "minimize": "Minimize Window",

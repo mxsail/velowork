@@ -55,10 +55,11 @@ pub struct UpdateInfo {
     cancel_token: Arc<AtomicU64>,
     app_version: Arc<String>,
     auto_check_enabled: Arc<AtomicBool>,
+    check_beta_enabled: Arc<AtomicBool>,
 }
 
 impl UpdateInfo {
-    pub fn new(app_version: String, auto_check_enabled: bool) -> Self {
+    pub fn new(app_version: String, auto_check_enabled: bool, check_beta_enabled: bool) -> Self {
         Self {
             inner: Arc::new(Mutex::new(UpdateInfoInner {
                 status: UpdateStatus::Idle,
@@ -70,6 +71,7 @@ impl UpdateInfo {
             cancel_token: Arc::new(AtomicU64::new(0)),
             app_version: Arc::new(app_version),
             auto_check_enabled: Arc::new(AtomicBool::new(auto_check_enabled)),
+            check_beta_enabled: Arc::new(AtomicBool::new(check_beta_enabled)),
         }
     }
 
@@ -174,6 +176,14 @@ impl UpdateInfo {
 
     pub fn set_auto_check_enabled(&self, enabled: bool) {
         self.auto_check_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn is_check_beta_enabled(&self) -> bool {
+        self.check_beta_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_check_beta_enabled(&self, enabled: bool) {
+        self.check_beta_enabled.store(enabled, Ordering::Relaxed);
     }
 }
 
@@ -373,11 +383,16 @@ mod tests {
 
     #[test]
     fn test_update_info_lifecycle() {
-        let info = UpdateInfo::new("0.1.0".to_string(), true);
+        let info = UpdateInfo::new("0.1.0".to_string(), true, false);
         assert_eq!(info.app_version(), "0.1.0");
         assert_eq!(info.status(), UpdateStatus::Idle);
         assert!(!info.is_dismissed());
         assert!(info.is_auto_check_enabled());
+        assert!(!info.is_check_beta_enabled());
+
+        // Toggle beta_check
+        info.set_check_beta_enabled(true);
+        assert!(info.is_check_beta_enabled());
 
         // Toggle auto_check
         info.set_auto_check_enabled(false);
@@ -402,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_cancellation_tokens() {
-        let info = UpdateInfo::new("0.1.0".to_string(), true);
+        let info = UpdateInfo::new("0.1.0".to_string(), true, true);
         let token1 = info.try_start().expect("should start first time");
         assert_eq!(token1, 0);
         assert!(!info.is_cancelled(token1));

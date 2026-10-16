@@ -339,9 +339,10 @@ fn main() {
         .position(|a| a == "--new-profile")
         .and_then(|pos| args.get(pos + 1).cloned());
 
-    // Propagate the binary's version into velowork-terminal so XTVERSION
-    // responses identify as `velowork(<version>)` rather than the library's
-    // internal crate version.
+    // Propagate the binary's version into velowork-core and velowork-terminal so
+    // updater, about dialog, and XTVERSION responses identify as `velowork(<version>)`
+    // rather than an internal subcrate's fallback version.
+    velowork_core::version::set_app_version(env!("CARGO_PKG_VERSION"));
     velowork_terminal::terminal::set_app_version(env!("CARGO_PKG_VERSION"));
 
     // Give PTYs and sockets FD headroom (macOS' 256 soft default is stingy for
@@ -511,7 +512,7 @@ fn main() {
         .detach();
 
         // Initialize updater service (sets GlobalUpdateInfo, starts background checker if enabled)
-        init::init_updater(&app_settings, cx);
+        init::init_updater(env!("CARGO_PKG_VERSION"), &app_settings, cx);
         // 延迟后台预热凭据后端（在应用窗口完全渲染 5 秒后再静默预热，或由首个会话按需装载），
         // 消除冷启动阶段建立 D-Bus 句柄引起的内存与 CPU 开销。
         let _ = std::thread::Builder::new()

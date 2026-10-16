@@ -19,10 +19,11 @@ pub use update_checker::start_update_checker;
 /// Called by the host app at startup.
 /// `app_version` is the host application's version (from root Cargo.toml).
 /// `auto_check_enabled` is whether background periodic checks are enabled.
-pub fn init(app_version: &str, auto_check_enabled: bool, cx: &mut gpui::App) {
+/// `check_beta_enabled` is whether pre-release / beta releases should be included.
+pub fn init(app_version: &str, auto_check_enabled: bool, check_beta_enabled: bool, cx: &mut gpui::App) {
     installer::cleanup_old_binary();
 
-    let update_info = UpdateInfo::new(app_version.to_string(), auto_check_enabled);
+    let update_info = UpdateInfo::new(app_version.to_string(), auto_check_enabled, check_beta_enabled);
     cx.set_global(GlobalUpdateInfo(update_info.clone()));
 
     start_update_checker(update_info, cx);

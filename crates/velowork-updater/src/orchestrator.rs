@@ -20,7 +20,7 @@ pub async fn run_manual_check<F>(info: UpdateInfo, token: u64, cx: &mut AsyncApp
 where
     F: Fn(&mut AsyncApp),
 {
-    match crate::checker::check_for_update(info.app_version()).await {
+    match crate::checker::check_for_update(info.app_version(), info.is_check_beta_enabled()).await {
         Ok(Some(release)) => {
             if info.is_homebrew() {
                 info.set_status(UpdateStatus::BrewUpdate {

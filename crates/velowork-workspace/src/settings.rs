@@ -14,6 +14,11 @@ fn default_true() -> bool {
     true
 }
 
+fn default_check_beta_updates() -> bool {
+    velowork_core::version::app_version().contains('-')
+        || env!("CARGO_PKG_VERSION").contains('-')
+}
+
 /// Default palette for the light appearance (`ColorTheme::Light`).
 fn default_light_color_theme() -> ColorTheme {
     ColorTheme::Light
@@ -1117,6 +1122,9 @@ pub struct AppSettings {
     /// Whether to automatically check for updates periodically (default: true)
     #[serde(default = "default_true")]
     pub auto_check_updates: bool,
+    /// Whether to check for pre-release / beta updates
+    #[serde(default = "default_check_beta_updates")]
+    pub check_beta_updates: bool,
     /// Close window behavior
     #[serde(default)]
     pub close_behavior: CloseBehavior,
@@ -1581,6 +1589,7 @@ impl Default for AppSettings {
             // New fields
             start_on_boot: false,
             auto_check_updates: true,
+            check_beta_updates: default_check_beta_updates(),
             close_behavior: CloseBehavior::default(),
             proxy_mode: ProxyMode::default(),
             proxy_host: String::new(),
@@ -2337,6 +2346,23 @@ mod tests {
         let json = r#"{"confirm_close_tab": false}"#;
         let recovered = recover_settings_from_json(json).unwrap();
         assert_eq!(recovered.confirm_close_tab, false);
+    }
+
+    #[test]
+    fn test_check_beta_updates_deserialization_compatibility() {
+        // 缺省字段智能继承 default_check_beta_updates()
+        let json = r#"{}"#;
+        let recovered = recover_settings_from_json(json).unwrap();
+        assert_eq!(recovered.check_beta_updates, default_check_beta_updates());
+
+        // 显式配置可持久化与恢复
+        let json = r#"{"check_beta_updates": true}"#;
+        let recovered = recover_settings_from_json(json).unwrap();
+        assert_eq!(recovered.check_beta_updates, true);
+
+        let json = r#"{"check_beta_updates": false}"#;
+        let recovered = recover_settings_from_json(json).unwrap();
+        assert_eq!(recovered.check_beta_updates, false);
     }
 
     #[test]

@@ -106,7 +106,7 @@ impl UpdateDialog {
 
         let (current_version, status) = match cx.try_global::<GlobalUpdateInfo>() {
             Some(g) => (g.0.app_version(), g.0.status()),
-            None => (env!("CARGO_PKG_VERSION").to_string(), UpdateStatus::Idle),
+            None => (velowork_core::version::app_version().to_string(), UpdateStatus::Idle),
         };
 
         let mut body = div()

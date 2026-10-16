@@ -60,7 +60,7 @@ pub fn start_update_checker(update_info: UpdateInfo, cx: &mut App) {
             update_info.set_status(UpdateStatus::Checking);
             cx.update(|cx| cx.refresh_windows());
 
-            match crate::checker::check_for_update(update_info.app_version()).await {
+            match crate::checker::check_for_update(update_info.app_version(), update_info.is_check_beta_enabled()).await {
                 Ok(Some(release)) => {
                     if update_info.is_homebrew() {
                         update_info.set_status(UpdateStatus::BrewUpdate {

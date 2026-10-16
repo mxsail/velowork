@@ -180,6 +180,8 @@
     "path": "路径",
     "start_on_boot": "开机自启",
     "auto_check_updates": "自动检查更新",
+    "check_beta_updates": "接收测试版更新 (Beta)",
+    "check_beta_updates_desc": "允许检测并升级到最新的预览版与测试版，抢先体验新特性",
     "close_behavior": {
       "label": "关闭窗口行为",
       "minimize": "最小化窗口",
