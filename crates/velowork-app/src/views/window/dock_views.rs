@@ -576,6 +576,49 @@ impl WindowView {
         }
     }
 
+    /// Handle status bar display mode change (Always, AutoHide, Never)
+    pub(super) fn on_status_bar_mode_changed(
+        &mut self,
+        _old_mode: StatusBarMode,
+        new_mode: StatusBarMode,
+        cx: &mut Context<Self>,
+    ) {
+        match new_mode {
+            StatusBarMode::Always => {
+                self.status_bar_hovered = false;
+                self.status_bar_hide_task = None;
+                self.status_bar_anim_seq = self.status_bar_anim_seq.wrapping_add(1);
+                self.status_bar_anim_task = None;
+                self.status_bar_anim_progress = 1.0;
+                self.status_bar_anim_target = 1.0;
+            }
+            StatusBarMode::Never => {
+                self.status_bar_hovered = false;
+                self.status_bar_hide_task = None;
+                self.status_bar_anim_seq = self.status_bar_anim_seq.wrapping_add(1);
+                self.status_bar_anim_task = None;
+                self.status_bar_anim_progress = 0.0;
+                self.status_bar_anim_target = 0.0;
+            }
+            StatusBarMode::AutoHide => {
+                self.status_bar_hovered = false;
+                self.status_bar_hide_task = None;
+                let is_pinned = self.status_bar.read(cx).is_pinned(cx);
+                if !is_pinned
+                    && (self.status_bar_anim_progress > 0.001
+                        || (self.status_bar_anim_target - 1.0).abs() < 0.001)
+                {
+                    // Transitioning from Always to AutoHide: immediately smoothly slide down and hide
+                    self.animate_status_bar_to(0.0, cx);
+                } else if !is_pinned {
+                    self.status_bar_anim_progress = 0.0;
+                    self.status_bar_anim_target = 0.0;
+                }
+            }
+        }
+        cx.notify();
+    }
+
     /// Toggle status bar mode (cycles Always -> AutoHide -> Never)
     pub(super) fn toggle_status_bar(&mut self, cx: &mut Context<Self>) {
         let current_mode = settings_entity(cx).read(cx).settings.status_bar_mode;
@@ -584,19 +627,6 @@ impl WindowView {
             StatusBarMode::AutoHide => StatusBarMode::Never,
             StatusBarMode::Never => StatusBarMode::Always,
         };
-        self.status_bar_hovered = false;
-        self.status_bar_hide_task = None;
-        self.status_bar_anim_task = None;
-        match next_mode {
-            StatusBarMode::Always => {
-                self.status_bar_anim_progress = 1.0;
-                self.status_bar_anim_target = 1.0;
-            }
-            StatusBarMode::AutoHide | StatusBarMode::Never => {
-                self.status_bar_anim_progress = 0.0;
-                self.status_bar_anim_target = 0.0;
-            }
-        }
         settings_entity(cx).update(cx, |s, cx| {
             s.set_status_bar_mode(next_mode, cx);
         });
@@ -607,7 +637,6 @@ impl WindowView {
         };
         let label = i18n!(cx, "settings.status_bar_mode.label");
         crate::views::panels::toast::ToastManager::info(format!("{}: {}", label, msg), cx);
-        cx.notify();
     }
 
     /// Animate status bar slide to target (0.0 = hidden, 1.0 = visible) over ~300ms
@@ -675,7 +704,14 @@ impl WindowView {
 
     /// Schedule smooth dismissal of the floating status bar with 200ms leave delay buffer
     pub(super) fn schedule_status_bar_hide(&mut self, cx: &mut Context<Self>) {
-        if self.status_bar_hide_task.is_some() || !self.status_bar_hovered {
+        if self.status_bar_hide_task.is_some() {
+            return;
+        }
+        // If already animating to hidden or already hidden and not hovered, no need to schedule hide
+        if (self.status_bar_anim_target - 0.0).abs() < 0.001 {
+            return;
+        }
+        if !self.status_bar_hovered && self.status_bar_anim_progress < 0.001 {
             return;
         }
         // Do not allow hide scheduling while the bar is still animating open

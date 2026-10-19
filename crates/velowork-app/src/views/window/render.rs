@@ -1081,6 +1081,9 @@ impl Render for WindowView {
                                 this.schedule_status_bar_hide(cx);
                             } else {
                                 this.status_bar_hide_task = None;
+                                if !this.status_bar_hovered {
+                                    this.on_status_bar_hover_enter(cx);
+                                }
                             }
                         } else if in_trigger_x && mouse_y >= win_h - trigger_zone {
                             this.on_status_bar_hover_enter(cx);
@@ -1907,6 +1910,8 @@ impl Render for WindowView {
                                                 .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                                                     if *hovered {
                                                         this.on_status_bar_hover_enter(cx);
+                                                    } else {
+                                                        this.schedule_status_bar_hide(cx);
                                                     }
                                                 }))
                                                 .child(

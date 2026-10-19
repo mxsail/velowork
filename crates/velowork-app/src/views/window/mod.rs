@@ -225,6 +225,8 @@ pub struct WindowView {
     pub(crate) allow_force_quit: bool,
     /// Whether the window/app is currently in a locked state (screen lock).
     pub(crate) is_locked: bool,
+    /// Last observed status bar mode to detect external/settings changes.
+    pub(crate) last_status_bar_mode: velowork_workspace::settings::StatusBarMode,
     /// Whether the status bar is currently hovered (for AutoHide mode).
     pub(crate) status_bar_hovered: bool,
     /// Delayed task to smoothly hide the status bar after mouse leaves.
@@ -624,9 +626,10 @@ impl WindowView {
         )
         .detach();
 
-        // Observe settings entity to dynamically update toolbar panel visibility and close hidden panel
+        // Observe settings entity to dynamically update toolbar panel visibility, close hidden panel, and respond to status bar mode changes
         cx.observe(&crate::settings::settings_entity(cx), |this, _, cx| {
-            let new_toolbar_open = crate::settings::settings_entity(cx).read(cx).settings.right_toolbar_open;
+            let settings = crate::settings::settings_entity(cx).read(cx).settings.clone();
+            let new_toolbar_open = settings.right_toolbar_open;
             if this.right_toolbar_open != new_toolbar_open {
                 this.right_toolbar_open = new_toolbar_open;
             }
@@ -637,6 +640,12 @@ impl WindowView {
                         this.toggle_right_dock(cx);
                     }
                 }
+            }
+            let current_status_bar_mode = settings.status_bar_mode;
+            if this.last_status_bar_mode != current_status_bar_mode {
+                let old_mode = this.last_status_bar_mode;
+                this.last_status_bar_mode = current_status_bar_mode;
+                this.on_status_bar_mode_changed(old_mode, current_status_bar_mode, cx);
             }
             cx.notify();
         })
@@ -718,6 +727,7 @@ impl WindowView {
             initial_focus_done: false,
             allow_force_quit: false,
             is_locked: false,
+            last_status_bar_mode: app_settings.status_bar_mode,
             status_bar_hovered: false,
             status_bar_hide_task: None,
             status_bar_anim_progress: match app_settings.status_bar_mode {
