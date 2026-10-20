@@ -425,16 +425,23 @@ impl OverlayManager {
 
     /// Close the active (topmost) modal with smooth leave animation, restoring focus when finished.
     pub fn close_modal(&mut self, cx: &mut Context<Self>) {
-        if let Some(am) = self.active_animated_modal.clone() {
+        if let Some(entry) = self
+            .modal_stack
+            .iter()
+            .rev()
+            .find(|entry| !entry.animated.read(cx).is_closing())
+        {
+            let am = entry.animated.clone();
             am.update(cx, |modal, cx| {
                 modal.request_close(cx);
             });
-        } else if let Some(last) = self.modal_stack.last() {
-            let am = last.animated.clone();
-            am.update(cx, |modal, cx| {
-                modal.request_close(cx);
-            });
-        } else {
+        } else if let Some(am) = self.active_animated_modal.clone() {
+            if !am.read(cx).is_closing() {
+                am.update(cx, |modal, cx| {
+                    modal.request_close(cx);
+                });
+            }
+        } else if self.modal_stack.is_empty() {
             self.finish_modal_closed(cx);
         }
     }
@@ -452,16 +459,23 @@ impl OverlayManager {
         destination_content: Option<AnyView>,
         cx: &mut Context<Self>,
     ) {
-        if let Some(am) = self.active_animated_modal.clone() {
+        if let Some(entry) = self
+            .modal_stack
+            .iter()
+            .rev()
+            .find(|entry| !entry.animated.read(cx).is_closing())
+        {
+            let am = entry.animated.clone();
             am.update(cx, |modal, cx| {
                 modal.start_morph_exit_with_content(target_bounds, destination_content, cx);
             });
-        } else if let Some(last) = self.modal_stack.last() {
-            let am = last.animated.clone();
-            am.update(cx, |modal, cx| {
-                modal.start_morph_exit_with_content(target_bounds, destination_content, cx);
-            });
-        } else {
+        } else if let Some(am) = self.active_animated_modal.clone() {
+            if !am.read(cx).is_closing() {
+                am.update(cx, |modal, cx| {
+                    modal.start_morph_exit_with_content(target_bounds, destination_content, cx);
+                });
+            }
+        } else if self.modal_stack.is_empty() {
             self.finish_modal_closed(cx);
         }
     }
@@ -537,11 +551,19 @@ impl OverlayManager {
         self.pending_restore_panel.take()
     }
 
-    /// Active modal focus handle (if modal is currently active).
+    /// Active modal focus handle (if modal is currently active and not closing).
     pub fn active_modal_focus_handle(&self, cx: &App) -> Option<FocusHandle> {
-        self.active_animated_modal
-            .as_ref()
-            .map(|am| am.read(cx).focus_handle().clone())
+        self.modal_stack
+            .iter()
+            .rev()
+            .find(|entry| !entry.animated.read(cx).is_closing())
+            .map(|entry| entry.animated.read(cx).focus_handle().clone())
+            .or_else(|| {
+                self.active_animated_modal
+                    .as_ref()
+                    .filter(|am| !am.read(cx).is_closing())
+                    .map(|am| am.read(cx).focus_handle().clone())
+            })
     }
 
     /// Immediate close without leave animation (used when immediately replacing with another modal).
@@ -759,7 +781,12 @@ fn outside_click_behavior_for_type<T: 'static>() -> OutsideClickBehavior {
         })
         .detach();
 
-        self.open_modal_with_origin(dialog, origin_focus, None, cx);
+        self.open_modal_with_origin(
+            dialog,
+            if self.modal_stack.is_empty() { origin_focus } else { None },
+            None,
+            cx,
+        );
     }
 
     /// Get the active modal for rendering.
@@ -2431,13 +2458,12 @@ fn outside_click_behavior_for_type<T: 'static>() -> OutsideClickBehavior {
             )
         });
         entity.update(cx, |this, cx| this.setup_selects(cx));
-        let origin_focus = origin.clone();
         let entity_clone = entity.clone();
         cx.subscribe(&entity, move |this, _, event: &QuickCommandDialogEvent, cx| {
             match event {
                 QuickCommandDialogEvent::Close => {
                     if entity_clone.read(cx).is_dirty(cx) {
-                        this.show_discard_draft_confirm(origin_focus.clone(), |this, cx| {
+                        this.show_discard_draft_confirm(None, |this, cx| {
                             this.close_modal(cx);
                         }, cx);
                     } else {
@@ -3081,13 +3107,12 @@ fn outside_click_behavior_for_type<T: 'static>() -> OutsideClickBehavior {
 
         let entity = cx.new(|cx| TunnelDialog::new(mode, Some(self.overlay_registry.clone()), cx));
         entity.update(cx, |this, cx| this.setup_selects(cx));
-        let origin_focus = origin.clone();
         let entity_clone = entity.clone();
         cx.subscribe(&entity, move |this, _, event: &TunnelDialogEvent, cx| {
             match event {
                 TunnelDialogEvent::Close => {
                     if entity_clone.read(cx).is_dirty(cx) {
-                        this.show_discard_draft_confirm(origin_focus.clone(), |this, cx| {
+                        this.show_discard_draft_confirm(None, |this, cx| {
                             this.close_modal(cx);
                         }, cx);
                     } else {
@@ -3145,12 +3170,11 @@ fn outside_click_behavior_for_type<T: 'static>() -> OutsideClickBehavior {
             this.setup_selects(cx);
             this.refresh_selects(cx);
         });
-        let origin_focus = origin.clone();
         let entity_clone = entity.clone();
         cx.subscribe(&entity, move |this, _, event: &ServiceDialogEvent, cx| match event {
             ServiceDialogEvent::Close => {
                 if entity_clone.read(cx).is_dirty(cx) {
-                    this.show_discard_draft_confirm(origin_focus.clone(), |this, cx| {
+                    this.show_discard_draft_confirm(None, |this, cx| {
                         this.close_modal(cx);
                     }, cx);
                 } else {
