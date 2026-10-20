@@ -2,6 +2,7 @@ use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::term::test::TermSize;
 use alacritty_terminal::term::{Config as TermConfig, Term};
 use alacritty_terminal::vte::ansi::{CursorShape as VteCursorShape, CursorStyle as VteCursorStyle, Processor};
+use gpui::{App, Window};
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::Arc;
@@ -325,7 +326,14 @@ pub struct Terminal {
     pub(super) zmodem_swallow_until: Arc<Mutex<Option<std::time::Instant>>>,
     pub(super) zmodem_suppress_until: Arc<Mutex<Option<std::time::Instant>>>,
     pub(crate) predictive_echo: Arc<Mutex<PredictiveEchoTracker>>,
+    /// Optional text input interceptor for modal/inline prompts
+    pub(super) text_input_interceptor: Mutex<Option<TextInputInterceptor>>,
 }
+
+/// Interceptor callback for text input (e.g. inline snippet parameter bar).
+/// When set, text from GPUI's `InputHandler::replace_text_in_range` is redirected
+/// to this callback instead of being sent to the PTY.
+pub type TextInputInterceptor = Arc<dyn Fn(&str, &mut Window, &mut App) + Send + Sync>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ZmodemEvent {
@@ -647,7 +655,23 @@ impl Terminal {
             zmodem_swallow_until: Arc::new(Mutex::new(None)),
             zmodem_suppress_until: Arc::new(Mutex::new(None)),
             predictive_echo: Arc::new(Mutex::new(PredictiveEchoTracker::new())),
+            text_input_interceptor: Mutex::new(None),
         }
+    }
+
+    /// Set or clear the text input interceptor
+    pub fn set_text_input_interceptor(&self, interceptor: Option<TextInputInterceptor>) {
+        *self.text_input_interceptor.lock() = interceptor;
+    }
+
+    /// Retrieve the currently active text input interceptor, if any
+    pub fn text_input_interceptor(&self) -> Option<TextInputInterceptor> {
+        self.text_input_interceptor.lock().clone()
+    }
+
+    /// Check whether a text input interceptor is currently registered
+    pub fn has_text_input_interceptor(&self) -> bool {
+        self.text_input_interceptor.lock().is_some()
     }
 
     pub fn set_pending_upload_files(&self, files: Vec<std::path::PathBuf>) {

@@ -320,9 +320,41 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
             .on_action(cx.listener(|this, _: &FocusDown, window, cx| { this.handle_navigation(NavigationDirection::Down, window, cx); }))
             .on_action(cx.listener(|this, _: &FocusNextTerminal, window, cx| { this.handle_sequential_navigation(true, window, cx); }))
             .on_action(cx.listener(|this, _: &FocusPrevTerminal, window, cx| { this.handle_sequential_navigation(false, window, cx); }))
-            .on_action(cx.listener(|this, _: &SendTab, _window, _cx| { if let Some(ref terminal) = this.terminal { terminal.send_bytes(b"\t"); } }))
-            .on_action(cx.listener(|this, _: &SendBacktab, _window, _cx| { if let Some(ref terminal) = this.terminal { terminal.send_bytes(b"\x1b[Z"); } }))
-            .on_action(cx.listener(|this, _: &SendEscape, _window, _cx| { if let Some(ref terminal) = this.terminal { terminal.send_bytes(b"\x1b"); } }))
+            .on_action(cx.listener(|this, _: &SendTab, window, cx| {
+                if let Some(ref mut snippet) = this.snippet_state {
+                    snippet.jump_next(window, cx);
+                    cx.notify();
+                    return;
+                }
+                if this.history_popup_open && !this.history_popup_items.is_empty() {
+                    let idx = this.history_popup_selected.unwrap_or(0);
+                    this.select_history_suggestion(idx, Some(window), cx);
+                    return;
+                }
+                if let Some(ref terminal) = this.terminal { terminal.send_bytes(b"\t"); }
+            }))
+            .on_action(cx.listener(|this, _: &SendBacktab, window, cx| {
+                if let Some(ref mut snippet) = this.snippet_state {
+                    snippet.jump_prev(window, cx);
+                    cx.notify();
+                    return;
+                }
+                if let Some(ref terminal) = this.terminal { terminal.send_bytes(b"\x1b[Z"); }
+            }))
+            .on_action(cx.listener(|this, _: &SendEscape, _window, cx| {
+                if this.snippet_state.is_some() {
+                    this.exit_snippet_mode(cx);
+                    return;
+                }
+                if this.history_popup_open {
+                    this.history_popup_open = false;
+                    this.history_popup_items.clear();
+                    this.history_popup_selected = None;
+                    cx.notify();
+                    return;
+                }
+                if let Some(ref terminal) = this.terminal { terminal.send_bytes(b"\x1b"); }
+            }))
             .on_action(cx.listener(|_this, _: &ZoomIn, _window, cx| {
                 let mut tvs = crate::terminal_view_settings(cx).clone();
                 let new_font_size = (tvs.font_size + 1.0).clamp(8.0, 48.0);
@@ -409,9 +441,42 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                             selected,
                             cursor_pos,
                             &t,
-                            move |idx, cx| {
+                            move |idx, window, cx| {
                                 self_entity.update(cx, |this, cx| {
-                                    this.select_history_suggestion(idx, cx);
+                                    this.select_history_suggestion(idx, Some(window), cx);
+                                });
+                            },
+                            cx,
+                        ))
+                    })
+                    .when_some(self.snippet_state.clone(), |el, snippet| {
+                        let cursor_pos = self.content.read(cx).relative_cursor_position(cx);
+                        let self_entity = cx.entity().clone();
+                        let self_entity_backdrop = cx.entity().clone();
+                        let viewport_size = window.viewport_size();
+                        el.child(
+                            div()
+                                .id("snippet-bar-dismiss-backdrop")
+                                .absolute()
+                                .inset_0()
+                                .on_mouse_down(MouseButton::Left, move |_, _, cx| {
+                                    cx.stop_propagation();
+                                    self_entity_backdrop.update(cx, |this, cx| {
+                                        this.exit_snippet_mode(cx);
+                                    });
+                                }),
+                        )
+                        .child(super::snippet_bar::render_snippet_bar(
+                            &snippet,
+                            cursor_pos,
+                            viewport_size,
+                            &t,
+                            move |slot_idx, window, cx| {
+                                self_entity.update(cx, |this, cx| {
+                                    if let Some(ref mut st) = this.snippet_state {
+                                        st.select_slot(slot_idx, window, cx);
+                                        cx.notify();
+                                    }
                                 });
                             },
                             cx,

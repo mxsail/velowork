@@ -48,6 +48,80 @@ impl QuickCommandNode {
     pub fn is_folder(&self) -> bool {
         matches!(self, QuickCommandNode::Folder { .. })
     }
+
+    /// Extracts the effective variables for this command.
+    /// Combines explicitly defined `variables` with any undeclared `{{placeholder}}`s in `command`.
+    pub fn effective_variables(&self) -> Vec<QuickCommandVar> {
+        let (command, variables) = match self {
+            QuickCommandNode::Command { command, variables, .. } => (command, variables),
+            _ => return Vec::new(),
+        };
+
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+
+        // 1. Explicitly configured variables first
+        for var in variables {
+            if seen.insert(var.name.clone()) {
+                out.push(var.clone());
+            }
+        }
+
+        // 2. Any placeholders in command that were not explicitly configured
+        for placeholder in extract_quick_command_vars(command) {
+            if seen.insert(placeholder.clone()) {
+                out.push(QuickCommandVar {
+                    name: placeholder,
+                    default_value: String::new(),
+                    hint: String::new(),
+                });
+            }
+        }
+
+        out
+    }
+}
+
+/// Recursively collect all `Command` nodes from a tree of `QuickCommandNode`s.
+pub fn qc_collect_all_commands(nodes: &[QuickCommandNode]) -> Vec<QuickCommandNode> {
+    let mut out = Vec::new();
+    fn recurse(nodes: &[QuickCommandNode], out: &mut Vec<QuickCommandNode>) {
+        for node in nodes {
+            match node {
+                QuickCommandNode::Folder { children, .. } => {
+                    recurse(children, out);
+                }
+                QuickCommandNode::Command { .. } => {
+                    out.push(node.clone());
+                }
+            }
+        }
+    }
+    recurse(nodes, &mut out);
+    out
+}
+
+/// Find quick commands matching the given query (case-insensitive search in name or command).
+pub fn qc_match_commands(nodes: &[QuickCommandNode], query: &str, limit: usize) -> Vec<QuickCommandNode> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Vec::new();
+    }
+    let all = qc_collect_all_commands(nodes);
+    let mut matched = Vec::new();
+    for cmd in all {
+        if let QuickCommandNode::Command { name, command, .. } = &cmd {
+            let name_lower = name.to_lowercase();
+            let cmd_lower = command.to_lowercase();
+            if name_lower.contains(&q) || cmd_lower.contains(&q) {
+                matched.push(cmd);
+                if matched.len() >= limit {
+                    break;
+                }
+            }
+        }
+    }
+    matched
 }
 
 /// Generate a process-unique id for a quick-command node. Combines a
@@ -597,5 +671,49 @@ mod tests {
             find_invalid_var_placeholder("ssh {{host.name}}"),
             Some("host.name".to_string())
         );
+    }
+
+    #[test]
+    fn test_qc_collect_and_match_commands() {
+        let tree = vec![
+            QuickCommandNode::Folder {
+                id: "f1".to_string(),
+                name: "Docker".to_string(),
+                expanded: true,
+                children: vec![
+                    QuickCommandNode::Command {
+                        id: "c1".to_string(),
+                        name: "Docker 启动".to_string(),
+                        command: "docker run -d -p {{port}}:80 {{image}}".to_string(),
+                        variables: vec![QuickCommandVar {
+                            name: "port".to_string(),
+                            default_value: "8080".to_string(),
+                            hint: "宿主机端口".to_string(),
+                        }],
+                    },
+                ],
+            },
+            QuickCommandNode::Command {
+                id: "c2".to_string(),
+                name: "查看进程".to_string(),
+                command: "ps aux | grep {{proc}}".to_string(),
+                variables: vec![],
+            },
+        ];
+
+        let all = qc_collect_all_commands(&tree);
+        assert_eq!(all.len(), 2);
+
+        let matches = qc_match_commands(&tree, "docker", 10);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].name(), "Docker 启动");
+
+        // Test effective variables extraction
+        let effective = matches[0].effective_variables();
+        assert_eq!(effective.len(), 2);
+        assert_eq!(effective[0].name, "port");
+        assert_eq!(effective[0].default_value, "8080");
+        assert_eq!(effective[1].name, "image");
+        assert_eq!(effective[1].default_value, "");
     }
 }

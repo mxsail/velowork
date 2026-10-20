@@ -12,6 +12,7 @@ mod render;
 mod scrollbar;
 mod search_bar;
 pub mod sftp_panel;
+pub mod snippet_bar;
 pub mod url_detector;
 mod zoom;
 
@@ -91,12 +92,13 @@ pub struct TerminalPane<D: ActionDispatch> {
     log_toolbar_exiting: bool,
     log_toolbar_exit_start_time: Option<std::time::Instant>,
 
-    // History Autocompletion & Multi-line command accumulation
+    // History & Quick Commands Autocompletion & Multi-line command accumulation
     input_line_buffer: String,
     command_accumulator: Vec<String>,
-    history_popup_items: Vec<velowork_workspace::repositories::HistoryEntry>,
+    history_popup_items: Vec<history_popup::TerminalCompletionItem>,
     history_popup_selected: Option<usize>,
     history_popup_open: bool,
+    snippet_state: Option<snippet_bar::TerminalSnippetState>,
 
     // Welcome screen search selection
     pub(super) welcome_selected_index: Option<usize>,
@@ -213,6 +215,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             history_popup_items: Vec::new(),
             history_popup_selected: None,
             history_popup_open: false,
+            snippet_state: None,
             welcome_selected_index: None,
             is_reconnecting: false,
             zmodem_cancel_flag: None,
@@ -1773,10 +1776,11 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
 impl<D: ActionDispatch> Drop for TerminalPane<D> {
     fn drop(&mut self) {
-        if let Some(ref terminal) = self.terminal
-            && terminal.is_zmodem_active()
-        {
-            terminal.cancel_zmodem();
+        if let Some(ref terminal) = self.terminal {
+            terminal.set_text_input_interceptor(None);
+            if terminal.is_zmodem_active() {
+                terminal.cancel_zmodem();
+            }
         }
         // Remove this pane from the spatial navigation map so stale entries
         // don't linger after a terminal is closed.

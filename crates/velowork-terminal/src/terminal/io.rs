@@ -339,6 +339,9 @@ impl Terminal {
     /// Send input to the PTY
     /// Automatically scrolls to bottom if scrolled into history
     pub fn send_input(&self, input: &str) {
+        if self.has_text_input_interceptor() {
+            return;
+        }
         self.had_user_input.store(true, Ordering::Relaxed);
         self.scroll_to_bottom();
         self.transport.send_input(&self.terminal_id, input.as_bytes());

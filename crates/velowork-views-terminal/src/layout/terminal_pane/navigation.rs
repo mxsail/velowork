@@ -6,6 +6,7 @@ use velowork_terminal::input::{KeyEvent, KeyModifiers, key_to_bytes};
 use crate::layout::navigation::{get_pane_map, PaneBounds, NavigationDirection};
 use velowork_workspace::state::LayoutNode;
 use gpui::*;
+use std::sync::Arc;
 
 use super::TerminalPane;
 
@@ -181,6 +182,13 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
     }
 
     pub(super) fn update_history_popup(&mut self, cx: &mut Context<Self>) {
+        if self.snippet_state.is_some() {
+            self.history_popup_open = false;
+            self.history_popup_items.clear();
+            self.history_popup_selected = None;
+            return;
+        }
+
         let s = crate::terminal_view_settings(cx);
         if !s.command_history_auto_completion || self.is_cursor_at_auth_prompt() {
             self.history_popup_open = false;
@@ -206,13 +214,52 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             return;
         }
 
+        let mut results = Vec::new();
+
+        // 1. Match quick commands
+        let empty_nodes = Vec::new();
+        let global_settings = cx.try_global::<velowork_app_core::settings::GlobalSettings>();
+        let qc_nodes = if let Some(global) = global_settings {
+            let app_settings = global.0.read(cx);
+            app_settings
+                .settings
+                .quick_commands_for_project(Some(&self.project_id))
+                .to_vec()
+        } else {
+            empty_nodes
+        };
+        let matched_qcs = velowork_workspace::quick_commands::qc_match_commands(&qc_nodes, query, 5);
+        for qc in matched_qcs {
+            let effective_vars = qc.effective_variables();
+            if let velowork_workspace::quick_commands::QuickCommandNode::Command {
+                id,
+                name,
+                command,
+                ..
+            } = qc
+            {
+                results.push(super::history_popup::TerminalCompletionItem::QuickCommand {
+                    id,
+                    name,
+                    command,
+                    variables: effective_vars,
+                });
+            }
+        }
+
+        // 2. Match history entries
+        let history_limit = 10usize.saturating_sub(results.len()).max(3);
         let entries = super::history_cache::HistoryCache::match_suggestions(
             &self.project_id,
             query,
-            super::history_cache::MAX_SUGGESTION_RESULTS,
+            history_limit,
         );
-        if !entries.is_empty() {
-            self.history_popup_items = entries;
+        for entry in entries {
+            results.push(super::history_popup::TerminalCompletionItem::History(entry));
+        }
+
+        if !results.is_empty() {
+            self.history_popup_items = results;
             self.history_popup_open = true;
             if let Some(sel) = self.history_popup_selected {
                 if sel >= self.history_popup_items.len() {
@@ -428,17 +475,131 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         })
     }
 
-    pub(super) fn select_history_suggestion(&mut self, idx: usize, cx: &mut Context<Self>) {
+    pub(super) fn select_history_suggestion(&mut self, idx: usize, window: Option<&mut Window>, cx: &mut Context<Self>) {
         if idx < self.history_popup_items.len() {
-            let selected_cmd = self.history_popup_items[idx].command.clone();
-            if let Some(terminal) = self.terminal.clone() {
-                terminal.send_bytes(b"\x15"); // Ctrl+U clear line
-                terminal.send_bytes(selected_cmd.as_bytes());
+            let item = self.history_popup_items[idx].clone();
+            match item {
+                super::history_popup::TerminalCompletionItem::History(entry) => {
+                    if let Some(terminal) = self.terminal.clone() {
+                        terminal.send_bytes(b"\x15"); // Ctrl+U clear line
+                        terminal.send_bytes(entry.command.as_bytes());
+                    }
+                    self.input_line_buffer = entry.command;
+                    self.history_popup_open = false;
+                    self.history_popup_items.clear();
+                    self.history_popup_selected = None;
+                    cx.notify();
+                }
+                super::history_popup::TerminalCompletionItem::QuickCommand {
+                    id,
+                    name,
+                    command,
+                    variables,
+                } => {
+                    if variables.is_empty() {
+                        if let Some(terminal) = self.terminal.clone() {
+                            terminal.send_bytes(b"\x15"); // Ctrl+U clear line
+                            terminal.send_bytes(command.as_bytes());
+                        }
+                        self.input_line_buffer = command;
+                        self.history_popup_open = false;
+                        self.history_popup_items.clear();
+                        self.history_popup_selected = None;
+                        cx.notify();
+                    } else {
+                        self.enter_snippet_mode(id, name, command, variables, window, cx);
+                    }
+                }
             }
-            self.input_line_buffer = selected_cmd;
-            self.history_popup_open = false;
-            self.history_popup_items.clear();
-            self.history_popup_selected = None;
+        }
+    }
+
+    pub(super) fn enter_snippet_mode(
+        &mut self,
+        id: String,
+        name: String,
+        command: String,
+        variables: Vec<velowork_workspace::quick_commands::QuickCommandVar>,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        let state = super::snippet_bar::TerminalSnippetState::new(
+            id,
+            name,
+            command,
+            variables,
+            self.input_line_buffer.clone(),
+            cx,
+        );
+
+        // 订阅每一个变量槽输入框的事件（内容变化触发实时预览重绘，Enter/Escape 控制生命周期）
+        for slot in &state.slots {
+            let input = slot.input.clone();
+            cx.subscribe(&input, |this, _, event: &velowork_ui::input::InputEvent, cx| {
+                match event {
+                    velowork_ui::input::InputEvent::Change => {
+                        if let Some(ref mut st) = this.snippet_state {
+                            st.sync_modified_status(cx);
+                        }
+                        cx.notify();
+                    }
+                    velowork_ui::input::InputEvent::PressEnter => {
+                        this.submit_snippet(false, cx);
+                    }
+                    velowork_ui::input::InputEvent::PressEscape => {
+                        this.exit_snippet_mode(cx);
+                    }
+                    _ => {}
+                }
+            })
+            .detach();
+        }
+
+        // 默认将焦点置于第一个输入框并全选默认值（支持打字直接覆盖与鼠标点击微调）
+        if let Some(win) = window {
+            if let Some(first_slot) = state.slots.first() {
+                first_slot.input.update(cx, |inp, cx| {
+                    inp.select_all(cx);
+                    inp.focus(win, cx);
+                });
+            }
+        }
+
+        self.snippet_state = Some(state);
+        self.history_popup_open = false;
+        self.history_popup_items.clear();
+        self.history_popup_selected = None;
+
+        if let Some(ref term) = self.terminal {
+            // 设置防御性输入拦截器，彻底防止底层终端接收多余击键
+            term.set_text_input_interceptor(Some(Arc::new(|_, _, _| {})));
+        }
+
+        cx.notify();
+    }
+
+    pub(super) fn submit_snippet(&mut self, auto_run: bool, cx: &mut Context<Self>) {
+        if let Some(ref snippet) = self.snippet_state {
+            let final_cmd = snippet.render_interpolated_command(cx);
+            self.exit_snippet_mode(cx);
+            if let Some(terminal) = self.terminal.clone() {
+                terminal.send_bytes(b"\x15"); // Ctrl+U clear query text
+                terminal.send_bytes(final_cmd.as_bytes());
+                if auto_run {
+                    terminal.send_bytes(b"\n");
+                }
+            }
+            self.input_line_buffer = if auto_run { String::new() } else { final_cmd };
+            cx.notify();
+        }
+    }
+
+    pub(super) fn exit_snippet_mode(&mut self, cx: &mut Context<Self>) {
+        if self.snippet_state.is_some() {
+            self.snippet_state = None;
+            if let Some(ref term) = self.terminal {
+                term.set_text_input_interceptor(None);
+            }
             cx.notify();
         }
     }
@@ -491,7 +652,40 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             return;
         }
 
-        // 历史命令智能匹配浮窗的键盘交互拦截
+        // 0. Snippet 变量导航与填参模式拦截（优先级 3）
+        if let Some(ref mut snippet) = self.snippet_state {
+            if event.keystroke.key == "tab"
+                && !event.keystroke.modifiers.control
+                && !event.keystroke.modifiers.alt
+                && !event.keystroke.modifiers.platform
+            {
+                if event.keystroke.modifiers.shift {
+                    snippet.jump_prev(window, cx);
+                } else {
+                    snippet.jump_next(window, cx);
+                }
+                cx.notify();
+                return;
+            }
+
+            if event.keystroke.key == "enter" {
+                let auto_run = event.keystroke.modifiers.control || event.keystroke.modifiers.platform;
+                self.submit_snippet(auto_run, cx);
+                window.focus(&self.focus_handle, cx);
+                return;
+            }
+
+            if event.keystroke.key == "escape" {
+                self.exit_snippet_mode(cx);
+                window.focus(&self.focus_handle, cx);
+                return;
+            }
+
+            // 吞噬所有其他键盘输入，普通字符与输入法文本由 SimpleInputState 原生接管
+            return;
+        }
+
+        // 历史命令与快捷指令智能匹配浮窗的键盘交互拦截
         if self.history_popup_open && !self.history_popup_items.is_empty() {
             if event.keystroke.key == "down"
                 && !event.keystroke.modifiers.control
@@ -542,19 +736,8 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                 });
 
                 if let Some(idx) = selected_idx {
-                    if idx < self.history_popup_items.len() {
-                        let selected_cmd = self.history_popup_items[idx].command.clone();
-                        if let Some(ref terminal) = self.terminal {
-                            terminal.send_bytes(b"\x15");
-                            terminal.send_bytes(selected_cmd.as_bytes());
-                        }
-                        self.input_line_buffer = selected_cmd;
-                        self.history_popup_open = false;
-                        self.history_popup_items.clear();
-                        self.history_popup_selected = None;
-                        cx.notify();
-                        return;
-                    }
+                    self.select_history_suggestion(idx, Some(window), cx);
+                    return;
                 }
             }
         }

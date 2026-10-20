@@ -20,7 +20,7 @@ pub(crate) struct TerminalInputHandler {
 impl TerminalInputHandler {
     /// Send text input to terminal, filtering macOS function keys and handling control characters
     fn send_filtered_input(&self, text: &str) {
-        if text.is_empty() {
+        if text.is_empty() || self.terminal.has_text_input_interceptor() {
             return;
         }
         // Local keyboard input reclaims resize authority from remote clients
@@ -97,9 +97,14 @@ impl InputHandler for TerminalInputHandler {
         _replacement_range: Option<Range<usize>>,
         text: &str,
         window: &mut Window,
-        _cx: &mut App,
+        cx: &mut App,
     ) {
         self.terminal.set_marked_text(None);
+        if let Some(interceptor) = self.terminal.text_input_interceptor() {
+            interceptor(text, window, cx);
+            window.refresh();
+            return;
+        }
         self.send_filtered_input(text);
         window.refresh();
     }
