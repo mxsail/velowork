@@ -1405,7 +1405,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                         let percent = (transferred * 100).checked_div(total).unwrap_or(0);
                         let elapsed = transfer_start.elapsed().as_secs();
                         if last_render.elapsed() >= std::time::Duration::from_millis(50) {
-                            let line = format_zmodem_progress_bar(percent, elapsed, speed, total, false);
+                            let line = format_zmodem_progress_bar(percent, transferred, total, speed, elapsed, false);
                             term_for_prog.write_to_screen(line.as_bytes());
                             last_render = std::time::Instant::now();
                         }
@@ -1466,9 +1466,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                         if summary.transferred_files > 0 {
                             let final_line = format_zmodem_progress_bar(
                                 100,
-                                transfer_start.elapsed().as_secs(),
-                                0.0,
                                 summary.transferred_bytes,
+                                summary.transferred_bytes,
+                                0.0,
+                                transfer_start.elapsed().as_secs(),
                                 true,
                             );
                             term_for_res.write_to_screen(final_line.as_bytes());
@@ -1481,9 +1482,10 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                         } else {
                             let final_line = format_zmodem_progress_bar(
                                 100,
-                                transfer_start.elapsed().as_secs(),
-                                0.0,
                                 total_bytes,
+                                total_bytes,
+                                0.0,
+                                transfer_start.elapsed().as_secs(),
                                 true,
                             );
                             term_for_res.write_to_screen(final_line.as_bytes());
@@ -1627,7 +1629,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                 let percent = (transferred * 100).checked_div(total).unwrap_or(0);
                 let elapsed = transfer_start.elapsed().as_secs();
                 if last_render.elapsed() >= std::time::Duration::from_millis(50) {
-                    let line = format_zmodem_progress_bar(percent, elapsed, speed, total, false);
+                    let line = format_zmodem_progress_bar(percent, transferred, total, speed, elapsed, false);
                     term_for_prog.write_to_screen(line.as_bytes());
                     last_render = std::time::Instant::now();
                 }
@@ -1800,17 +1802,17 @@ impl<D: ActionDispatch + Send + Sync> gpui::Focusable for TerminalPane<D> {
 
 fn format_zmodem_progress_bar(
     percent: u64,
-    elapsed_secs: u64,
-    speed_bps: f64,
+    transferred_bytes: u64,
     total_bytes: u64,
+    speed_bps: f64,
+    elapsed_secs: u64,
     is_complete: bool,
 ) -> String {
-    let hrs = elapsed_secs / 3600;
-    let mins = (elapsed_secs % 3600) / 60;
-    let secs = elapsed_secs % 60;
-    let time_str = format!("{:02}:{:02}:{:02}", hrs, mins, secs);
-
     if is_complete {
+        let hrs = elapsed_secs / 3600;
+        let mins = (elapsed_secs % 3600) / 60;
+        let secs = elapsed_secs % 60;
+        let time_str = format!("{:02}:{:02}:{:02}", hrs, mins, secs);
         let bar = "=".repeat(20);
         format!("\r\x1b[2K 100% [{}] {} {} bytes\r\n\r\n", bar, time_str, total_bytes)
     } else {
@@ -1833,7 +1835,50 @@ fn format_zmodem_progress_bar(
             format!("{:.0} B/s", speed_bps)
         };
 
-        format!("\r\x1b[2K{:3}% [{}] {}  {}", percent, bar, time_str, speed_str)
+        let eta_str = if speed_bps > 0.0 && total_bytes > 0 {
+            let remaining_bytes = total_bytes.saturating_sub(transferred_bytes);
+            let eta_secs = (remaining_bytes as f64 / speed_bps).ceil() as u64;
+            let eta_secs = eta_secs.min(359_999);
+            let hrs = eta_secs / 3600;
+            let mins = (eta_secs % 3600) / 60;
+            let secs = eta_secs % 60;
+            format!("ETA {:02}:{:02}:{:02}", hrs, mins, secs)
+        } else {
+            "ETA --:--:--".to_string()
+        };
+
+        format!("\r\x1b[2K{:3}% [{}] {}  {}", percent, bar, eta_str, speed_str)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_zmodem_progress_bar_inflight_eta() {
+        // 50% transferred, 500 KB remaining at 100 KB/s => 5 seconds ETA
+        let output = format_zmodem_progress_bar(50, 500_000, 1_000_000, 100_000.0, 10, false);
+        assert!(output.contains("ETA 00:00:05"), "Expected ETA 00:00:05, got: {}", output);
+        assert!(output.contains("50%"), "Expected 50%, got: {}", output);
+        assert!(output.contains("97.66 KB/s"), "Expected speed format, got: {}", output);
+    }
+
+    #[test]
+    fn test_format_zmodem_progress_bar_zero_speed() {
+        // Zero speed or initial state => ETA --:--:--
+        let output = format_zmodem_progress_bar(0, 0, 1_000_000, 0.0, 0, false);
+        assert!(output.contains("ETA --:--:--"), "Expected ETA --:--:--, got: {}", output);
+    }
+
+    #[test]
+    fn test_format_zmodem_progress_bar_complete() {
+        // Complete transfer => Elapsed duration and byte count
+        let output = format_zmodem_progress_bar(100, 1_000_000, 1_000_000, 0.0, 65, true);
+        assert!(output.contains("100%"), "Expected 100%, got: {}", output);
+        assert!(output.contains("00:01:05"), "Expected elapsed 00:01:05, got: {}", output);
+        assert!(output.contains("1000000 bytes"), "Expected byte count, got: {}", output);
+    }
+}
+
 
