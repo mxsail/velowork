@@ -45,12 +45,14 @@ where
         InputState::new(cx)
             .placeholder(placeholder)
             .default_value(current_name)
+            .select_all_text()
     });
 
     let focus_handle = input.read(cx).focus_handle(cx);
     let subscription = cx.on_blur(&focus_handle, window, on_blur);
     input.update(cx, |input, cx| {
         input.focus(window, cx);
+        input.select_all(cx);
     });
 
     RenameState { target, input, _blur_subscription: Some(subscription) }

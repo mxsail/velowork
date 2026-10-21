@@ -161,27 +161,46 @@ pub struct InlineRenameState {
     pub old_name: String,
     pub name_input: Option<Entity<InputState>>,
     pub error: Option<SharedString>,
+    pub submitting: bool,
 }
 
 impl InlineRenameState {
-    pub fn ensure_input(&mut self, _window: &mut Window, cx: &mut Context<BottomPanel>) -> Entity<InputState> {
+    pub fn ensure_input(&mut self, window: &mut Window, cx: &mut Context<BottomPanel>) -> Entity<InputState> {
         if let Some(ref mut input) = self.name_input {
             return input.clone();
         }
         let old_name = self.old_name.clone();
+        let placeholder = i18n!(cx, "sftp.dialog.new_name_placeholder");
         let input = cx.new(|cx| {
             InputState::new(cx)
                 .default_value(old_name)
-                .placeholder("New name...")
+                .placeholder(placeholder)
+                .select_all_text()
+        });
+        input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(cx);
         });
         cx.subscribe(&input, |this: &mut BottomPanel, _, event: &InputEvent, cx| {
-            if let InputEvent::Change = event {
-                if let Some(ref mut r) = this.inline_rename {
-                    if r.error.is_some() {
-                        r.error = None;
-                        cx.notify();
+            match event {
+                InputEvent::Change => {
+                    if let Some(ref mut r) = this.inline_rename {
+                        if r.error.is_some() {
+                            r.error = None;
+                            cx.notify();
+                        }
                     }
                 }
+                InputEvent::PressEnter => {
+                    this.submit_rename(cx);
+                }
+                InputEvent::PressEscape => {
+                    this.inline_rename = None;
+                    this.inline_rename_sub = None;
+                    this.focus_self_pending = true;
+                    cx.notify();
+                }
+                _ => {}
             }
         })
         .detach();
@@ -306,6 +325,7 @@ pub struct BottomPanel {
     /// Inline rename state - when set, shows an input field at the row position
     /// instead of opening a modal dialog.
     inline_rename: Option<InlineRenameState>,
+    inline_rename_sub: Option<Subscription>,
     focus_handle: FocusHandle,
     /// When set, the corresponding input is focused on the next render.
     /// Used to auto-focus the first input of a freshly opened dialog so it is
@@ -452,6 +472,7 @@ impl BottomPanel {
             context_menu: None,
             modal: None,
             inline_rename: None,
+            inline_rename_sub: None,
             focus_handle: cx.focus_handle(),
             dialog_focus_target: None,
             dialog_focus_handle_target: None,
@@ -1926,7 +1947,7 @@ impl BottomPanel {
     }
 
     // ─── Rename ─────────────────────────────────────────────────────────────
-    fn open_rename_dialog(&mut self, idx: usize, cx: &mut Context<Self>) {
+    fn open_rename_dialog(&mut self, idx: usize, window: &mut Window, cx: &mut Context<Self>) {
         let (old_path, old_name) = match self.abs_path(idx) {
             Some((p, _, false)) => {
                 let files = self.filtered_files();
@@ -1934,13 +1955,58 @@ impl BottomPanel {
             }
             _ => return,
         };
+
+        let placeholder = i18n!(cx, "sftp.dialog.new_name_placeholder");
+        let input = cx.new(|cx| {
+            InputState::new(cx)
+                .default_value(old_name.clone())
+                .placeholder(placeholder)
+                .select_all_text()
+        });
+        input.update(cx, |input, cx| {
+            input.focus(window, cx);
+            input.select_all(cx);
+        });
+
+        cx.subscribe(&input, |this: &mut BottomPanel, _, event: &InputEvent, cx| {
+            match event {
+                InputEvent::Change => {
+                    if let Some(ref mut r) = this.inline_rename {
+                        if r.error.is_some() {
+                            r.error = None;
+                            cx.notify();
+                        }
+                    }
+                }
+                InputEvent::PressEnter => {
+                    this.submit_rename(cx);
+                }
+                InputEvent::PressEscape => {
+                    this.inline_rename = None;
+                    this.inline_rename_sub = None;
+                    this.focus_self_pending = true;
+                    cx.notify();
+                }
+                _ => {}
+            }
+        })
+        .detach();
+
+        let focus_handle = input.read(cx).focus_handle(cx);
+        self.inline_rename_sub = Some(cx.on_blur(&focus_handle, window, |this: &mut BottomPanel, _window, cx| {
+            if this.inline_rename.is_some() {
+                this.submit_rename(cx);
+            }
+        }));
+
         // Use inline rename instead of modal
         self.inline_rename = Some(InlineRenameState {
             idx,
             old_path,
             old_name,
-            name_input: None,
+            name_input: Some(input),
             error: None,
+            submitting: false,
         });
         self.context_menu = None;
         cx.notify();
@@ -1948,7 +2014,10 @@ impl BottomPanel {
 
     fn submit_rename(&mut self, cx: &mut Context<Self>) {
         // Support both modal and inline rename
-        let (sftp, old_path, new_path, old_name, is_inline) = if let Some(s) = &self.inline_rename {
+        let (sftp, old_path, new_path, old_name, is_inline) = if let Some(s) = &mut self.inline_rename {
+            if s.submitting {
+                return;
+            }
             let new_name = if let Some(ref input) = s.name_input {
                 input.read(cx).text().to_string().trim().to_string()
             } else {
@@ -1956,10 +2025,13 @@ impl BottomPanel {
             };
             if new_name.is_empty() || new_name == s.old_name {
                 self.inline_rename = None;
+                self.inline_rename_sub = None;
                 self.focus_self_pending = true;
                 cx.notify();
                 return;
             }
+            s.submitting = true;
+            self.inline_rename_sub = None;
             let parent = parent_dir_of(&s.old_path);
             (
                 match &self.connection_state {
@@ -1995,6 +2067,7 @@ impl BottomPanel {
             let _ = this.update(cx, |this, cx| match res {
                 Ok(()) => {
                     this.inline_rename = None;
+                    this.inline_rename_sub = None;
                     this.modal = None;
                     this.context_menu = None;
                     this.focus_self_pending = true;
@@ -2009,6 +2082,7 @@ impl BottomPanel {
                             .replace("{error}", &e.to_string())
                             .into();
                         if let Some(ref mut r) = this.inline_rename {
+                            r.submitting = false;
                             r.error = Some(msg);
                         }
                         cx.notify();
@@ -3492,7 +3566,7 @@ impl BottomPanel {
         .detach();
     }
 
-    fn handle_key(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) {
+    fn handle_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let key = event.keystroke.key.as_str();
 
         // 行数 = 父目录 ".." 项(1) + 可见文件数；键盘导航范围与渲染/操作一致。
@@ -3565,6 +3639,7 @@ impl BottomPanel {
                 // Cancel inline rename first, then modals
                 if self.inline_rename.is_some() {
                     self.inline_rename = None;
+                    self.inline_rename_sub = None;
                     self.focus_self_pending = true;
                     cx.notify();
                 } else if self.modal.is_some() || self.active_dialog.is_some() {
@@ -3582,7 +3657,7 @@ impl BottomPanel {
                     if let Some(idx) = self.selection.active() {
                         // idx 0 为 ".." 父目录项，不可重命名。
                         if idx != 0 {
-                            self.open_rename_dialog(idx, cx);
+                            self.open_rename_dialog(idx, window, cx);
                         }
                     }
                 }
@@ -4848,6 +4923,7 @@ impl Render for BottomPanel {
             .on_action(cx.listener(|this, _: &UiCancel, _, cx| {
                 if this.inline_rename.is_some() {
                     this.inline_rename = None;
+                    this.inline_rename_sub = None;
                     this.focus_self_pending = true;
                     cx.notify();
                 } else if this.modal.is_some() || this.active_dialog.is_some() {
@@ -4861,6 +4937,7 @@ impl Render for BottomPanel {
             .on_action(cx.listener(|this, _: &TermCancel, _, cx| {
                 if this.inline_rename.is_some() {
                     this.inline_rename = None;
+                    this.inline_rename_sub = None;
                     this.focus_self_pending = true;
                     cx.notify();
                 } else if this.modal.is_some() || this.active_dialog.is_some() {
@@ -4871,8 +4948,8 @@ impl Render for BottomPanel {
                     cx.notify();
                 }
             }))
-            .on_key_down(cx.listener(|this, event, _, cx| {
-                this.handle_key(event, cx);
+            .on_key_down(cx.listener(|this, event, window, cx| {
+                this.handle_key(event, window, cx);
             }))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(|_, _, cx| cx.stop_propagation())
@@ -5012,9 +5089,9 @@ impl Render for BottomPanel {
                                         &t, cx,
                                     )
                                     .on_click(cx.listener(
-                                        move |this, _, _, cx| {
+                                        move |this, _, window, cx| {
                                             this.context_menu = None;
-                                            this.open_rename_dialog(item_idx, cx);
+                                            this.open_rename_dialog(item_idx, window, cx);
                                         },
                                     )),
                                 )

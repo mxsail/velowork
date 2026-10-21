@@ -800,7 +800,9 @@ impl TunnelsPanel {
         let input_ent = if let Some(ref mut state) = self.inline_tunnel {
             if state.input.is_none() {
                 let inp = cx.new(|cx| {
-                    InputState::new(cx).default_value(&state.original_name)
+                    InputState::new(cx)
+                        .default_value(&state.original_name)
+                        .select_all_text()
                 });
                 state.input = Some(inp);
             }
@@ -816,6 +818,7 @@ impl TunnelsPanel {
         let focus_handle = input.focus_handle(cx);
         if self.inline_tunnel_sub.is_none() {
             window.focus(&focus_handle, cx);
+            input.update(cx, |i, cx| i.select_all(cx));
             self.inline_tunnel_sub =
                 Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                     this.commit_inline_tunnel(cx);
@@ -1194,7 +1197,7 @@ impl TunnelsPanel {
                 InlineTunnelFolderState::Renaming { input, original_name, .. } => {
                     if input.is_none() {
                         let name = original_name.clone();
-                        let i = cx.new(|cx| InputState::new(cx).default_value(name));
+                        let i = cx.new(|cx| InputState::new(cx).default_value(name).select_all_text());
                         *input = Some(i);
                     }
                     input.clone()
@@ -1212,6 +1215,9 @@ impl TunnelsPanel {
         let focus_handle = input.focus_handle(cx);
         if self.inline_folder_sub.is_none() {
             window.focus(&focus_handle, cx);
+            if matches!(self.inline_folder, Some(InlineTunnelFolderState::Renaming { .. })) {
+                input.update(cx, |i, cx| i.select_all(cx));
+            }
             self.inline_folder_sub =
                 Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                     this.commit_inline_folder(cx);

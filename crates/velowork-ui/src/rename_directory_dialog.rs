@@ -156,6 +156,7 @@ impl Render for RenameDirectoryDialog {
                 InputState::new(cx)
                     .placeholder(i18n!(cx, "dialog.directory_name_placeholder"))
                     .default_value(current_name)
+                    .select_all_text()
                     .pass_enter(true)
             })
         });
@@ -164,6 +165,7 @@ impl Render for RenameDirectoryDialog {
             self.initialized = true;
             name_input.update(cx, |input, cx| {
                 input.focus(window, cx);
+                input.select_all(cx);
             });
         }
 

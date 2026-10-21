@@ -1153,7 +1153,7 @@ impl QuickCommandsPanel {
                 InlineQcFolderState::Renaming { input, original_name, .. } => {
                     if input.is_none() {
                         let name = original_name.clone();
-                        let i = cx.new(|cx| InputState::new(cx).default_value(name));
+                        let i = cx.new(|cx| InputState::new(cx).default_value(name).select_all_text());
                         *input = Some(i);
                     }
                     input.clone()
@@ -1171,6 +1171,9 @@ impl QuickCommandsPanel {
         let focus_handle = input.focus_handle(cx);
         if self.inline_folder_sub.is_none() {
             window.focus(&focus_handle, cx);
+            if matches!(self.inline_folder, Some(InlineQcFolderState::Renaming { .. })) {
+                input.update(cx, |i, cx| i.select_all(cx));
+            }
             self.inline_folder_sub = Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                 this.commit_inline_folder(cx);
                 window.focus(&this.focus_handle, cx);
@@ -1301,7 +1304,7 @@ impl QuickCommandsPanel {
             let InlineQcCommandState::Renaming { input, original_name, .. } = state;
             if input.is_none() {
                 let name = original_name.clone();
-                let i = cx.new(|cx| InputState::new(cx).default_value(name));
+                let i = cx.new(|cx| InputState::new(cx).default_value(name).select_all_text());
                 *input = Some(i);
             }
             input.clone()
@@ -1316,6 +1319,7 @@ impl QuickCommandsPanel {
         let focus_handle = input.focus_handle(cx);
         if self.inline_command_sub.is_none() {
             window.focus(&focus_handle, cx);
+            input.update(cx, |i, cx| i.select_all(cx));
             self.inline_command_sub = Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                 this.commit_inline_command(cx);
                 if this.inline_command.is_none() {

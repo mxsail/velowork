@@ -4512,6 +4512,7 @@ impl AiAssistantPanel {
         let state = cx.new(|cx| {
             SimpleInputState::new(cx)
                 .default_value(&val)
+                .select_all_text()
                 .submit_on_enter(true)
         });
         let state_clone = state.clone();

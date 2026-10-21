@@ -471,6 +471,15 @@ impl SimpleInputState {
         self
     }
 
+    /// Select all text initially upon creation.
+    pub fn select_all_text(mut self) -> Self {
+        if !self.value.is_empty() {
+            self.selection = Some(0..self.value.len());
+            self.selection_reversed = false;
+        }
+        self
+    }
+
     pub fn icon(mut self, icon: impl Into<AppIcon>) -> Self {
         self.icon = Some(icon.into());
         self
@@ -3913,6 +3922,51 @@ mod tests {
             };
             assert_eq!(this.handle_key_down(&ev, cx), KeyHandled::Handled);
             assert!(this.marked_range.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn test_select_all_text_and_navigation(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+
+        // 1. Initial creation with select_all_text()
+        let input = cx.new(|cx| SimpleInputState::new(cx).default_value("document.txt").select_all_text());
+        input.update(cx, |this, _cx| {
+            assert_eq!(this.selection(), Some(0.."document.txt".len()));
+        });
+
+        // 2. Pressing Left arrow clears selection and positions cursor at 0
+        input.update(cx, |this, cx| {
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("left").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev, cx);
+            assert_eq!(this.selection(), None);
+            assert_eq!(this.cursor_offset(), 0);
+        });
+
+        // 3. Re-select all, then Right arrow clears selection and positions cursor at end
+        input.update(cx, |this, cx| {
+            this.select_all(cx);
+            assert_eq!(this.selection(), Some(0.."document.txt".len()));
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("right").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev, cx);
+            assert_eq!(this.selection(), None);
+            assert_eq!(this.cursor_offset(), "document.txt".len());
+        });
+
+        // 4. Re-select all, typing a character replaces the entire text
+        input.update(cx, |this, cx| {
+            this.select_all(cx);
+            this.insert_text("new_name", cx);
+            assert_eq!(this.value(), "new_name");
+            assert_eq!(this.selection(), None);
         });
     }
 }

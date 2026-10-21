@@ -809,7 +809,7 @@ impl SessionPanel {
                 } => {
                     if input.is_none() {
                         let name = original_name.clone();
-                        let i = cx.new(|cx| InputState::new(cx).default_value(name));
+                        let i = cx.new(|cx| InputState::new(cx).default_value(name).select_all_text());
                         *input = Some(i);
                     }
                     input.clone()
@@ -828,6 +828,9 @@ impl SessionPanel {
 
         if self.inline_folder_sub.is_none() {
             window.focus(&focus_handle, cx);
+            if matches!(self.inline_folder, Some(InlineFolderState::Renaming { .. })) {
+                input.update(cx, |i, cx| i.select_all(cx));
+            }
             self.inline_folder_sub =
                 Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                     this.commit_inline_folder(cx);
@@ -964,7 +967,7 @@ impl SessionPanel {
         let input_ent = if let Some(ref mut state) = self.inline_session {
             if state.input.is_none() {
                 let name = state.original_name.clone();
-                let i = cx.new(|cx| InputState::new(cx).default_value(name));
+                let i = cx.new(|cx| InputState::new(cx).default_value(name).select_all_text());
                 state.input = Some(i);
             }
             state.input.clone()
@@ -983,6 +986,7 @@ impl SessionPanel {
 
         if self.inline_session_sub.is_none() {
             window.focus(&focus_handle, cx);
+            input.update(cx, |i, cx| i.select_all(cx));
             self.inline_session_sub =
                 Some(cx.on_blur(&focus_handle, window, move |this, window, cx| {
                     this.commit_inline_session(cx);
@@ -1518,14 +1522,23 @@ impl SessionPanel {
         &mut self,
         id: String,
         name: String,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.inline_folder_sub = None;
+        let input = cx.new(|cx| {
+            InputState::new(cx)
+                .default_value(&name)
+                .select_all_text()
+        });
+        input.update(cx, |i, cx| {
+            i.focus(window, cx);
+            i.select_all(cx);
+        });
         self.inline_folder = Some(InlineFolderState::Renaming {
             id,
             original_name: name,
-            input: None,
+            input: Some(input),
         });
         cx.notify();
     }
@@ -1642,14 +1655,23 @@ impl SessionPanel {
         &mut self,
         id: String,
         name: String,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.inline_session_sub = None;
+        let input = cx.new(|cx| {
+            InputState::new(cx)
+                .default_value(&name)
+                .select_all_text()
+        });
+        input.update(cx, |i, cx| {
+            i.focus(window, cx);
+            i.select_all(cx);
+        });
         self.inline_session = Some(InlineSessionRename {
             id,
             original_name: name,
-            input: None,
+            input: Some(input),
         });
         cx.notify();
     }

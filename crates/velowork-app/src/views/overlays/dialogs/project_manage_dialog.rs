@@ -396,8 +396,12 @@ impl ManageProjectsDialog {
             InputState::new(cx)
                 .placeholder(placeholder)
                 .default_value(&name)
+                .select_all_text()
         });
-        input.update(cx, |inp, cx| inp.focus(window, cx));
+        input.update(cx, |inp, cx| {
+            inp.focus(window, cx);
+            inp.select_all(cx);
+        });
         self.rename_input = Some(input);
         self.rename_project_id = Some(project_id.to_string());
         self.rename_sub = None;
