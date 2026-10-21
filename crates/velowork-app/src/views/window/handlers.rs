@@ -891,6 +891,33 @@ impl WindowView {
                                 terminal.set_shell_pid(pid);
                             }
                             self.terminals.lock().insert(new_tid.clone(), terminal);
+
+                            let target_path = {
+                                let ws = self.workspace.read(cx);
+                                ws.project(project_id)
+                                    .and_then(|p| p.layout.as_ref())
+                                    .and_then(|l| l.find_terminal_path(&new_tid))
+                            };
+                            if let Some(target_path) = target_path {
+                                let focus_manager = self.focus_manager.clone();
+                                let workspace = self.workspace.clone();
+                                let pid = project_id.clone();
+                                focus_manager.update(cx, |fm, cx| {
+                                    workspace.update(cx, |ws, cx| {
+                                        ws.set_focused_terminal(fm, pid, target_path, cx);
+                                    });
+                                    fm.request_focus(velowork_workspace::focus::FocusLayer::Terminal);
+                                });
+                            }
+                            for win in cx.windows() {
+                                let _ = cx.update_window(win, |view, window, cx| {
+                                    if let Ok(wv) = view.downcast::<WindowView>() {
+                                        wv.update(cx, |this, cx| {
+                                            this.focus_active_terminal(window, cx);
+                                        });
+                                    }
+                                });
+                            }
                         }
                         Err(e) => {
                             if let Some(ref sid) = session_id {

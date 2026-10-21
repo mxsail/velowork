@@ -303,7 +303,10 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
             .on_action(cx.listener(|this, _: &AddTab, _window, cx| { this.handle_add_tab(cx); }))
             .on_action(cx.listener(|this, _: &DuplicateSession, _window, cx| { this.handle_duplicate_session(cx); }))
             .on_action(cx.listener(|this, _: &DuplicateChannel, _window, cx| { this.handle_duplicate_channel(cx); }))
-            .on_action(cx.listener(|this, _: &ReconnectTerminal, _window, cx| { this.handle_reconnect(cx); }))
+            .on_action(cx.listener(|this, _: &ReconnectTerminal, window, cx| {
+                window.focus(&this.focus_handle, cx);
+                this.handle_reconnect(cx);
+            }))
             .on_action(cx.listener(|this, _: &CloseTerminal, _window, cx| { this.handle_close(cx); }))
             .on_action(cx.listener(|this, _: &MinimizeTerminal, _window, cx| { this.handle_minimize(cx); }))
             .on_action(cx.listener(|this, _: &Copy, _window, cx| { this.handle_copy(cx); }))
@@ -570,7 +573,9 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                                             s.hover(|h| h.opacity(0.9))
                                                 .active(|a| a.opacity(0.75))
                                                 .cursor_pointer()
-                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
+                                                .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                                                    cx.stop_propagation();
+                                                    window.focus(&this.focus_handle, cx);
                                                     this.handle_reconnect(cx);
                                                 }))
                                         })

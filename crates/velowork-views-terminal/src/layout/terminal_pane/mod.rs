@@ -546,19 +546,39 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
 
                 let pid = self.project_id.clone();
                 let path = self.layout_path.clone();
-                self.focus_manager.update(cx, |fm, _| {
-                    fm.focus_terminal(pid.clone(), path.clone());
+                let focus_handle = self.focus_handle.clone();
+                let ws = self.workspace.clone();
+
+                self.focus_manager.update(cx, |fm, cx| {
+                    fm.request_focus(velowork_workspace::focus::FocusLayer::Terminal);
+                    ws.update(cx, |ws, cx| {
+                        ws.set_focused_terminal(fm, pid, path, cx);
+                    });
                 });
-                self.workspace.update(cx, |ws, cx| {
-                    ws.touch_project(&pid);
-                    ws.bump_activity(&pid, cx);
-                    cx.notify();
-                });
+
+                for win in cx.windows() {
+                    let fh = focus_handle.clone();
+                    let _ = cx.update_window(win, |_, window, cx| {
+                        window.focus(&fh, cx);
+                    });
+                }
 
                 cx.spawn(async move |this: WeakEntity<Self>, cx| {
                     smol::Timer::after(Duration::from_millis(200)).await;
                     let _ = this.update(cx, |this, cx| {
                         this.is_reconnecting = false;
+                        if this.is_active_pane(cx) {
+                            let fm = this.focus_manager.read(cx);
+                            if fm.terminal_layer_allows_claim() && !fm.is_modal() {
+                                let fh = this.focus_handle.clone();
+                                for win in cx.windows() {
+                                    let fh = fh.clone();
+                                    let _ = cx.update_window(win, |_, window, cx| {
+                                        window.focus(&fh, cx);
+                                    });
+                                }
+                            }
+                        }
                         cx.notify();
                     });
                 })
