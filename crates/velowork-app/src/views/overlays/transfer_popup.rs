@@ -10,13 +10,14 @@ use gpui::*;
 use velowork_ui::icon::AppIcon;
 use gpui::prelude::*;
 use velowork_i18n::i18n;
+use velowork_ui::scrollable::{Scrollbar, ScrollbarShow};
 use velowork_ui::theme::{surface_bg, theme, ThemeColors};
 use velowork_ui::tooltip::{Tooltip, TooltipDirection};
 use velowork_ui::tokens::{ui_text_md, SPACE_SM, SPACE_MD, SPACE_XL, RADIUS_MD, RADIUS_STD, RADIUS_LG, ICON_STD};
 use velowork_ui::h_flex;
 use velowork_views_terminal::transfer_store::{
-    format_amount, format_bytes, format_speed, TransferDirection, TransferStatus, TransferStore,
-    TransferTask,
+    format_amount, format_bytes, format_eta, format_speed, format_timestamp,
+    TransferDirection, TransferStatus, TransferStore, TransferTask,
 };
 
 /// Event emitted by `TransferPopup`.
@@ -36,6 +37,8 @@ pub struct TransferPopup {
     height: Pixels,
     /// Active drag resize state: (start_mouse_y, start_height).
     drag_start: Option<(Pixels, Pixels)>,
+    /// Scroll handle for vertical list scrolling.
+    scroll_handle: ScrollHandle,
 }
 
 impl TransferPopup {
@@ -50,6 +53,7 @@ impl TransferPopup {
             anchor,
             height,
             drag_start: None,
+            scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -66,6 +70,12 @@ impl Render for TransferPopup {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = theme(cx);
         let anchor = self.anchor;
+
+        // Automatically acknowledge unseen errors when the popup is opened
+        self.store.update(cx, |s, cx| {
+            s.mark_errors_seen();
+            cx.notify();
+        });
 
         let drag_overlay = if self.drag_start.is_some() {
             let ent = cx.entity().downgrade();
@@ -179,7 +189,7 @@ impl TransferPopup {
                     .into_any_element(),
             ]
         } else {
-            tasks.iter().map(|task| self.render_item(task, t, window, cx)).collect()
+            tasks.iter().rev().map(|task| self.render_item(task, t, window, cx)).collect()
         };
 
         let p = velowork_ui::design::semantic::SemanticPalette::from_context(cx);
@@ -340,17 +350,37 @@ impl TransferPopup {
                             .child(collapse_btn)
                     }),
             )
-            // List
+            // List with vertical scrollbar
             .child(
                 div()
-                    .id("transfer-list")
-                    .flex()
-                    .flex_col()
+                    .id("transfer-list-container")
+                    .relative()
                     .flex_1()
-                    .gap(SPACE_SM)
-                    .p(SPACE_MD)
-                    .overflow_y_scroll()
-                    .children(items),
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .id("transfer-list")
+                            .size_full()
+                            .track_scroll(&self.scroll_handle)
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_col()
+                            .gap(SPACE_SM)
+                            .p(SPACE_MD)
+                            .children(items),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .right_0()
+                            .left_0()
+                            .child(
+                                Scrollbar::vertical(&self.scroll_handle)
+                                    .scrollbar_show(ScrollbarShow::Hover),
+                            ),
+                    ),
             )
             .into_any_element()
     }
@@ -520,24 +550,48 @@ impl TransferPopup {
         }
 
         let status_label = if is_complete {
+            let time_str = format_timestamp(task.completed_at);
+            let label = if time_str.is_empty() {
+                i18n!(cx, "transfers.complete")
+            } else {
+                format!("{} · {}", i18n!(cx, "transfers.completed_at"), time_str)
+            };
             div()
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.success))
-                .child(i18n!(cx, "transfers.complete"))
+                .child(label)
         } else if is_error {
+            let time_str = format_timestamp(task.completed_at);
+            let err_msg = task.error.clone().unwrap_or_else(|| i18n!(cx, "transfers.error"));
+            let label = if time_str.is_empty() {
+                err_msg
+            } else {
+                format!("{} {} · {}", i18n!(cx, "transfers.failed_at"), time_str, err_msg)
+            };
             div()
                 .text_size(ui_text_md(cx))
                 .text_color(rgb(t.error))
-                .child(task.error.clone().unwrap_or_else(|| i18n!(cx, "transfers.error")))
-        } else {
+                .child(label)
+        } else if is_paused {
             div()
                 .text_size(ui_text_md(cx))
-                .text_color(rgb(t.text_muted))
-                .child(format!("{}%", progress as i32))
+                .text_color(rgb(t.warning))
+                .child(format!("{}% · {}", progress as i32, i18n!(cx, "transfers.pause")))
+        } else {
+            let eta = task
+                .eta_seconds()
+                .map(|s| format!(" · {} {}", i18n!(cx, "transfers.eta_prefix"), format_eta(Some(s))))
+                .unwrap_or_default();
+            div()
+                .text_size(ui_text_md(cx))
+                .text_color(rgb(t.text_primary))
+                .child(format!("{}%{}", progress as i32, eta))
         };
 
         let bottom_right = if is_complete {
             format_bytes(task.total_bytes.max(task.transferred_bytes))
+        } else if is_error {
+            format_amount(task.transferred_bytes, task.total_bytes)
         } else {
             format!(
                 "{} · {}",

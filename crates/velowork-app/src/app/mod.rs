@@ -132,6 +132,9 @@ impl Velowork {
 
         // Transfer store backing the status-bar transfer manager.
         let transfer_store = cx.new(|_cx| velowork_views_terminal::transfer_store::TransferStore::new());
+        transfer_store.update(cx, |s, _cx| {
+            s.load_persisted();
+        });
         cx.set_global(velowork_views_terminal::transfer_store::GlobalTransferStore(
             transfer_store.clone(),
         ));

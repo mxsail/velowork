@@ -2542,7 +2542,13 @@
     "open_file": "Open File",
     "open_folder": "Open Containing Folder",
     "local_path": "Local Path",
-    "remote_path": "Remote Path"
+    "remote_path": "Remote Path",
+    "eta_prefix": "Remaining",
+    "completed_at": "Completed",
+    "failed_at": "Failed at",
+    "error_ssh_disconnected": "SSH connection disconnected",
+    "error_interrupted": "Transfer interrupted",
+    "cancelled": "Cancelled"
   },
   "workspace": {
     "explorer": "Session Manager",

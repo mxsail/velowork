@@ -2542,7 +2542,13 @@
     "open_file": "打开文件",
     "open_folder": "打开所在目录",
     "local_path": "本地路径",
-    "remote_path": "远程路径"
+    "remote_path": "远程路径",
+    "eta_prefix": "剩余",
+    "completed_at": "已完成",
+    "failed_at": "失败于",
+    "error_ssh_disconnected": "SSH 连接已断开",
+    "error_interrupted": "传输已中断",
+    "cancelled": "已取消"
   },
   "workspace": {
     "explorer": "会话管理器",

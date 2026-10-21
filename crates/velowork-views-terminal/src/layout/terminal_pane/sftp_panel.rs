@@ -874,8 +874,24 @@ impl BottomPanel {
     /// single shared panel always reflects the active terminal in real time.
     /// No-op when the target hasn't changed since the last bind.
     fn bind_active_terminal(&mut self, cx: &mut Context<Self>) {
+        let old_target = self.active_terminal_id.clone();
         let target = self.resolve_target(cx);
         if target == self.active_terminal_id {
+            // Check if active terminal's SSH session has closed
+            if let Some(ref tid) = target {
+                if let Some(session) = self.backend.get_ssh_session(tid) {
+                    if session.is_closed() && !matches!(self.connection_state, SftpConnectionState::Disconnected) {
+                        self.connection_state = SftpConnectionState::Disconnected;
+                        let disconnect_msg = velowork_i18n::i18n!(cx, "transfers.error_ssh_disconnected");
+                        let store = cx.global::<GlobalTransferStore>().0.clone();
+                        store.update(cx, |s, cx| {
+                            s.fail_session_transfers(tid, disconnect_msg);
+                            cx.notify();
+                        });
+                        cx.notify();
+                    }
+                }
+            }
             return;
         }
         self.active_terminal_id = target.clone();
@@ -885,6 +901,14 @@ impl BottomPanel {
         self.selection.clear();
         match target {
             None => {
+                if let Some(ref old_tid) = old_target {
+                    let disconnect_msg = velowork_i18n::i18n!(cx, "transfers.error_ssh_disconnected");
+                    let store = cx.global::<GlobalTransferStore>().0.clone();
+                    store.update(cx, |s, cx| {
+                        s.fail_session_transfers(old_tid, disconnect_msg);
+                        cx.notify();
+                    });
+                }
                 self.connection_state = SftpConnectionState::Disconnected;
                 cx.notify();
             }
@@ -2556,12 +2580,13 @@ impl BottomPanel {
 
         let store = cx.global::<GlobalTransferStore>().0.clone();
 
-        let (sftp, current_dir) = match &self.connection_state {
+        let (sftp, ssh_handle, current_dir) = match &self.connection_state {
             SftpConnectionState::Connected {
                 conn, current_dir, ..
-            } => (conn.sftp.clone(), current_dir.clone()),
+            } => (conn.sftp.clone(), conn.ssh_handle.clone(), current_dir.clone()),
             _ => return,
         };
+        let session_id = self.active_terminal_id.clone();
 
         let paths = local_paths.to_vec();
         let is_multiple = paths.len() > 1;
@@ -2616,24 +2641,31 @@ impl BottomPanel {
                     }
 
                     for (local_file, remote_file_path, file_name) in file_list {
-                        Self::upload_single_file_task(
+                        let ok = Self::upload_single_file_task(
                             &sftp,
+                            &ssh_handle,
                             &local_file,
                             &remote_file_path,
                             &file_name,
+                            session_id.clone(),
                             &store,
                             &this,
                             cx,
                         )
                         .await;
+                        if !ok {
+                            break;
+                        }
                     }
                 } else {
                     let remote_file_path = format!("{}{}", remote_base, filename);
-                    Self::upload_single_file_task(
+                    let _ = Self::upload_single_file_task(
                         &sftp,
+                        &ssh_handle,
                         &local_path,
                         &remote_file_path,
                         &filename,
+                        session_id.clone(),
                         &store,
                         &this,
                         cx,
@@ -2651,17 +2683,20 @@ impl BottomPanel {
 
     async fn upload_single_file_task(
         sftp: &Arc<russh_sftp::client::SftpSession>,
+        ssh_handle: &Arc<russh::client::Handle<Client>>,
         local_path: &std::path::PathBuf,
         remote_path: &str,
         filename: &str,
+        session_id: Option<String>,
         store: &Entity<crate::transfer_store::TransferStore>,
         _this: &WeakEntity<BottomPanel>,
         cx: &mut AsyncApp,
-    ) {
+    ) -> bool {
         let total = std::fs::metadata(local_path).map(|m| m.len()).unwrap_or(0);
         let local_display = local_path.to_string_lossy().to_string();
         let id = next_transfer_id();
         let control = Arc::new(AtomicU8::new(TRANSFER_CONTROL_ACTIVE));
+        let now = chrono::Local::now().timestamp();
         store.update(cx, |s, cx| {
             s.add(TransferTask {
                 id: id.clone(),
@@ -2674,6 +2709,9 @@ impl BottomPanel {
                 status: TransferStatus::Active,
                 speed_bps: 0.0,
                 error: None,
+                session_id,
+                created_at: Some(now),
+                completed_at: None,
             });
             s.register_control(&id, control.clone());
             cx.notify();
@@ -2699,6 +2737,13 @@ impl BottomPanel {
                         if p.done {
                             t.status = p.status;
                             t.error = p.error.clone();
+                            if t.completed_at.is_none() {
+                                t.completed_at = Some(chrono::Local::now().timestamp());
+                            }
+                            if p.status == TransferStatus::Error {
+                                s.has_unseen_error = true;
+                            }
+                            s.save_persisted();
                         }
                     }
                     cx.notify();
@@ -2715,10 +2760,19 @@ impl BottomPanel {
         let prog_io = progress.clone();
         let control_io = control.clone();
         let sftp = sftp.clone();
-        let _res = run_in_tokio(async move {
+        let ssh_handle = ssh_handle.clone();
+        let disconnect_msg = "SSH 连接已断开".to_string();
+        let ok = run_in_tokio(async move {
             use russh_sftp::protocol::{FileAttributes, OpenFlags};
             use std::io::Read;
             use tokio::io::AsyncWriteExt;
+            if ssh_handle.is_closed() {
+                let mut p = prog_io.lock();
+                p.done = true;
+                p.status = TransferStatus::Error;
+                p.error = Some(disconnect_msg);
+                return false;
+            }
             let mut local_file = match std::fs::File::open(&local_path_io) {
                 Ok(f) => f,
                 Err(e) => {
@@ -2745,6 +2799,12 @@ impl BottomPanel {
                     let mut transferred = 0u64;
                     let mut success = true;
                     loop {
+                        if ssh_handle.is_closed() {
+                            done_status = TransferStatus::Error;
+                            done_error = Some(disconnect_msg.clone());
+                            success = false;
+                            break;
+                        }
                         match control_io.load(Ordering::Relaxed) {
                             TRANSFER_CONTROL_CANCELLED => {
                                 done_status = TransferStatus::Error;
@@ -2786,7 +2846,7 @@ impl BottomPanel {
                                     }
                                     Err(e) => {
                                         done_status = TransferStatus::Error;
-                                        done_error = Some(format!("{:?}", e));
+                                        done_error = Some(crate::transfer_store::humanize_transfer_error(&format!("{:?}", e), &disconnect_msg));
                                         success = false;
                                         break;
                                     }
@@ -2807,7 +2867,7 @@ impl BottomPanel {
                 }
                 Err(e) => {
                     done_status = TransferStatus::Error;
-                    done_error = Some(format!("{:?}", e));
+                    done_error = Some(crate::transfer_store::humanize_transfer_error(&format!("{:?}", e), &disconnect_msg));
                     false
                 }
             };
@@ -2833,9 +2893,19 @@ impl BottomPanel {
                 t.speed_bps = p.speed_bps;
                 t.status = p.status;
                 t.error = p.error;
+                if p.status == TransferStatus::Complete || p.status == TransferStatus::Error {
+                    if t.completed_at.is_none() {
+                        t.completed_at = Some(chrono::Local::now().timestamp());
+                    }
+                }
+                if p.status == TransferStatus::Error {
+                    s.has_unseen_error = true;
+                }
             }
+            s.save_persisted();
             cx.notify();
         });
+        ok
     }
 
     fn handle_external_drop(&mut self, paths: &ExternalPaths, cx: &mut Context<Self>) {
@@ -2846,7 +2916,7 @@ impl BottomPanel {
     }
 
     fn trigger_download(&mut self, cx: &mut Context<Self>) {
-        let (sftp, current_dir, filtered) = match &self.connection_state {
+        let (sftp, ssh_handle, current_dir, filtered) = match &self.connection_state {
             SftpConnectionState::Connected {
                 conn,
                 current_dir,
@@ -2857,10 +2927,11 @@ impl BottomPanel {
                     .filter(|f| self.show_hidden || !f.name.starts_with('.'))
                     .cloned()
                     .collect();
-                (conn.sftp.clone(), current_dir.clone(), filtered)
+                (conn.sftp.clone(), conn.ssh_handle.clone(), current_dir.clone(), filtered)
             }
             _ => return,
         };
+        let session_id = self.active_terminal_id.clone();
 
         let store = cx.global::<GlobalTransferStore>().0.clone();
 
@@ -2946,24 +3017,31 @@ impl BottomPanel {
                         }
 
                         for (child_remote, child_local, file_name, file_size) in file_list {
-                            Self::download_single_file_task(
+                            let ok = Self::download_single_file_task(
                                 &sftp,
+                                &ssh_handle,
                                 &child_remote,
                                 &child_local,
                                 &file_name,
                                 file_size,
+                                session_id.clone(),
                                 &store,
                                 cx,
                             )
                             .await;
+                            if !ok {
+                                break;
+                            }
                         }
                     } else {
-                        Self::download_single_file_task(
+                        let _ = Self::download_single_file_task(
                             &sftp,
+                            &ssh_handle,
                             &remote_item_path,
                             &target_local,
                             &filename,
                             item.size,
+                            session_id.clone(),
                             &store,
                             cx,
                         )
@@ -2977,18 +3055,21 @@ impl BottomPanel {
 
     async fn download_single_file_task(
         sftp: &Arc<russh_sftp::client::SftpSession>,
+        ssh_handle: &Arc<russh::client::Handle<Client>>,
         remote_path: &str,
         local_path: &std::path::PathBuf,
         filename: &str,
         total_size: u64,
+        session_id: Option<String>,
         store: &Entity<crate::transfer_store::TransferStore>,
         cx: &mut AsyncApp,
-    ) {
+    ) -> bool {
         let id = next_transfer_id();
         let name = filename.to_string();
         let remote = remote_path.to_string();
         let local_display = local_path.to_string_lossy().to_string();
         let control = Arc::new(AtomicU8::new(TRANSFER_CONTROL_ACTIVE));
+        let now = chrono::Local::now().timestamp();
         store.update(cx, |s, cx| {
             s.add(TransferTask {
                 id: id.clone(),
@@ -3001,6 +3082,9 @@ impl BottomPanel {
                 status: TransferStatus::Active,
                 speed_bps: 0.0,
                 error: None,
+                session_id,
+                created_at: Some(now),
+                completed_at: None,
             });
             s.register_control(&id, control.clone());
             cx.notify();
@@ -3026,6 +3110,13 @@ impl BottomPanel {
                         if p.done {
                             t.status = p.status;
                             t.error = p.error.clone();
+                            if t.completed_at.is_none() {
+                                t.completed_at = Some(chrono::Local::now().timestamp());
+                            }
+                            if p.status == TransferStatus::Error {
+                                s.has_unseen_error = true;
+                            }
+                            s.save_persisted();
                         }
                     }
                     cx.notify();
@@ -3042,9 +3133,18 @@ impl BottomPanel {
         let prog_io = progress.clone();
         let control_io = control.clone();
         let sftp = sftp.clone();
-        let _res = run_in_tokio(async move {
+        let ssh_handle = ssh_handle.clone();
+        let disconnect_msg = "SSH 连接已断开".to_string();
+        let ok = run_in_tokio(async move {
             use std::io::Write;
             use tokio::io::AsyncReadExt;
+            if ssh_handle.is_closed() {
+                let mut p = prog_io.lock();
+                p.done = true;
+                p.status = TransferStatus::Error;
+                p.error = Some(disconnect_msg);
+                return false;
+            }
             let open_res = sftp.open(&remote_path_io).await;
             let mut done_status = TransferStatus::Complete;
             let mut done_error: Option<String> = None;
@@ -3069,6 +3169,12 @@ impl BottomPanel {
                     let mut transferred = 0u64;
                     let mut success = true;
                     loop {
+                        if ssh_handle.is_closed() {
+                            done_status = TransferStatus::Error;
+                            done_error = Some(disconnect_msg.clone());
+                            success = false;
+                            break;
+                        }
                         match control_io.load(Ordering::Relaxed) {
                             TRANSFER_CONTROL_CANCELLED => {
                                 done_status = TransferStatus::Error;
@@ -3114,7 +3220,7 @@ impl BottomPanel {
                             }
                             Err(e) => {
                                 done_status = TransferStatus::Error;
-                                done_error = Some(format!("{:?}", e));
+                                done_error = Some(crate::transfer_store::humanize_transfer_error(&format!("{:?}", e), &disconnect_msg));
                                 success = false;
                                 break;
                             }
@@ -3128,7 +3234,7 @@ impl BottomPanel {
                 }
                 Err(e) => {
                     done_status = TransferStatus::Error;
-                    done_error = Some(format!("{:?}", e));
+                    done_error = Some(crate::transfer_store::humanize_transfer_error(&format!("{:?}", e), &disconnect_msg));
                     false
                 }
             };
@@ -3155,9 +3261,19 @@ impl BottomPanel {
                 t.speed_bps = p.speed_bps;
                 t.status = p.status;
                 t.error = p.error;
+                if p.status == TransferStatus::Complete || p.status == TransferStatus::Error {
+                    if t.completed_at.is_none() {
+                        t.completed_at = Some(chrono::Local::now().timestamp());
+                    }
+                }
+                if p.status == TransferStatus::Error {
+                    s.has_unseen_error = true;
+                }
             }
+            s.save_persisted();
             cx.notify();
         });
+        ok
     }
 
 
@@ -3173,7 +3289,7 @@ impl BottomPanel {
     /// own scratch folder.
     fn open_remote_file(&mut self, use_editor: bool, cx: &mut Context<Self>) {
         // ── Resolve the target file (same selection logic as `trigger_download`) ──
-        let (sftp, current_dir, filtered) = match &self.connection_state {
+        let (sftp, ssh_handle, current_dir, filtered) = match &self.connection_state {
             SftpConnectionState::Connected {
                 conn,
                 current_dir,
@@ -3184,7 +3300,7 @@ impl BottomPanel {
                     .filter(|f| self.show_hidden || !f.name.starts_with('.'))
                     .cloned()
                     .collect();
-                (conn.sftp.clone(), current_dir.clone(), filtered)
+                (conn.sftp.clone(), conn.ssh_handle.clone(), current_dir.clone(), filtered)
             }
             _ => return,
         };
@@ -3241,6 +3357,7 @@ impl BottomPanel {
         let remote = remote_path.clone();
         let local_for_task = local_display.clone();
         let control = Arc::new(AtomicU8::new(TRANSFER_CONTROL_ACTIVE));
+        let now = chrono::Local::now().timestamp();
         store.update(cx, |s, cx| {
             s.add(TransferTask {
                 id: id.clone(),
@@ -3253,6 +3370,9 @@ impl BottomPanel {
                 status: TransferStatus::Active,
                 speed_bps: 0.0,
                 error: None,
+                session_id: Some(conn_id),
+                created_at: Some(now),
+                completed_at: None,
             });
             s.register_control(&id, control.clone());
             cx.notify();
@@ -3280,6 +3400,13 @@ impl BottomPanel {
                             if p.done {
                                 t.status = p.status;
                                 t.error = p.error.clone();
+                                if t.completed_at.is_none() {
+                                    t.completed_at = Some(chrono::Local::now().timestamp());
+                                }
+                                if p.status == TransferStatus::Error {
+                                    s.has_unseen_error = true;
+                                }
+                                s.save_persisted();
                             }
                         }
                         cx.notify();
@@ -3295,12 +3422,21 @@ impl BottomPanel {
             let local_path_io = local_path.clone();
             let prog_io = progress.clone();
             let control_io = control.clone();
-        let opener_io = opener.clone();
-        let local_display_io = local_display.clone();
-        let sftp_for_watch = sftp.clone();
-        let res = run_in_tokio(async move {
+            let opener_io = opener.clone();
+            let local_display_io = local_display.clone();
+            let sftp_for_watch = sftp.clone();
+            let ssh_handle = ssh_handle.clone();
+            let disconnect_msg = "SSH 连接已断开".to_string();
+            let res = run_in_tokio(async move {
                 use std::io::Write;
                 use tokio::io::AsyncReadExt;
+                if ssh_handle.is_closed() {
+                    let mut p = prog_io.lock();
+                    p.done = true;
+                    p.status = TransferStatus::Error;
+                    p.error = Some(disconnect_msg);
+                    return false;
+                }
                 let open_res = sftp.open(&remote_path_io).await;
                 let mut done_status = TransferStatus::Complete;
                 let mut done_error: Option<String> = None;
@@ -3325,6 +3461,12 @@ impl BottomPanel {
                         let mut transferred = 0u64;
                         let mut success = true;
                         loop {
+                            if ssh_handle.is_closed() {
+                                done_status = TransferStatus::Error;
+                                done_error = Some(disconnect_msg.clone());
+                                success = false;
+                                break;
+                            }
                             match control_io.load(Ordering::Relaxed) {
                                 TRANSFER_CONTROL_CANCELLED => {
                                     done_status = TransferStatus::Error;
@@ -3369,7 +3511,7 @@ impl BottomPanel {
                                 }
                                 Err(e) => {
                                     done_status = TransferStatus::Error;
-                                    done_error = Some(format!("{:?}", e));
+                                    done_error = Some(crate::transfer_store::humanize_transfer_error(&format!("{:?}", e), &disconnect_msg));
                                     success = false;
                                     break;
                                 }
@@ -3380,7 +3522,7 @@ impl BottomPanel {
                     }
                     Err(e) => {
                         done_status = TransferStatus::Error;
-                        done_error = Some(format!("{:?}", e));
+                        done_error = Some(crate::transfer_store::humanize_transfer_error(&format!("{:?}", e), &disconnect_msg));
                         false
                     }
                 };
@@ -3396,6 +3538,20 @@ impl BottomPanel {
                 ok
             })
             .await;
+
+            store.update(cx, |s, cx| {
+                if let Some(t) = s.tasks.iter_mut().find(|t| t.id == id) {
+                    if res {
+                        t.status = TransferStatus::Complete;
+                        t.transferred_bytes = t.total_bytes;
+                    }
+                    if t.completed_at.is_none() {
+                        t.completed_at = Some(chrono::Local::now().timestamp());
+                    }
+                }
+                s.save_persisted();
+                cx.notify();
+            });
 
             if res {
                 // Baseline = state right after the download write, before launching
@@ -3544,6 +3700,12 @@ impl BottomPanel {
         sftp: Arc<russh_sftp::client::SftpSession>,
         cx: &mut Context<Self>,
     ) {
+        let (ssh_handle, session_id) = match &self.connection_state {
+            SftpConnectionState::Connected { conn, .. } => {
+                (conn.ssh_handle.clone(), self.active_terminal_id.clone())
+            }
+            _ => return,
+        };
         let store = cx.global::<GlobalTransferStore>().0.clone();
         let filename = local_path
             .file_name()
@@ -3551,11 +3713,13 @@ impl BottomPanel {
             .unwrap_or_default();
         let this_weak = cx.entity().downgrade();
         cx.spawn(async move |_this: WeakEntity<BottomPanel>, cx| {
-            Self::upload_single_file_task(
+            let _ = Self::upload_single_file_task(
                 &sftp,
+                &ssh_handle,
                 &local_path,
                 &remote_path,
                 &filename,
+                session_id,
                 &store,
                 &this_weak,
                 cx,
