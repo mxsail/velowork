@@ -410,10 +410,18 @@ impl Terminal {
             .map_or(false, |until| std::time::Instant::now() < until)
     }
 
+    /// Check if ZMODEM quiet window swallow is active
+    pub fn is_zmodem_swallowing(&self) -> bool {
+        self.zmodem_swallow_until
+            .lock()
+            .map_or(false, |until| std::time::Instant::now() < until)
+    }
+
     /// Explicitly clear any ZMODEM suppression cooldown and swallow window (e.g. when user submits a new command).
     pub fn clear_zmodem_suppression(&self) {
         let had_suppression = self.zmodem_suppress_until.lock().take().is_some();
         let had_swallow = self.zmodem_swallow_until.lock().take().is_some();
+        self.set_zmodem_active(false);
         if had_suppression || had_swallow {
             log::info!(
                 "[ZMODEM-SUPPRESS] Cooldown suppression and swallow cleared | terminal_id={}",
@@ -429,6 +437,36 @@ impl Terminal {
     ) -> R {
         let term = self.term.lock();
         f(&term)
+    }
+
+    /// Abort a ZMODEM session before any file transfer has started (e.g. user cancelled file chooser dialog).
+    /// Sends the ZMODEM abort sequence (10x CAN + 10x BS) to break remote rz/sz immediately.
+    /// Does NOT activate a swallow quiet window, allowing remote shell's pristine prompt to render immediately.
+    pub fn cancel_zmodem_pre_transfer(&self) {
+        log::info!(
+            "[ZMODEM-CANCEL] cancel_zmodem_pre_transfer initiated | terminal_id={}",
+            self.terminal_id
+        );
+        *self.zmodem_suppress_until.lock() =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(1500));
+        // Crucial: no swallow quiet window here because no binary file data was ever transmitted.
+        // Keeping swallow active would drop the remote shell prompt and user typing!
+        *self.zmodem_swallow_until.lock() = None;
+        self.unregister_zmodem_raw_sender();
+        self.set_zmodem_active(false);
+        self.clear_zmodem_early_buffer();
+        self.zmodem_detector.lock().reset();
+        self.pending_zmodem_events.lock().clear();
+
+        let mut abort_bytes = Vec::with_capacity(24);
+        abort_bytes.extend_from_slice(crate::zmodem::session::ZMODEM_CANCEL_SEQUENCE);
+        abort_bytes.extend_from_slice(b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08");
+        self.transport.send_input(&self.terminal_id, &abort_bytes);
+
+        log::info!(
+            "[ZMODEM-CANCEL] cancel_zmodem_pre_transfer completed | terminal_id={}",
+            self.terminal_id
+        );
     }
 
     /// Abort an in-progress ZMODEM file transfer cleanly:
@@ -462,7 +500,7 @@ impl Terminal {
         abort_bytes.extend_from_slice(b"\x08\x08\x08\x08\x08\x08\x08\x08\x08\x08");
         // Clear terminal line buffer with Ctrl+C and request pristine prompt with newline
         abort_bytes.extend_from_slice(b"\r\n\x03\x03\r\n");
-        self.send_bytes(&abort_bytes);
+        self.transport.send_input(&self.terminal_id, &abort_bytes);
 
         // Follow up after swallow window ends (650ms) to ensure remote shell prints a pristine prompt
         let transport = self.transport.clone();
@@ -471,6 +509,10 @@ impl Terminal {
             tokio::time::sleep(std::time::Duration::from_millis(650)).await;
             transport.send_input(&terminal_id, b"\r");
         });
+        log::info!(
+            "[ZMODEM-CANCEL] cancel_zmodem completed | terminal_id={}",
+            self.terminal_id
+        );
     }
 
     /// Stop recording terminal output and return the path of the saved log file

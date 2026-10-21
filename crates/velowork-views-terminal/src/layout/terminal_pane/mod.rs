@@ -1322,6 +1322,23 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                             term.write_to_screen(b"\r\nTransfer cancelled.\r\n");
                         }
                         pane.cancel_zmodem(cx);
+                        // Re-claim physical and layer focus for this terminal pane after modal closes
+                        let pid = pane.project_id.clone();
+                        let path = pane.layout_path.clone();
+                        let ws = pane.workspace.clone();
+                        pane.focus_manager.update(cx, |fm, cx| {
+                            fm.request_focus(velowork_workspace::focus::FocusLayer::Terminal);
+                            ws.update(cx, |ws, cx| {
+                                ws.set_focused_terminal(fm, pid, path, cx);
+                            });
+                        });
+                        for win in cx.windows() {
+                            let focus_handle = pane.focus_handle.clone();
+                            let _ = cx.update_window(win, |_, window, cx| {
+                                window.focus(&focus_handle, cx);
+                            });
+                        }
+                        cx.notify();
                         return;
                     };
                     pane.start_zmodem_upload(selected, cx);
@@ -1336,7 +1353,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             return;
         };
         if files.is_empty() {
-            terminal.cancel_zmodem();
+            terminal.cancel_zmodem_pre_transfer();
             return;
         }
 
@@ -1567,6 +1584,23 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
                             term.write_to_screen(b"\r\nTransfer cancelled.\r\n");
                         }
                         pane.cancel_zmodem(cx);
+                        // Re-claim physical and layer focus for this terminal pane after modal closes
+                        let pid = pane.project_id.clone();
+                        let path = pane.layout_path.clone();
+                        let ws = pane.workspace.clone();
+                        pane.focus_manager.update(cx, |fm, cx| {
+                            fm.request_focus(velowork_workspace::focus::FocusLayer::Terminal);
+                            ws.update(cx, |ws, cx| {
+                                ws.set_focused_terminal(fm, pid, path, cx);
+                            });
+                        });
+                        for win in cx.windows() {
+                            let focus_handle = pane.focus_handle.clone();
+                            let _ = cx.update_window(win, |_, window, cx| {
+                                window.focus(&focus_handle, cx);
+                            });
+                        }
+                        cx.notify();
                         return;
                     };
                     pane.start_zmodem_download(chosen_dir, cx);
@@ -1738,7 +1772,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             // before unregistering zmodem_raw_sender. Calling terminal.cancel_zmodem() now would
             // prematurely destroy zmodem_raw_sender and spill in-flight binary packets to the screen!
             if !had_task {
-                terminal.cancel_zmodem();
+                terminal.cancel_zmodem_pre_transfer();
             }
         }
         cx.notify();
@@ -1781,7 +1815,7 @@ impl<D: ActionDispatch> Drop for TerminalPane<D> {
         if let Some(ref terminal) = self.terminal {
             terminal.set_text_input_interceptor(None);
             if terminal.is_zmodem_active() {
-                terminal.cancel_zmodem();
+                terminal.cancel_zmodem_pre_transfer();
             }
         }
         // Remove this pane from the spatial navigation map so stale entries

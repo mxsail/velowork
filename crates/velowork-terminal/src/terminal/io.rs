@@ -228,8 +228,17 @@ impl Terminal {
         self.dirty.store(true, Ordering::Relaxed);
         self.content_generation.fetch_add(1, Ordering::Relaxed);
         *self.last_output_time.lock() = Instant::now();
+
+        let current = term.grid().display_offset();
+        if current > 0 {
+            term.scroll_display(alacritty_terminal::grid::Scroll::Delta(-(current as i32)));
+        }
+        drop(block_tracker);
+        drop(prompt_tracker);
+        drop(prompt_sidecar);
+        drop(sidecar);
+        drop(processor);
         drop(term);
-        self.scroll_to_bottom();
     }
 
     /// Enqueue output data for deferred processing.

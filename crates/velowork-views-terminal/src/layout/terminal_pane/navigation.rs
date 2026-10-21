@@ -611,8 +611,12 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
         cx: &mut Context<Self>,
     ) {
         // Defense-in-depth: never feed keystrokes to the PTY unless this pane
-        // is the actually-focused element.
-        if !self.focus_handle.is_focused(window) {
+        // is the actually-focused element or contains the focused element.
+        if !self.focus_handle.is_focused(window) && !self.focus_handle.contains_focused(window, cx) {
+            log::warn!(
+                "[TERMINAL-NAV] Dropped key {:?} because pane focus_handle is not focused on window",
+                event.keystroke.key
+            );
             return;
         }
 
