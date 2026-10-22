@@ -415,8 +415,8 @@ impl TerminalContent {
         })
     }
 
-    /// Calculate cursor position relative to this content container.
-    pub fn relative_cursor_position(&self, cx: &App) -> Option<Point<Pixels>> {
+    /// Calculate cursor position and container placement context for popups.
+    pub fn relative_cursor_placement(&self, cx: &App) -> Option<super::history_popup::TerminalCursorPlacement> {
         let terminal = self.terminal.as_ref()?;
         let (cell_width, cell_height) = terminal.cell_dimensions();
         let render_settings = crate::terminal_view_settings(cx);
@@ -436,18 +436,40 @@ impl TerminalContent {
             0.0
         };
 
+        let is_no_wrap = render_settings.wrap_mode == velowork_workspace::settings::WrapMode::NoWrap;
+        let x_offset = if is_no_wrap { self.scroll_x } else { 0.0 };
+
         terminal.with_content(|term| {
             let cursor_point = term.grid().cursor.point;
             let display_offset = term.grid().display_offset();
             let cursor_visual_line = cursor_point.line.0 + display_offset as i32;
             if cursor_visual_line >= 0 {
-                let x = px(gutter_offset + Self::TERMINAL_PADDING + cursor_point.column.0 as f32 * actual_cell_w);
+                let x = px((gutter_offset + Self::TERMINAL_PADDING + cursor_point.column.0 as f32 * actual_cell_w - x_offset).max(0.0));
                 let y = px(Self::TERMINAL_PADDING + cursor_visual_line as f32 * actual_cell_h + actual_cell_h);
-                Some(point(x, y))
+
+                let container_size = self.element_bounds.map(|b| b.size).unwrap_or_else(|| {
+                    let cols = term.grid().columns() as f32;
+                    let rows = term.grid().screen_lines() as f32;
+                    size(
+                        px(gutter_offset + Self::TERMINAL_PADDING * 2.0 + cols * actual_cell_w),
+                        px(Self::TERMINAL_PADDING * 2.0 + rows * actual_cell_h),
+                    )
+                });
+
+                Some(super::history_popup::TerminalCursorPlacement {
+                    cursor_pos: point(x, y),
+                    line_height: px(actual_cell_h),
+                    container_size,
+                })
             } else {
                 None
             }
         })
+    }
+
+    /// Calculate cursor position relative to this content container.
+    pub fn relative_cursor_position(&self, cx: &App) -> Option<Point<Pixels>> {
+        self.relative_cursor_placement(cx).map(|p| p.cursor_pos)
     }
 
     /// Calculate input start position (aligned with first character of current input buffer)

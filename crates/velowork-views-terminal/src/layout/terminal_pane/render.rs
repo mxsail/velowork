@@ -435,14 +435,14 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                             StyleRefinement::default().size_full()
                         ))
                     .when(self.history_popup_open && !self.history_popup_items.is_empty(), |el| {
-                        let cursor_pos = self.content.read(cx).relative_cursor_position(cx);
+                        let placement = self.content.read(cx).relative_cursor_placement(cx);
                         let items = self.history_popup_items.clone();
                         let selected = self.history_popup_selected;
                         let self_entity = cx.entity().clone();
                         el.child(super::history_popup::render_history_popup(
                             &items,
                             selected,
-                            cursor_pos,
+                            placement,
                             &t,
                             move |idx, window, cx| {
                                 self_entity.update(cx, |this, cx| {
@@ -456,7 +456,12 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                         let cursor_pos = self.content.read(cx).relative_cursor_position(cx);
                         let self_entity = cx.entity().clone();
                         let self_entity_backdrop = cx.entity().clone();
-                        let viewport_size = window.viewport_size();
+                        let container_size = self
+                            .content
+                            .read(cx)
+                            .relative_cursor_placement(cx)
+                            .map(|p| p.container_size)
+                            .unwrap_or_else(|| window.viewport_size());
                         el.child(
                             div()
                                 .id("snippet-bar-dismiss-backdrop")
@@ -472,7 +477,7 @@ impl<D: ActionDispatch + Send + Sync> Render for TerminalPane<D> {
                         .child(super::snippet_bar::render_snippet_bar(
                             &snippet,
                             cursor_pos,
-                            viewport_size,
+                            container_size,
                             &t,
                             move |slot_idx, window, cx| {
                                 self_entity.update(cx, |this, cx| {

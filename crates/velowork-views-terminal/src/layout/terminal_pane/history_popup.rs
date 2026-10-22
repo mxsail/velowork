@@ -25,6 +25,96 @@ pub enum TerminalCompletionItem {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminalCursorPlacement {
+    /// Cursor position: bottom-left of the cursor cell (relative to container)
+    pub cursor_pos: Point<Pixels>,
+    /// Height of one terminal line in pixels.
+    pub line_height: Pixels,
+    /// Width and height of the content element.
+    pub container_size: Size<Pixels>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PopupVerticalPlacement {
+    Below { top: Pixels, max_h: Pixels },
+    Above { bottom: Pixels, max_h: Pixels },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopupGeometry {
+    pub left: Pixels,
+    pub min_w: Pixels,
+    pub max_w: Pixels,
+    pub vertical: PopupVerticalPlacement,
+}
+
+pub fn compute_popup_geometry(
+    placement: Option<TerminalCursorPlacement>,
+    item_count: usize,
+    row_height: Pixels,
+) -> PopupGeometry {
+    const POPUP_GAP: Pixels = px(4.0);
+    const MAX_POPUP_HEIGHT: Pixels = px(260.0);
+    const DEFAULT_MIN_W: Pixels = px(260.0);
+    const DEFAULT_MAX_W: Pixels = px(640.0);
+
+    let Some(p) = placement else {
+        return PopupGeometry {
+            left: px(8.0),
+            min_w: DEFAULT_MIN_W,
+            max_w: DEFAULT_MAX_W,
+            vertical: PopupVerticalPlacement::Below {
+                top: px(36.0),
+                max_h: MAX_POPUP_HEIGHT,
+            },
+        };
+    };
+
+    let container_w = p.container_size.width;
+    let container_h = p.container_size.height;
+    let cursor_bottom_y = p.cursor_pos.y;
+    let cursor_top_y = cursor_bottom_y - p.line_height;
+
+    // Estimate needed height: padding/borders (6px) + each item (row_height + 2px gap)
+    let estimated_h = px(6.0) + (row_height + px(2.0)) * item_count as f32;
+    let ideal_h = estimated_h.min(MAX_POPUP_HEIGHT);
+
+    let space_below = (container_h - cursor_bottom_y - POPUP_GAP).max(px(0.0));
+    let space_above = (cursor_top_y - POPUP_GAP).max(px(0.0));
+
+    // Vertical placement decision
+    let vertical = if space_below >= ideal_h {
+        PopupVerticalPlacement::Below {
+            top: (cursor_bottom_y + POPUP_GAP).max(px(4.0)),
+            max_h: space_below.min(MAX_POPUP_HEIGHT).max(row_height + px(8.0)),
+        }
+    } else if space_above > space_below {
+        PopupVerticalPlacement::Above {
+            bottom: (container_h - cursor_top_y + POPUP_GAP).max(px(4.0)),
+            max_h: space_above.min(MAX_POPUP_HEIGHT).max(row_height + px(8.0)),
+        }
+    } else {
+        PopupVerticalPlacement::Below {
+            top: (cursor_bottom_y + POPUP_GAP).max(px(4.0)),
+            max_h: space_below.min(MAX_POPUP_HEIGHT).max(row_height + px(8.0)),
+        }
+    };
+
+    // Horizontal placement decision
+    let min_w = DEFAULT_MIN_W.min(container_w - px(8.0)).max(px(120.0));
+    let max_left = (container_w - min_w - px(4.0)).max(px(4.0));
+    let left = p.cursor_pos.x.clamp(px(4.0), max_left);
+    let max_w = (container_w - left - px(4.0)).min(DEFAULT_MAX_W).max(min_w);
+
+    PopupGeometry {
+        left,
+        min_w,
+        max_w,
+        vertical,
+    }
+}
+
 impl TerminalCompletionItem {
     pub fn id(&self) -> String {
         match self {
@@ -48,7 +138,7 @@ impl TerminalCompletionItem {
 pub fn render_history_popup(
     items: &[TerminalCompletionItem],
     selected_index: Option<usize>,
-    cursor_pos: Option<Point<Pixels>>,
+    placement: Option<TerminalCursorPlacement>,
     t: &ThemeColors,
     on_select: impl Fn(usize, &mut Window, &mut App) + 'static + Send + Sync,
     cx: &App,
@@ -62,20 +152,15 @@ pub fn render_history_popup(
     let badge_qc = i18n!(cx, "quick_commands.badge_quick_command");
     let badge_hist = i18n!(cx, "quick_commands.badge_history");
 
-    let (left, top) = match cursor_pos {
-        Some(pos) => (pos.x.max(px(4.0)), (pos.y + px(4.0)).max(px(4.0))),
-        None => (px(8.0), px(36.0)),
-    };
+    let geom = compute_popup_geometry(placement, items.len(), ap.height);
 
-    div()
+    let mut popup = div()
         .id("terminal-history-popup")
         .occlude()
         .absolute()
-        .left(left)
-        .top(top)
-        .min_w(px(260.0))
-        .max_w(px(640.0))
-        .max_h(px(260.0))
+        .left(geom.left)
+        .min_w(geom.min_w)
+        .max_w(geom.max_w)
         .bg(surface_bg_t(t.bg_panel, t))
         .border_1()
         .border_color(rgb(t.border))
@@ -85,10 +170,23 @@ pub fn render_history_popup(
         .overflow_hidden()
         .on_mouse_down(MouseButton::Left, |_, _, cx| {
             cx.stop_propagation();
-        })
+        });
+
+    match geom.vertical {
+        PopupVerticalPlacement::Below { top, max_h } => {
+            popup = popup.top(top).max_h(max_h);
+        }
+        PopupVerticalPlacement::Above { bottom, max_h } => {
+            popup = popup.bottom(bottom).max_h(max_h);
+        }
+    }
+
+    popup
         .child(
             v_flex()
+                .id("terminal-history-popup-list")
                 .w_full()
+                .overflow_y_scroll()
                 .gap(px(2.0))
                 .children(items.iter().enumerate().map(|(idx, item)| {
                     let is_selected = selected_index == Some(idx);
@@ -342,5 +440,96 @@ fn format_full_timestamp(ts: &str) -> String {
         ts[..19].replace('T', " ")
     } else {
         ts.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_geometry_normal_middle_cursor_renders_below() {
+        let placement = TerminalCursorPlacement {
+            cursor_pos: point(px(100.0), px(200.0)),
+            line_height: px(20.0),
+            container_size: size(px(800.0), px(600.0)),
+        };
+        let geom = compute_popup_geometry(Some(placement), 5, px(24.0));
+        assert_eq!(geom.left, px(100.0));
+        assert_eq!(geom.min_w, px(260.0));
+        match geom.vertical {
+            PopupVerticalPlacement::Below { top, max_h } => {
+                assert_eq!(top, px(204.0)); // 200 + 4 gap
+                assert_eq!(max_h, px(260.0));
+            }
+            PopupVerticalPlacement::Above { .. } => panic!("Expected Below for middle cursor"),
+        }
+    }
+
+    #[test]
+    fn test_geometry_bottom_cursor_flips_above() {
+        let placement = TerminalCursorPlacement {
+            cursor_pos: point(px(100.0), px(590.0)),
+            line_height: px(20.0),
+            container_size: size(px(800.0), px(600.0)),
+        };
+        let geom = compute_popup_geometry(Some(placement), 5, px(24.0));
+        assert_eq!(geom.left, px(100.0));
+        match geom.vertical {
+            PopupVerticalPlacement::Above { bottom, max_h } => {
+                // cursor_top_y = 590 - 20 = 570. bottom = 600 - 570 + 4 = 34
+                assert_eq!(bottom, px(34.0));
+                assert_eq!(max_h, px(260.0));
+            }
+            PopupVerticalPlacement::Below { .. } => panic!("Expected Above for bottom line cursor"),
+        }
+    }
+
+    #[test]
+    fn test_geometry_right_edge_clamps_left() {
+        let placement = TerminalCursorPlacement {
+            cursor_pos: point(px(750.0), px(200.0)),
+            line_height: px(20.0),
+            container_size: size(px(800.0), px(600.0)),
+        };
+        let geom = compute_popup_geometry(Some(placement), 3, px(24.0));
+        // max_left = 800 - 260 - 4 = 536. 750 clamped to 536.
+        assert_eq!(geom.left, px(536.0));
+        assert_eq!(geom.min_w, px(260.0));
+    }
+
+    #[test]
+    fn test_geometry_tiny_container() {
+        let placement = TerminalCursorPlacement {
+            cursor_pos: point(px(10.0), px(60.0)),
+            line_height: px(20.0),
+            container_size: size(px(200.0), px(80.0)),
+        };
+        let geom = compute_popup_geometry(Some(placement), 5, px(24.0));
+        // min_w is constrained by container_w - 8 = 192
+        assert_eq!(geom.min_w, px(192.0));
+        match geom.vertical {
+            PopupVerticalPlacement::Above { max_h, .. } => {
+                assert!(max_h <= px(80.0));
+            }
+            PopupVerticalPlacement::Below { max_h, .. } => {
+                assert!(max_h <= px(80.0));
+            }
+        }
+    }
+
+    #[test]
+    fn test_geometry_none_placement_fallback() {
+        let geom = compute_popup_geometry(None, 5, px(24.0));
+        assert_eq!(geom.left, px(8.0));
+        assert_eq!(geom.min_w, px(260.0));
+        assert_eq!(geom.max_w, px(640.0));
+        assert_eq!(
+            geom.vertical,
+            PopupVerticalPlacement::Below {
+                top: px(36.0),
+                max_h: px(260.0)
+            }
+        );
     }
 }
