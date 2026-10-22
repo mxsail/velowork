@@ -2829,10 +2829,27 @@ pub fn apply_tcp_socket_options(stream: &tokio::net::TcpStream, nodelay: bool) {
 
     let sock = socket2::SockRef::from(stream);
     let keepalive = socket2::TcpKeepalive::new()
-        .with_time(std::time::Duration::from_secs(30))
-        .with_interval(std::time::Duration::from_secs(10));
+        .with_time(std::time::Duration::from_secs(10))
+        .with_interval(std::time::Duration::from_secs(3));
     if let Err(e) = sock.set_tcp_keepalive(&keepalive) {
         log::debug!("[pty:network] set_tcp_keepalive failed (non-fatal): {:#}", e);
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = stream.as_raw_fd();
+        let timeout_ms: libc::c_uint = 15_000;
+        // SAFETY: setsockopt with libc::TCP_USER_TIMEOUT on valid socket fd
+        unsafe {
+            let _ = libc::setsockopt(
+                fd,
+                libc::IPPROTO_TCP,
+                libc::TCP_USER_TIMEOUT,
+                &timeout_ms as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_uint>() as libc::socklen_t,
+            );
+        }
     }
 }
 
@@ -2960,8 +2977,8 @@ pub async fn connect_tcp_or_proxy_stream(
 pub fn build_russh_client_config(session: &velowork_state::SshSession) -> russh::client::Config {
     let recv_window = if session.recv_window > 0 { session.recv_window } else { 2097152 };
     let max_packets = if session.max_packets > 0 { session.max_packets } else { 32768 };
-    let keepalive_secs = session.keep_alive_interval;
-    let keepalive_max = if session.keep_alive_max > 0 { session.keep_alive_max as usize } else { 3 };
+    let keepalive_secs = if session.keep_alive_interval > 0 { session.keep_alive_interval } else { 10 };
+    let keepalive_max = if session.keep_alive_max > 0 { session.keep_alive_max as usize } else { 2 };
     let tcp_nodelay = session.tcp_nodelay;
     let channel_buf = if session.channel_buffer_size > 0 { session.channel_buffer_size as usize } else { 100 };
 
@@ -3589,8 +3606,8 @@ async fn run_ssh_connection(
         let timeout_secs = session_config.as_ref().map(|s| s.connection_timeout).filter(|&t| t > 0).unwrap_or(30);
         let recv_window = session_config.as_ref().map(|s| s.recv_window).filter(|&w| w > 0).unwrap_or(2097152);
         let max_packets = session_config.as_ref().map(|s| s.max_packets).filter(|&p| p > 0).unwrap_or(32768);
-        let keepalive_secs = session_config.as_ref().map(|s| s.keep_alive_interval).unwrap_or(60);
-        let keepalive_max = session_config.as_ref().map(|s| s.keep_alive_max as usize).filter(|&m| m > 0).unwrap_or(3);
+        let keepalive_secs = session_config.as_ref().map(|s| s.keep_alive_interval).filter(|&k| k > 0).unwrap_or(10);
+        let keepalive_max = session_config.as_ref().map(|s| s.keep_alive_max as usize).filter(|&m| m > 0).unwrap_or(2);
         let tcp_nodelay = session_config.as_ref().map(|s| s.tcp_nodelay).unwrap_or(true);
         let channel_buf = session_config.as_ref().map(|s| s.channel_buffer_size as usize).filter(|&b| b > 0).unwrap_or(100);
 
@@ -4134,6 +4151,7 @@ async fn run_ssh_connection(
 
     tokio::spawn(async move {
         let mut shutdown_interval = tokio::time::interval(tokio::time::Duration::from_millis(500));
+        let mut exit_sent = false;
         loop {
             if shutdown_c.is_broken() {
                 let _ = channel.close().await;
@@ -4170,6 +4188,7 @@ async fn run_ssh_connection(
                                 terminal_id: terminal_id_c.clone(),
                                 exit_code: Some(0),
                             }).await;
+                            exit_sent = true;
                             break;
                         }
                         Some(russh::ChannelMsg::Close) => {
@@ -4178,6 +4197,7 @@ async fn run_ssh_connection(
                                 terminal_id: terminal_id_c.clone(),
                                 exit_code: Some(0),
                             }).await;
+                            exit_sent = true;
                             break;
                         }
                         None => {
@@ -4186,6 +4206,7 @@ async fn run_ssh_connection(
                                 terminal_id: terminal_id_c.clone(),
                                 exit_code: Some(0),
                             }).await;
+                            exit_sent = true;
                             break;
                         }
                         _ => {}
@@ -4220,6 +4241,13 @@ async fn run_ssh_connection(
             }
         }
         let _ = channel.close().await;
+        shutdown_c.mark_broken();
+        if !exit_sent {
+            let _ = event_tx_c.send(PtyEvent::Exit {
+                terminal_id: terminal_id_c.clone(),
+                exit_code: Some(1),
+            }).await;
+        }
     });
 
     Ok(())

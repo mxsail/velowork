@@ -620,6 +620,11 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             return;
         }
 
+        if self.is_connection_lost(cx) {
+            log::debug!("[TERMINAL-NAV] Dropped key {:?} because connection is lost", event.keystroke.key);
+            return;
+        }
+
         // ZMODEM stream protection: intercept Ctrl+C/Esc while ZMODEM is active, and swallow other keystrokes
         if self.is_zmodem_active() {
             if (event.keystroke.key == "c" && event.keystroke.modifiers.control)
@@ -861,8 +866,7 @@ impl<D: ActionDispatch + Send + Sync> TerminalPane<D> {
             let is_ctrl = event.keystroke.modifiers.control;
             if key_str == "backspace" {
                 terminal.predict_backspace();
-            } else if key_str == "enter"
-                || key_str == "escape"
+            } else if key_str == "escape"
                 || key_str == "tab"
                 || matches!(key_str, "up" | "down" | "left" | "right" | "home" | "end" | "pageup" | "pagedown")
                 || is_ctrl

@@ -51,7 +51,6 @@ impl TerminalInputHandler {
                     self.terminal.send_bytes(&[DEL]);
                 }
                 '\n' | '\r' => {
-                    self.terminal.clear_predictions();
                     self.terminal.send_bytes(b"\r");
                 }
                 _ => {

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use unicode_width::UnicodeWidthChar;
 
 pub const MAX_PREDICTABLE_INPUT_LEN: usize = 128;
-pub const PREDICTION_TIMEOUT: Duration = Duration::from_millis(3000);
+pub const PREDICTION_TIMEOUT: Duration = Duration::from_millis(15000);
 
 /// A single predicted speculative character waiting for remote echo confirmation.
 #[derive(Clone, Debug, PartialEq, Eq)]
