@@ -452,6 +452,10 @@ impl SimpleInputState {
     pub fn clear_selection(&mut self, cx: &mut Context<Self>) {
         if self.selection.is_some() {
             self.selection = None;
+            self.selection_reversed = false;
+            self.is_selecting = false;
+            self.last_mouse_position = None;
+            self._drag_scroll_task = None;
             cx.notify();
         }
     }
@@ -476,6 +480,10 @@ impl SimpleInputState {
         if !self.value.is_empty() {
             self.selection = Some(0..self.value.len());
             self.selection_reversed = false;
+            self.cursor_position = self.value.len();
+            self.is_selecting = false;
+            self.last_mouse_position = None;
+            self._drag_scroll_task = None;
         }
         self
     }
@@ -642,6 +650,9 @@ impl SimpleInputState {
         self.cursor_position = self.value.len();
         self.selection = None;
         self.selection_reversed = false;
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
         self.marked_range = None;
         self.layout_cache.borrow_mut().scroll_offset = px(0.0);
         self.undo_stack.clear();
@@ -689,6 +700,12 @@ impl SimpleInputState {
         self.is_focused = false;
         self.cursor_visible = false;
         self._blink_task = None;
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
+        if self.is_scrollbar_dragging {
+            self.end_scrollbar_drag(cx);
+        }
         cx.emit(InputEvent::Blur);
         cx.notify();
     }
@@ -742,6 +759,10 @@ impl SimpleInputState {
         if !self.value.is_empty() {
             self.selection = Some(0..self.value.len());
             self.selection_reversed = false;
+            self.cursor_position = self.value.len();
+            self.is_selecting = false;
+            self.last_mouse_position = None;
+            self._drag_scroll_task = None;
             self.reset_cursor_blink();
             cx.notify();
         }
@@ -915,11 +936,16 @@ impl SimpleInputState {
             }
         }
 
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
+
         if self.selection.is_some() {
             self.push_undo_checkpoint();
             let range = self.selection.take().unwrap();
             self.value.replace_range(range.clone(), "");
             self.cursor_position = range.start;
+            self.selection_reversed = false;
         } else {
             self.check_group_typing();
         }
@@ -928,6 +954,7 @@ impl SimpleInputState {
         self.value.insert_str(self.cursor_position, &filtered_text);
         self.cursor_position += filtered_text.len();
         self.marked_range = None;
+        self.selection_reversed = false;
         self.reset_cursor_blink();
         self.emit_change(cx);
         cx.notify();
@@ -937,11 +964,15 @@ impl SimpleInputState {
         if self.read_only {
             return;
         }
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
         if self.selection.is_some() {
             self.push_undo_checkpoint();
             let range = self.selection.take().unwrap();
             self.value.replace_range(range.clone(), "");
             self.cursor_position = range.start;
+            self.selection_reversed = false;
             self.reset_cursor_blink();
             self.emit_change(cx);
             cx.notify();
@@ -963,11 +994,15 @@ impl SimpleInputState {
         if self.read_only {
             return;
         }
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
         if self.selection.is_some() {
             self.push_undo_checkpoint();
             let range = self.selection.take().unwrap();
             self.value.replace_range(range.clone(), "");
             self.cursor_position = range.start;
+            self.selection_reversed = false;
             self.reset_cursor_blink();
             self.emit_change(cx);
             cx.notify();
@@ -988,11 +1023,15 @@ impl SimpleInputState {
         if self.read_only {
             return;
         }
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
         if self.selection.is_some() {
             self.push_undo_checkpoint();
             let range = self.selection.take().unwrap();
             self.value.replace_range(range.clone(), "");
             self.cursor_position = range.start;
+            self.selection_reversed = false;
             self.reset_cursor_blink();
             self.emit_change(cx);
             cx.notify();
@@ -1014,11 +1053,15 @@ impl SimpleInputState {
         if self.read_only {
             return;
         }
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
         if self.selection.is_some() {
             self.push_undo_checkpoint();
             let range = self.selection.take().unwrap();
             self.value.replace_range(range.clone(), "");
             self.cursor_position = range.start;
+            self.selection_reversed = false;
             self.reset_cursor_blink();
             self.emit_change(cx);
             cx.notify();
@@ -1473,7 +1516,8 @@ impl SimpleInputState {
             loop {
                 smol::Timer::after(Duration::from_millis(50)).await;
                 let done = this.update(&mut *cx, |state, cx| {
-                    if !state.is_selecting {
+                    if !state.is_selecting || !state.is_focused {
+                        state._drag_scroll_task = None;
                         return true; // Stop task
                     }
                     
@@ -1550,6 +1594,10 @@ impl SimpleInputState {
 
     // Keystroke mapping
     fn handle_key_down(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> KeyHandled {
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
+
         if let Some(interceptor) = self.key_interceptor.clone() {
             match (interceptor)(event, &self.value, cx) {
                 KeyInterceptResult::Handled => return KeyHandled::Handled,
@@ -1665,6 +1713,7 @@ impl SimpleInputState {
                 cx.emit(InputEvent::PressEscape);
                 if self.selection.is_some() {
                     self.selection = None;
+                    self.selection_reversed = false;
                     cx.notify();
                 }
                 if self.pass_escape {
@@ -1755,10 +1804,15 @@ impl EntityInputHandler for SimpleInputState {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
-        let sel = self.selection.clone().unwrap_or(self.cursor_position..self.cursor_position);
+        let (range, reversed) = if let Some(ref sel) = self.selection {
+            (self.range_to_utf16(sel), self.selection_reversed)
+        } else {
+            let pos_utf16 = self.range_to_utf16(&(self.cursor_position..self.cursor_position));
+            (pos_utf16, false)
+        };
         Some(UTF16Selection {
-            range: self.range_to_utf16(&sel),
-            reversed: self.selection_reversed,
+            range,
+            reversed,
         })
     }
 
@@ -1776,6 +1830,9 @@ impl EntityInputHandler for SimpleInputState {
         self.marked_range = None;
         self.selection = None;
         self.selection_reversed = false;
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
         cx.notify();
     }
 
@@ -1789,6 +1846,10 @@ impl EntityInputHandler for SimpleInputState {
         if self.read_only {
             return;
         }
+
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
 
         // The range passed by the platform (IME) is in UTF-16 units, matching
         // `selected_text_range`/`marked_text_range`. Convert it to UTF-8 byte
@@ -1856,6 +1917,10 @@ impl EntityInputHandler for SimpleInputState {
         if self.read_only {
             return;
         }
+
+        self.is_selecting = false;
+        self.last_mouse_position = None;
+        self._drag_scroll_task = None;
         let range = range_utf16
             .as_ref()
             .map(|r| self.range_from_utf16(r))
@@ -2833,6 +2898,24 @@ impl Element for TextInputElement {
             cx,
         );
 
+        window.on_mouse_event({
+            let state = self.state.clone();
+            move |event: &MouseUpEvent, phase, _window, cx| {
+                if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
+                    state.update(cx, |this, cx| {
+                        if this.is_selecting || this.is_scrollbar_dragging {
+                            this.is_selecting = false;
+                            this.last_mouse_position = None;
+                            this._drag_scroll_task = None;
+                            if this.is_scrollbar_dragging {
+                                this.end_scrollbar_drag(cx);
+                            }
+                        }
+                    });
+                }
+            }
+        });
+
         if multiline {
             let clip_bounds = Bounds {
                 origin: bounds.origin,
@@ -3046,6 +3129,7 @@ impl Render for SimpleInputState {
                 cx.emit(InputEvent::PressEscape);
                 if this.selection.is_some() {
                     this.selection = None;
+                    this.selection_reversed = false;
                     cx.notify();
                 }
                 if this.pass_escape {
@@ -3967,6 +4051,99 @@ mod tests {
             this.insert_text("new_name", cx);
             assert_eq!(this.value(), "new_name");
             assert_eq!(this.selection(), None);
+        });
+
+        // 5. Reversed selection: typing consecutive characters replaces and appends correctly
+        input.update(cx, |this, cx| {
+            this.set_value("/var/log/syslog", cx);
+            this.set_selection(Some(0.."/var/log/syslog".len()), true, cx);
+            assert_eq!(this.selection(), Some(0.."/var/log/syslog".len()));
+            assert!(this.selection_reversed);
+            assert_eq!(this.cursor_offset(), 0);
+
+            // Type 'a'
+            let ev1 = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke {
+                    modifiers: gpui::Modifiers::default(),
+                    key: "a".into(),
+                    key_char: Some("a".into()),
+                },
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev1, cx);
+            assert_eq!(this.value(), "a");
+            assert_eq!(this.selection(), None);
+            assert!(!this.selection_reversed);
+            assert_eq!(this.cursor_offset(), 1);
+
+            // Type 'b'
+            let ev2 = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke {
+                    modifiers: gpui::Modifiers::default(),
+                    key: "b".into(),
+                    key_char: Some("b".into()),
+                },
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev2, cx);
+            assert_eq!(this.value(), "ab");
+            assert_eq!(this.cursor_offset(), 2);
+
+            // Type 'c'
+            let ev3 = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke {
+                    modifiers: gpui::Modifiers::default(),
+                    key: "c".into(),
+                    key_char: Some("c".into()),
+                },
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev3, cx);
+            assert_eq!(this.value(), "abc");
+            assert_eq!(this.cursor_offset(), 3);
+        });
+
+        // 6. Mouse dragging state cleared on key down
+        input.update(cx, |this, cx| {
+            this.is_selecting = true;
+            this.last_mouse_position = Some(gpui::point(gpui::px(100.0), gpui::px(10.0)));
+
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke {
+                    modifiers: gpui::Modifiers::default(),
+                    key: "x".into(),
+                    key_char: Some("x".into()),
+                },
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev, cx);
+
+            assert!(!this.is_selecting);
+            assert!(this.last_mouse_position.is_none());
+            assert!(this._drag_scroll_task.is_none());
+        });
+
+        // 7. Backspace on reversed selection resets reversed flag
+        input.update(cx, |this, cx| {
+            this.set_value("hello world", cx);
+            this.set_selection(Some(0..11), true, cx);
+            assert!(this.selection_reversed);
+
+            let ev = gpui::KeyDownEvent {
+                keystroke: gpui::Keystroke::parse("backspace").expect("valid keystroke"),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            this.handle_key_down(&ev, cx);
+
+            assert_eq!(this.value(), "");
+            assert_eq!(this.selection(), None);
+            assert!(!this.selection_reversed);
+            assert_eq!(this.cursor_offset(), 0);
         });
     }
 }
