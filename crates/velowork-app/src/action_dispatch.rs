@@ -130,8 +130,40 @@ impl ActionDispatcher {
                             let backend = backend.clone();
                             let terminals = terminals.clone();
                             let window_id = *window_id;
+
+                            let tab_title = {
+                                let ws = workspace.read(cx);
+                                if let Some(project) = ws.project(&pid) {
+                                    if let Some(custom_name) = project.terminal_names.get(&tid) {
+                                        if !custom_name.trim().is_empty() {
+                                            Some(custom_name.clone())
+                                        } else {
+                                            None
+                                        }
+                                    } else if let Some(path) = project.layout.as_ref().and_then(|l| l.find_terminal_path(&tid)) {
+                                        let default_shell = velowork_core::shell::ShellType::Default;
+                                        let shell_type = ws.get_terminal_shell(&pid, &path);
+                                        let shell_ref = shell_type.as_ref().unwrap_or(&default_shell);
+                                        let osc_title = terminals.lock().get(&tid).and_then(|t| t.title());
+                                        let store = cx.global::<velowork_workspace::stores::GlobalSessionStore>().0.read(cx);
+                                        Some(velowork_views_terminal::layout::session_labels::terminal_base_name(
+                                            &tid,
+                                            shell_ref,
+                                            backend.is_remote(),
+                                            osc_title.as_deref(),
+                                            project,
+                                            &store,
+                                        ))
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            };
+
                             om.update(cx, |om, cx| {
-                                om.request_terminal_close_confirm(pid.clone(), tid.clone(), move |cx| {
+                                om.request_terminal_close_confirm(pid.clone(), tid.clone(), tab_title, move |cx| {
                                     Self::execute_close_single_terminal(
                                         &workspace,
                                         &focus_manager,

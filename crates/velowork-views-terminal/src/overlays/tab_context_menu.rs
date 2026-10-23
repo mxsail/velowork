@@ -91,7 +91,7 @@ impl Render for TabContextMenu {
         let split_v = i18n!(cx, "terminal.split_vertical");
         let minimize_tab = i18n!(cx, "terminal.minimize_tab");
         let restore_tab = i18n!(cx, "terminal.restore_tab");
-        let close_current = i18n!(cx, "terminal.close_current_view");
+        let close_current = i18n!(cx, "terminal.close_tab");
         let close_to_right = i18n!(cx, "terminal.close_right_views");
         let close_others = i18n!(cx, "terminal.close_other_views");
         let close_inactive = i18n!(cx, "terminal.close_inactive_views");

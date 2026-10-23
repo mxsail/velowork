@@ -2020,16 +2020,25 @@ fn outside_click_behavior_for_type<T: 'static>() -> OutsideClickBehavior {
         &mut self,
         _project_id: String,
         _terminal_id: String,
+        tab_title: Option<String>,
         on_confirm: impl FnOnce(&mut App) + 'static,
         cx: &mut Context<Self>,
     ) {
+        let title = i18n!(cx, "terminal.confirm_close_title");
+        let body = match tab_title.filter(|t| !t.trim().is_empty()) {
+            Some(name) => velowork_i18n::t_fmt(cx, "terminal.confirm_close_named_msg", &[("name", &name)]),
+            None => i18n!(cx, "terminal.confirm_close_current_msg"),
+        };
+        let confirm_btn = i18n!(cx, "terminal.close_tab");
+        let cancel_btn = i18n!(cx, "common.action.cancel");
+
         let dialog = cx.new(|cx| {
             ConfirmDialog::new(
                 cx,
-                i18n!(cx, "terminal.confirm_close_title"),
-                i18n!(cx, "terminal.confirm_close_current_msg"),
-                i18n!(cx, "terminal.close_current_view"),
-                i18n!(cx, "common.action.cancel"),
+                title,
+                body,
+                confirm_btn,
+                cancel_btn,
                 true,
                 Some(self.overlay_registry.clone()),
                 "tab-close-confirm",
